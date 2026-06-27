@@ -41,23 +41,10 @@
 mkdir -p ~/needle && cd ~/needle
 ```
 
-创建 `.env` 文件，自动生成随机 Token：
+创建 `docker-compose.yml` 和 `.env`：
 
 ```bash
-echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
-```
-
-> 记下生成的 Token，安装 Agent 时需要用到。想自定义 Token 直接替换：`echo "NEEDLE_TOKEN=你的token" > .env`
-
-创建 `docker-compose.yml`：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/docker-compose.yml -o docker-compose.yml
-```
-
-或者手动创建：
-
-```yaml
+cat > docker-compose.yml << 'EOF'
 services:
   needle-server:
     image: ghcr.io/robinproxy/needle:latest
@@ -68,7 +55,14 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
+EOF
+
+echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 ```
+
+> 记下生成的 Token，安装 Agent 时需要用到。想自定义 Token 直接替换 `echo "NEEDLE_TOKEN=你的token" > .env`。
+>
+> 如果与 Cloudflare Tunnel 同机部署，需要在 `restart` 下添加 `networks:` 配置（参见 [Cloudflare Tunnel](#cloudflare-tunnel) 章节）。
 
 #### 第 2 步：启动容器
 
@@ -304,6 +298,38 @@ ingress:
 cloudflared tunnel route dns needle needle.example.com
 cloudflared tunnel run needle
 ```
+
+#### Docker + Cloudflare Tunnel
+
+如果 Needle Server 和 cloudflared 都在 Docker 中运行，需要共享同一个网络：
+
+```yaml
+services:
+  needle-server:
+    image: ghcr.io/robinproxy/needle:latest
+    ports:
+      - "${NEEDLE_PORT:-8008}:8008"
+    environment:
+      NEEDLE_TOKEN: "${NEEDLE_TOKEN:?error: set NEEDLE_TOKEN in .env or environment}"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    networks:
+      - cf-tunnel
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: 你的TunnelToken
+    networks:
+      - cf-tunnel
+
+networks:
+  cf-tunnel: {}
+```
+
+cloudflared 通过 `localhost:8008` 访问 Needle Server（同网络下容器名可解析）。
 
 Agent 配置中 `server` 改为 `https://needle.example.com`。
 
