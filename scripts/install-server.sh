@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 REPO="Robinproxy/Needle"
 INSTALL_DIR="/opt/needle"
