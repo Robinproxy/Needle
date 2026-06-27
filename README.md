@@ -87,6 +87,12 @@ docker compose logs -f
 
 按 `Ctrl+C` 退出日志查看。
 
+#### 第 4 步：访问仪表盘
+
+打开浏览器访问 `http://你的VPSIP:8008`，即可看到仪表盘。
+
+> 如果使用云服务器，需要在防火墙/安全组中放行 8008 端口。
+
 #### 环境变量
 
 查看当前配置的环境变量：
@@ -98,12 +104,6 @@ cat .env
 # 查看容器内生效的环境变量
 docker compose exec needle-server env | grep NEEDLE
 ```
-
-#### 第 4 步：访问仪表盘
-
-打开浏览器访问 `http://你的VPSIP:8008`，即可看到仪表盘。
-
-> 如果使用云服务器，需要在防火墙/安全组中放行 8008 端口。
 
 #### 指定端口
 
@@ -123,8 +123,8 @@ docker compose up -d
 如果不想等待 GHCR 镜像拉取，也可以直接从源码构建：
 
 ```bash
-git clone https://github.com/Robinproxy/Needle.git ~/needle
-cd ~/needle
+git clone https://github.com/Robinproxy/Needle.git ~/needle-src
+cd ~/needle-src
 echo "NEEDLE_TOKEN=你的token" > .env
 docker compose up -d --build
 ```
@@ -217,9 +217,9 @@ sudo systemctl disable needle-server
 sudo rm /etc/systemd/system/needle-server.service
 sudo rm -rf /opt/needle
 
-# Server（Docker）
+# Server（Docker，在 docker-compose.yml 所在目录执行）
 docker compose down -v
-rm -rf ~/needle
+rm -rf ./data
 
 # Agent
 sudo systemctl stop needle-agent
