@@ -74,18 +74,18 @@ echo
 echo "TCPing targets (edit the defaults or press enter to keep):"
 set -- $TCPING_DEFAULTS
 N1="$1"; T1="$2"; N3="$3"; T3="$4"; N5="$5"; T5="$6"; N7="$7"; T7="$8"; N9="$9"; T9="${10}"; N11="${11}"; T11="${12}"
-read -rp "  Target 1 name [${N1}]: " V; N1="${V:-$N1}" < /dev/tty
-read -rp "  Target 1 address [${T1}]: " V; T1="${V:-$T1}" < /dev/tty
-read -rp "  Target 2 name [${N3}]: " V; N3="${V:-$N3}" < /dev/tty
-read -rp "  Target 2 address [${T3}]: " V; T3="${V:-$T3}" < /dev/tty
-read -rp "  Target 3 name [${N5}]: " V; N5="${V:-$N5}" < /dev/tty
-read -rp "  Target 3 address [${T5}]: " V; T5="${V:-$T5}" < /dev/tty
-read -rp "  Target 4 name [${N7}]: " V; N7="${V:-$N7}" < /dev/tty
-read -rp "  Target 4 address [${T7}]: " V; T7="${V:-$T7}" < /dev/tty
-read -rp "  Target 5 name [${N9}]: " V; N9="${V:-$N9}" < /dev/tty
-read -rp "  Target 5 address [${T9}]: " V; T9="${V:-$T9}" < /dev/tty
-read -rp "  Target 6 name [${N11}]: " V; N11="${V:-$N11}" < /dev/tty
-read -rp "  Target 6 address [${T11}]: " V; T11="${V:-$T11}" < /dev/tty
+read -rp "  Target 1 name [${N1}]: " V < /dev/tty; N1="${V:-$N1}"
+read -rp "  Target 1 address [${T1}]: " V < /dev/tty; T1="${V:-$T1}"
+read -rp "  Target 2 name [${N3}]: " V < /dev/tty; N3="${V:-$N3}"
+read -rp "  Target 2 address [${T3}]: " V < /dev/tty; T3="${V:-$T3}"
+read -rp "  Target 3 name [${N5}]: " V < /dev/tty; N5="${V:-$N5}"
+read -rp "  Target 3 address [${T5}]: " V < /dev/tty; T5="${V:-$T5}"
+read -rp "  Target 4 name [${N7}]: " V < /dev/tty; N7="${V:-$N7}"
+read -rp "  Target 4 address [${T7}]: " V < /dev/tty; T7="${V:-$T7}"
+read -rp "  Target 5 name [${N9}]: " V < /dev/tty; N9="${V:-$N9}"
+read -rp "  Target 5 address [${T9}]: " V < /dev/tty; T9="${V:-$T9}"
+read -rp "  Target 6 name [${N11}]: " V < /dev/tty; N11="${V:-$N11}"
+read -rp "  Target 6 address [${T11}]: " V < /dev/tty; T11="${V:-$T11}"
 
 # Generate agent.yaml
 AGENT_YAML="$INSTALL_DIR/agent.yaml"
