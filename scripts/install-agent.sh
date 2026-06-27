@@ -62,29 +62,24 @@ done
 read -rp "Report interval (seconds) [30]: " INTERVAL
 INTERVAL="${INTERVAL:-30}"
 
-# TCPing targets
-DEFAULT_TCPING=(
-  "CMv4,sh-cm-v4.ip.zstaticcdn.com:80,60"
-  "CMv6,sh-cm-v6.ip.zstaticcdn.com:80,60"
-  "CUv4,sh-cu-v4.ip.zstaticcdn.com:80,60"
-  "CUv6,sh-cu-v6.ip.zstaticcdn.com:80,60"
-  "CTv4,sh-ct-v4.ip.zstaticcdn.com:80,60"
-  "CTv6,sh-ct-v6.ip.zstaticcdn.com:80,60"
-)
+TCPING_DEFAULTS="CMv4 sh-cm-v4.ip.zstaticcdn.com:80 CMv6 sh-cm-v6.ip.zstaticcdn.com:80 CUv4 sh-cu-v4.ip.zstaticcdn.com:80 CUv6 sh-cu-v6.ip.zstaticcdn.com:80 CTv4 sh-ct-v4.ip.zstaticcdn.com:80 CTv6 sh-ct-v6.ip.zstaticcdn.com:80"
 
 echo
 echo "TCPing targets (edit the defaults or press enter to keep):"
-TCPING_ENTRIES=()
-for i in "${!DEFAULT_TCPING[@]}"; do
-  ENTRY="${DEFAULT_TCPING[$i]}"
-  NAME="${ENTRY%%,*}"
-  REST="${ENTRY#*,}"
-  TARGET="${REST%%,*}"
-  INTERVAL="${REST#*,}"
-  read -rp "  Target $((i+1)) name [${NAME}]: " N
-  read -rp "  Target $((i+1)) address [${TARGET}]: " T
-  TCPING_ENTRIES+=("${N:-$NAME},${T:-$TARGET},$INTERVAL")
-done
+set -- $TCPING_DEFAULTS
+N1="$1"; T1="$2"; N3="$3"; T3="$4"; N5="$5"; T5="$6"; N7="$7"; T7="$8"; N9="$9"; T9="${10}"; N11="${11}"; T11="${12}"
+read -rp "  Target 1 name [${N1}]: " V; N1="${V:-$N1}"
+read -rp "  Target 1 address [${T1}]: " V; T1="${V:-$T1}"
+read -rp "  Target 2 name [${N3}]: " V; N3="${V:-$N3}"
+read -rp "  Target 2 address [${T3}]: " V; T3="${V:-$T3}"
+read -rp "  Target 3 name [${N5}]: " V; N5="${V:-$N5}"
+read -rp "  Target 3 address [${T5}]: " V; T5="${V:-$T5}"
+read -rp "  Target 4 name [${N7}]: " V; N7="${V:-$N7}"
+read -rp "  Target 4 address [${T7}]: " V; T7="${V:-$T7}"
+read -rp "  Target 5 name [${N9}]: " V; N9="${V:-$N9}"
+read -rp "  Target 5 address [${T9}]: " V; T9="${V:-$T9}"
+read -rp "  Target 6 name [${N11}]: " V; N11="${V:-$N11}"
+read -rp "  Target 6 address [${T11}]: " V; T11="${V:-$T11}"
 
 # Generate agent.yaml
 AGENT_YAML="$INSTALL_DIR/agent.yaml"
@@ -96,18 +91,25 @@ region: ${REGION}
 interval: ${INTERVAL}
 insecure: false
 tcpping:
+  - name: "${N1}"
+    target: "${T1}"
+    interval: 60
+  - name: "${N3}"
+    target: "${T3}"
+    interval: 60
+  - name: "${N5}"
+    target: "${T5}"
+    interval: 60
+  - name: "${N7}"
+    target: "${T7}"
+    interval: 60
+  - name: "${N9}"
+    target: "${T9}"
+    interval: 60
+  - name: "${N11}"
+    target: "${T11}"
+    interval: 60
 YAML
-for entry in "${TCPING_ENTRIES[@]}"; do
-  NAME="${entry%%,*}"
-  REST="${entry#*,}"
-  TARGET="${REST%%,*}"
-  INT="${REST#*,}"
-  cat >> "$AGENT_YAML" <<YAML
-  - name: "${NAME}"
-    target: "${TARGET}"
-    interval: ${INT}
-YAML
-done
 
 chmod 600 "$AGENT_YAML"
 
