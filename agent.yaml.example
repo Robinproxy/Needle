@@ -1,5 +1,5 @@
 hostname: ""     # optional, defaults to os.Hostname()
-server: http://localhost:8008
+server: http://127.0.0.1:8008
 token: your-server-token
 region: SG
 interval: 30

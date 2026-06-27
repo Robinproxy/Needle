@@ -133,7 +133,7 @@ func sendReport(url string, p reportPayload) error {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	baseURL := "http://localhost:8008/api/report"
+	baseURL := "http://127.0.0.1:8008/api/report"
 
 	total := 0
 	for _, a := range agents {
