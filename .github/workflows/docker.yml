@@ -23,8 +23,8 @@ jobs:
 
       - name: Build and push
         run: |
-          docker build -t ghcr.io/Robinproxy/needle:latest .
+          docker build -t ghcr.io/robinproxy/needle:latest .
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            docker tag ghcr.io/Robinproxy/needle:latest ghcr.io/Robinproxy/needle:${{ github.ref_name }}
+            docker tag ghcr.io/robinproxy/needle:latest ghcr.io/robinproxy/needle:${{ github.ref_name }}
           fi
-          docker push --all-tags ghcr.io/Robinproxy/needle
+          docker push --all-tags ghcr.io/robinproxy/needle

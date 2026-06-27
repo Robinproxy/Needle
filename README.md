@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/docker-compo
 ```yaml
 services:
   needle-server:
-    image: ghcr.io/Robinproxy/needle:latest
+    image: ghcr.io/robinproxy/needle:latest
     ports:
       - "${NEEDLE_PORT:-8008}:8008"
     environment:
@@ -74,7 +74,7 @@ services:
 docker compose up -d
 ```
 
-> 首次启动会自动从 `ghcr.io/Robinproxy/needle` 拉取镜像。如果镜像尚未构建（新版本刚发布），也可以使用下面的**本地构建**方式。
+> 首次启动会自动从 `ghcr.io/robinproxy/needle` 拉取镜像。如果镜像尚未构建（新版本刚发布），也可以使用下面的**本地构建**方式。
 
 #### 第 3 步：验证运行状态
 
@@ -330,6 +330,6 @@ git push origin v0.2.0
 
 推送 tag 后 GitHub Actions 自动构建：
 - **release.yml** — 编译 Linux 二进制并上传到 Releases
-- **docker.yml** — 构建 Docker 镜像并推送到 `ghcr.io/Robinproxy/needle`
+- **docker.yml** — 构建 Docker 镜像并推送到 `ghcr.io/robinproxy/needle`
 
 Docker 用户后续可以直接 `docker compose pull` 更新镜像。

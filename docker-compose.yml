@@ -1,6 +1,6 @@
 services:
   needle-server:
-    image: ghcr.io/Robinproxy/needle:latest
+    image: ghcr.io/robinproxy/needle:latest
     ports:
       - "${NEEDLE_PORT:-8008}:8008"
     environment:
