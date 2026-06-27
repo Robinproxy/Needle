@@ -106,7 +106,7 @@ chmod 600 "$AGENT_YAML"
 
 echo "Installing systemd service..."
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
-[Description]
+[Unit]
 Description=Needle Agent
 After=network-online.target
 Wants=network-online.target

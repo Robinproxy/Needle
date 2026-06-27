@@ -48,23 +48,17 @@ curl -fsSL https://github.com/Robinproxy/Needle/releases/latest/download/install
 
 ### Server — Docker
 
+先克隆仓库，然后构建启动：
+
 ```bash
-mkdir -p needle/data && cd needle
+git clone https://github.com/Robinproxy/Needle.git
+cd Needle
 
-cat > docker-compose.yml <<'YAML'
-services:
-  needle-server:
-    image: golang:1.26-alpine
-    ports:
-      - "8008:8008"
-    environment:
-      NEEDLE_TOKEN: "${NEEDLE_TOKEN}"
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-YAML
+# 创建 .env 文件
+echo "NEEDLE_TOKEN=your-token" > .env
 
-NEEDLE_TOKEN="your-token" docker compose up -d
+# 构建并启动
+docker compose up -d
 ```
 
 ### Agent — 一键脚本

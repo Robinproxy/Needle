@@ -12,7 +12,12 @@ import (
 )
 
 func main() {
-	addr := flag.String("l", ":8008", "listen address")
+	addr := flag.String("l", func() string {
+		if env := os.Getenv("NEEDLE_LISTEN"); env != "" {
+			return env
+		}
+		return ":8008"
+	}(), "listen address")
 	dbPath := flag.String("db", "./data/needle.db", "database path")
 	token := flag.String("token", "", "server token for agent authentication")
 	flag.Parse()

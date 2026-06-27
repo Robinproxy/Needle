@@ -19,12 +19,18 @@ release:
 	cp scripts/install-agent.sh release/
 	cp agent.yaml.example release/
 	cd release && \
+	  ln -f needle-server-linux-amd64 needle-server && \
+	  ln -f needle-agent-linux-amd64 needle-agent && \
 	  tar czf needle-linux-amd64.tar.gz \
-	    needle-server-linux-amd64 needle-agent-linux-amd64 \
+	    needle-server needle-agent \
 	    install-server.sh install-agent.sh agent.yaml.example && \
+	  rm needle-server needle-agent && \
+	  ln -f needle-server-linux-arm64 needle-server && \
+	  ln -f needle-agent-linux-arm64 needle-agent && \
 	  tar czf needle-linux-arm64.tar.gz \
-	    needle-server-linux-arm64 needle-agent-linux-arm64 \
+	    needle-server needle-agent \
 	    install-server.sh install-agent.sh agent.yaml.example && \
+	  rm needle-server needle-agent && \
 	  sha256sum needle-*.tar.gz > checksums.txt
 
 clean:
