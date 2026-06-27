@@ -26,7 +26,7 @@ echo "Fetching latest release..."
 VERSION=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
 if [ -z "$VERSION" ]; then
   echo "Failed to fetch latest release. Set manually:"
-  read -rp "Version (e.g. v0.1.0): " VERSION
+  read -rp "Version (e.g. v0.1.0): " VERSION < /dev/tty
 fi
 
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/needle-linux-$GOARCH.tar.gz"
@@ -45,11 +45,11 @@ chmod +x "$BIN_DIR/needle-server"
 
 # Interactive config
 DEFAULT_LISTEN=":8008"
-read -rp "Listen address [${DEFAULT_LISTEN}]: " LISTEN
+read -rp "Listen address [${DEFAULT_LISTEN}]: " LISTEN < /dev/tty
 LISTEN="${LISTEN:-$DEFAULT_LISTEN}"
 
 DEFAULT_TOKEN=$(head -c 32 /dev/urandom | xxd -p | head -c 32)
-read -rp "Server token (enter for random) [${DEFAULT_TOKEN}]: " TOKEN
+read -rp "Server token (enter for random) [${DEFAULT_TOKEN}]: " TOKEN < /dev/tty
 TOKEN="${TOKEN:-$DEFAULT_TOKEN}"
 
 cat > "$ENV_FILE" <<EOF
