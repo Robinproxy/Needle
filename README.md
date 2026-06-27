@@ -41,11 +41,13 @@
 mkdir -p ~/needle && cd ~/needle
 ```
 
-创建 `.env` 文件，填入你的 Token：
+创建 `.env` 文件，自动生成随机 Token：
 
 ```bash
-echo "NEEDLE_TOKEN=你的token" > .env
+echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 ```
+
+> 记下生成的 Token，安装 Agent 时需要用到。想自定义 Token 直接替换：`echo "NEEDLE_TOKEN=你的token" > .env`
 
 创建 `docker-compose.yml`：
 
@@ -125,7 +127,7 @@ docker compose up -d
 ```bash
 git clone https://github.com/Robinproxy/Needle.git ~/needle-src
 cd ~/needle-src
-echo "NEEDLE_TOKEN=你的token" > .env
+echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 docker compose up -d --build
 ```
 
@@ -136,12 +138,15 @@ docker compose up -d --build
 适合没有 Docker 的环境。从 [Releases](https://github.com/Robinproxy/Needle/releases) 下载对应架构的 `.tar.gz`：
 
 ```bash
+# 生成 Token
+TOKEN=$(openssl rand -hex 16)
+
 # Server
 tar xzf needle-linux-amd64.tar.gz needle-server
-./needle-server -l :8008 -token your-token
+./needle-server -l :8008 -token "$TOKEN"
 
 # 带日志在后台运行
-nohup ./needle-server -l :8008 -token your-token > needle.log 2>&1 &
+nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
 ```
 
 ---
