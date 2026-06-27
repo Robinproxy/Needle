@@ -29,7 +29,7 @@
 ### Server — 一键脚本
 
 ```bash
-curl -fsSL https://github.com/Robinproxy/Needle/releases/latest/download/install-server.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
 ```
 
 交互式配置：
@@ -64,7 +64,7 @@ docker compose up -d
 ### Agent — 一键脚本
 
 ```bash
-curl -fsSL https://github.com/Robinproxy/Needle/releases/latest/download/install-agent.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
 ```
 
 交互式配置：
@@ -155,6 +155,7 @@ tcpping:
 |---|---|---|
 | `NEEDLE_TOKEN` | 认证 Token | **必填** |
 | `NEEDLE_LISTEN` | 监听地址 | `:8008` |
+| `NEEDLE_PORT` | Docker 主机端口映射 | `8008` |
 
 ## Cloudflare Tunnel
 
