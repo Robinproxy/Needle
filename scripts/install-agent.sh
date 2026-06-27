@@ -55,10 +55,8 @@ HOSTNAME="${HOSTNAME:-$DEFAULT_HOSTNAME}"
 read -rp "Region (ISO country code, e.g. CN/SG/US) [SG]: " REGION < /dev/tty
 REGION="${REGION:-SG}"
 
-read -rp "Server URL (e.g. https://needle.example.com): " SERVER_URL < /dev/tty
-while [ -z "$SERVER_URL" ]; do
-  read -rp "Server URL is required: " SERVER_URL < /dev/tty
-done
+read -rp "Server URL [http://localhost:8008]: " SERVER_URL < /dev/tty
+SERVER_URL="${SERVER_URL:-http://localhost:8008}"
 
 read -rp "Server token: " TOKEN < /dev/tty
 while [ -z "$TOKEN" ]; do
