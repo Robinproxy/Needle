@@ -48,18 +48,29 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/inst
 
 ### Server — Docker
 
-先克隆仓库，然后构建启动：
-
 ```bash
-git clone https://github.com/Robinproxy/Needle.git
-cd Needle
-
-# 创建 .env 文件
+mkdir -p ~/needle && cd ~/needle
 echo "NEEDLE_TOKEN=your-token" > .env
-
-# 构建并启动
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
+
+`docker-compose.yml` 也可以直接创建：
+
+```yaml
+services:
+  needle-server:
+    image: ghcr.io/Robinproxy/needle:latest
+    ports:
+      - "${NEEDLE_PORT:-8008}:8008"
+    environment:
+      NEEDLE_TOKEN: "${NEEDLE_TOKEN:?error: set NEEDLE_TOKEN in .env or environment}"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+```
+
+> ⚠️ 首次使用需要等 GitHub Actions 构建完镜像（push tag 后自动构建），或先手动 `docker compose up -d --build` 本地构建。
 
 ### Agent — 一键脚本
 
@@ -154,7 +165,7 @@ tcpping:
 | 变量 | 说明 | 默认 |
 |---|---|---|
 | `NEEDLE_TOKEN` | 认证 Token | **必填** |
-| `NEEDLE_LISTEN` | 监听地址 | `:8008` |
+| `NEEDLE_LISTEN` | 监听地址（二进制运行） | `:8008` |
 | `NEEDLE_PORT` | Docker 主机端口映射 | `8008` |
 
 ## Cloudflare Tunnel

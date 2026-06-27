@@ -1,0 +1,30 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: [v*]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        run: |
+          docker build -t ghcr.io/Robinproxy/needle:latest .
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            docker tag ghcr.io/Robinproxy/needle:latest ghcr.io/Robinproxy/needle:${{ github.ref_name }}
+          fi
+          docker push --all-tags ghcr.io/Robinproxy/needle
