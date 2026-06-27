@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install cross-compiler (arm64)
+        if: matrix.goarch == 'arm64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build server
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '1'
+          CC: ${{ matrix.goarch == 'arm64' && 'aarch64-linux-gnu-gcc' || '' }}
+        run: go build -o release/needle-server ./cmd/server
+
+      - name: Build agent
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -o release/needle-agent ./cmd/agent
+
+      - name: Package
+        run: |
+          cd release
+          cp ../scripts/install-server.sh .
+          cp ../scripts/install-agent.sh .
+          cp ../agent.yaml.example .
+          tar czf ../needle-linux-${{ matrix.goarch }}.tar.gz \
+            needle-server needle-agent \
+            install-server.sh install-agent.sh agent.yaml.example
+          cd ..
+
+      - name: Generate checksums
+        run: sha256sum needle-*.tar.gz > checksums.txt
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            needle-linux-*.tar.gz
+            checksums.txt

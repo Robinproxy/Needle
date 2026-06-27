@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Needle Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="container header-inner">
+      <div class="brand" onclick="refresh();expandedId=null;filterRegion='';renderAll();" style="cursor:pointer">
+        <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28">
+          <path class="brand-ring" d="M7.6 20.4C5.7 18.9 4.5 16.6 4.5 14c0-5.1 5.4-8.9 11.5-8.9S27.5 8.9 27.5 14c0 2.6-1.2 4.9-3.1 6.4"/>
+          <path class="brand-ring-inner" d="M10.1 18.5C9 17.4 8.4 15.9 8.4 14.2c0-3.5 3.4-6.1 7.6-6.1s7.6 2.6 7.6 6.1c0 1.7-.6 3.2-1.7 4.3"/>
+          <path class="brand-mast" d="M16 3.6v21.8M12.3 10.6 16 3.6l3.7 7M11.1 22.3 16 25.4l4.9-3.1"/>
+          <path class="brand-beam" d="M16 7.5 9.2 20.5M16 7.5l6.8 13M6.1 25.9c2.2-1 4.4-1 6.6 0s4.4 1 6.6 0 4.4-1 6.6 0"/>
+          <circle class="brand-core" cx="16" cy="14.2" r="2.4"/>
+          <circle class="brand-spark" cx="16" cy="14.2" r="0.82"/>
+        </svg>
+        <div class="brand-text">
+          <h1>NEEDLE</h1>
+          <p>Server Monitoring</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost btn-sm" id="view-toggle" onclick="toggleCardFormat()" title="Toggle view">
+          <svg id="view-icon-grid" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <svg id="view-icon-list" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
+        </button>
+        <button class="btn btn-ghost btn-sm" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">☀️</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="server-info container" id="server-info"></div>
+
+  <main class="container">
+    <div class="agents-header">
+      <div class="agents-header-left">
+        <h2>Nodes</h2>
+        <span class="count" id="node-count-sub"></span>
+      </div>
+    </div>
+
+    <div id="card-grid" class="card-grid"></div>
+
+    <div id="empty-state" class="empty-state">
+      <div class="empty-icon">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </div>
+      <div class="empty-title">No nodes connected</div>
+      <div class="empty-desc">Waiting for agent reports...</div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-inner">
+      <span>NEEDLE v0.1</span>
+      <span>Server Monitoring</span>
+      <span class="footer-status">● System Online</span>
+    </div>
+  </footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
