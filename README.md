@@ -87,6 +87,18 @@ docker compose logs -f
 
 按 `Ctrl+C` 退出日志查看。
 
+#### 环境变量
+
+查看当前配置的环境变量：
+
+```bash
+# 查看 .env 文件
+cat .env
+
+# 查看容器内生效的环境变量
+docker compose exec needle-server env | grep NEEDLE
+```
+
 #### 第 4 步：访问仪表盘
 
 打开浏览器访问 `http://你的VPSIP:8008`，即可看到仪表盘。
