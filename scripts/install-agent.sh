@@ -76,7 +76,11 @@ echo
 echo "TCPing targets (edit the defaults or press enter to keep):"
 TCPING_ENTRIES=()
 for i in "${!DEFAULT_TCPING[@]}"; do
-  IFS=',' read -r NAME TARGET INTERVAL <<< "${DEFAULT_TCPING[$i]}"
+  ENTRY="${DEFAULT_TCPING[$i]}"
+  NAME="${ENTRY%%,*}"
+  REST="${ENTRY#*,}"
+  TARGET="${REST%%,*}"
+  INTERVAL="${REST#*,}"
   read -rp "  Target $((i+1)) name [${NAME}]: " N
   read -rp "  Target $((i+1)) address [${TARGET}]: " T
   TCPING_ENTRIES+=("${N:-$NAME},${T:-$TARGET},$INTERVAL")
@@ -94,7 +98,10 @@ insecure: false
 tcpping:
 YAML
 for entry in "${TCPING_ENTRIES[@]}"; do
-  IFS=',' read -r NAME TARGET INT <<< "$entry"
+  NAME="${entry%%,*}"
+  REST="${entry#*,}"
+  TARGET="${REST%%,*}"
+  INT="${REST#*,}"
   cat >> "$AGENT_YAML" <<YAML
   - name: "${NAME}"
     target: "${TARGET}"
