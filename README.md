@@ -38,6 +38,14 @@ curl -fsSL https://github.com/Robinproxy/Needle/releases/latest/download/install
 
 安装后自动作为 systemd 服务运行，仪表盘地址 `http://<ip>:8008`。
 
+**安装路径**：
+| 内容 | 路径 |
+|---|---|
+| 二进制 | `/opt/needle/bin/needle-server` |
+| 环境变量 | `/opt/needle/.env` |
+| 数据库 | `/opt/needle/data/needle.db` |
+| 日志 | `journalctl -u needle-server -f` |
+
 ### Server — Docker
 
 ```bash
@@ -71,6 +79,13 @@ curl -fsSL https://github.com/Robinproxy/Needle/releases/latest/download/install
 - Server URL
 - Token
 - TCPing 目标（6 个上海节点默认，可自定义修改）
+
+**安装路径**：
+| 内容 | 路径 |
+|---|---|
+| 二进制 | `/opt/needle-agent/bin/needle-agent` |
+| 配置文件 | `/opt/needle-agent/agent.yaml` |
+| 日志 | `journalctl -u needle-agent -f` |
 
 ## 手动安装
 
@@ -135,6 +150,10 @@ tcpping:
     target: "sh-ct-v6.ip.zstaticcdn.com:80"
     interval: 60
 ```
+
+**文件路径**：
+- 一键安装：`/opt/needle-agent/agent.yaml`
+- 手动安装：当前目录下的 `agent.yaml`
 
 ### Server 环境变量
 
