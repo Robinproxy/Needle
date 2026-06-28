@@ -13,6 +13,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -23,7 +25,11 @@ jobs:
 
       - name: Build and push
         run: |
-          VERSION=$(echo "${{ github.ref_name }}" | grep -E '^v[0-9]' || echo "${{ github.sha }}" | cut -c1-7)
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION=${{ github.ref_name }}
+          else
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "${{ github.sha }}" | cut -c1-7)
+          fi
           docker build --build-arg VERSION=$VERSION -t ghcr.io/robinproxy/needle:latest .
           if [ "${{ github.ref_type }}" = "tag" ]; then
             docker tag ghcr.io/robinproxy/needle:latest ghcr.io/robinproxy/needle:${{ github.ref_name }}
