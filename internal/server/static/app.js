@@ -109,6 +109,8 @@ function loadServerInfo() {
   fetch('/api/info').then(r => r.json()).then(info => {
     infoData = info;
     renderInfoBar();
+    const el = document.getElementById('version-label');
+    if (el) el.textContent = 'NEEDLE ' + info.version;
   }).catch(() => {});
 }
 
@@ -201,8 +203,7 @@ function renderAll() {
 
 function renderCard(a, idx, isActive) {
   const m = a.latest_metric;
-  const now = Date.now();
-  const isOnline = m && (now - m.created_at * 1000 < 120000);
+  const isOnline = a._online || false;
   const cpu = m ? m.cpu_usage : 0;
   const memPct = m ? (m.memory_used / m.memory_total * 100) : 0;
   const memStr = m ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : '';
@@ -244,8 +245,7 @@ function renderCard(a, idx, isActive) {
 
 function renderListRow(a, idx, isActive) {
   const m = a.latest_metric;
-  const now = Date.now();
-  const isOnline = m && (now - m.created_at * 1000 < 120000);
+  const isOnline = a._online || false;
   const cpu = m ? m.cpu_usage : 0;
   const memPct = m ? (m.memory_used / m.memory_total * 100) : 0;
   const diskPct = m ? (m.disk_used / m.disk_total * 100) : 0;
@@ -321,8 +321,11 @@ function setCardResetDay(id, day) {
 
 function cycleCardResetDay(id) {
   const current = getCardResetDay(id);
-  const next = current >= 31 ? 1 : current + 1;
-  setCardResetDay(id, next);
+  const input = prompt('Reset day (1-31):', String(current));
+  if (!input) return;
+  const day = parseInt(input);
+  if (isNaN(day) || day < 1 || day > 31) return;
+  setCardResetDay(id, day);
   delete trafficCache[id];
   renderAll();
 }
@@ -622,6 +625,10 @@ function refresh() {
     fetch('/api/info').then(r => r.json()),
   ]).then(([data, info]) => {
     agents = data;
+    agents.forEach(a => {
+      const m = a.latest_metric;
+      a._online = m && (Date.now() - m.created_at * 1000 < 120000);
+    });
     infoData = info;
     renderInfoBar();
     if (wasExpanded && !agents.find(a => a.agent.id === wasExpanded)) {

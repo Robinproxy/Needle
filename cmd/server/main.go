@@ -20,6 +20,8 @@ func main() {
 	}(), "listen address")
 	dbPath := flag.String("db", "./data/needle.db", "database path")
 	token := flag.String("token", "", "server token for agent authentication")
+	certFile := flag.String("cert", "", "TLS certificate file")
+	keyFile := flag.String("key", "", "TLS key file")
 	flag.Parse()
 
 	if *token == "" {
@@ -45,13 +47,20 @@ func main() {
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: mux,
+		Handler: server.SecurityHeaders(mux),
 	}
 
 	go func() {
-		log.Printf("Needle Server listening on %s", *addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server: %v", err)
+		if *certFile != "" && *keyFile != "" {
+			log.Printf("Needle Server listening on %s (TLS)", *addr)
+			if err := srv.ListenAndServeTLS(*certFile, *keyFile); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("server: %v", err)
+			}
+		} else {
+			log.Printf("Needle Server listening on %s", *addr)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("server: %v", err)
+			}
 		}
 	}()
 

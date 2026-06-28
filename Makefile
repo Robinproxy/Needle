@@ -37,10 +37,10 @@ clean:
 	rm -rf bin/ data/ release/
 
 run-server:
-	./bin/needle-server -l :8008 -token your-token
+	./bin/needle-server -l :8008 -token "${NEEDLE_TOKEN}"
 
 run-agent:
 	./bin/needle-agent agent.yaml
 
 dev-server:
-	go run ./cmd/server -l :8008 -token your-token
+	go run ./cmd/server -l :8008 -token "${NEEDLE_TOKEN}"

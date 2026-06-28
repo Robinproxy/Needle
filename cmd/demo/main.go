@@ -145,7 +145,7 @@ func main() {
 	for _, a := range agents {
 		runningSent := int64(500 * 1 << 30)
 		runningRecv := int64(800 * 1 << 30)
-		for day := 7; day >= 0; day-- {
+		for day := 6; day >= 0; day-- {
 			for hour := 0; hour < 24; hour++ {
 				runningSent += int64(randRange(0.1, 0.5) * (1 << 30))
 				runningRecv += int64(randRange(0.15, 0.8) * (1 << 30))
@@ -155,6 +155,7 @@ func main() {
 				} else {
 					total++
 				}
+				time.Sleep(25 * time.Millisecond)
 			}
 		}
 	}
