@@ -23,7 +23,8 @@ jobs:
 
       - name: Build and push
         run: |
-          docker build -t ghcr.io/robinproxy/needle:latest .
+          VERSION=$(echo "${{ github.ref_name }}" | grep -E '^v[0-9]' || echo "${{ github.sha }}" | cut -c1-7)
+          docker build --build-arg VERSION=$VERSION -t ghcr.io/robinproxy/needle:latest .
           if [ "${{ github.ref_type }}" = "tag" ]; then
             docker tag ghcr.io/robinproxy/needle:latest ghcr.io/robinproxy/needle:${{ github.ref_name }}
           fi

@@ -8,11 +8,25 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
+
+var Version = "dev"
+
+var reportThrottle sync.Map
+
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
 
 type Handler struct {
 	store       *Store
@@ -39,12 +53,16 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	stats, _ := h.store.GetStats()
 	if stats == nil {
 		stats = &ServerStats{}
 	}
 	info := map[string]interface{}{
-		"version":  "0.1.0",
+		"version":  Version,
 		"db_stats": stats,
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -167,9 +185,22 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// per-agent rate limit: 50 req/s (20ms window)
+	last, loaded := reportThrottle.LoadOrStore(agentID, time.Now().UnixMilli())
+	if loaded && time.Now().UnixMilli()-last.(int64) < 20 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
+	}
+	reportThrottle.Store(agentID, time.Now().UnixMilli())
+
 	var createdAt int64
 	if req.CreatedAt != nil {
 		createdAt = *req.CreatedAt
+	}
+	now := time.Now()
+	if createdAt < now.Add(-30*24*time.Hour).Unix() || createdAt > now.Add(5*time.Minute).Unix() {
+		createdAt = now.Unix()
 	}
 
 	if req.CPU != nil {
@@ -229,6 +260,10 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	agents, err := h.store.GetAgents()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -253,6 +288,10 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
 	parts := strings.Split(path, "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -281,6 +320,9 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
 		if d, err := time.ParseDuration(rangeStr); err == nil {
+			if d > 720*time.Hour {
+				d = 720 * time.Hour
+			}
 			since = time.Now().Add(-d).Unix()
 		}
 	}
