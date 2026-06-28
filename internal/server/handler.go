@@ -227,7 +227,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			load15 = req.Load.Load15
 		}
 
-		h.store.InsertMetric(&MetricRow{
+		if err := h.store.InsertMetric(&MetricRow{
 			AgentID:     agentID,
 			CPUUsage:    req.CPU.Percent,
 			MemoryTotal: memTotal,
@@ -242,17 +242,23 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Load5:       load5,
 			Load15:      load15,
 			Uptime:      int64(req.Uptime),
-		}, createdAt)
+		}, createdAt); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	for _, t := range req.TCPing {
-		h.store.InsertTCPing(&TCPingRow{
+		if err := h.store.InsertTCPing(&TCPingRow{
 			AgentID:   agentID,
 			Name:      t.Name,
 			Target:    t.Target,
 			LatencyMs: t.LatencyMs,
 			Success:   t.Success,
-		}, createdAt)
+		}, createdAt); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
