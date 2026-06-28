@@ -61,8 +61,6 @@ echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 docker compose up -d
 ```
 
-> 首次启动会自动从 `ghcr.io/robinproxy/needle` 拉取镜像。如果镜像尚未构建（新版本刚发布），也可以使用下面的**本地构建**方式。
-
 #### 第 3 步：验证运行状态
 
 ```bash
@@ -75,10 +73,6 @@ docker compose logs -f
 按 `Ctrl+C` 退出日志查看。
 
 #### 第 4 步：访问仪表盘
-
-打开浏览器访问 `http://你的VPSIP:8008`，即可看到仪表盘。
-
-> 如果使用云服务器，需要在防火墙/安全组中放行 8008 端口。
 
 #### 环境变量
 
@@ -266,92 +260,4 @@ tcpping:
 
 ---
 
-## Cloudflare Tunnel
 
-Server 本身无 TLS 支持，推荐配合 Cloudflare Tunnel 提供 HTTPS：
-
-```bash
-cloudflared tunnel create needle
-```
-
-`~/.cloudflared/config.yml`:
-
-```yaml
-tunnel: needle
-credentials-file: /root/.cloudflared/needle.json
-ingress:
-  - hostname: needle.example.com
-    service: http://localhost:8008
-  - service: http_status:404
-```
-
-```bash
-cloudflared tunnel route dns needle needle.example.com
-cloudflared tunnel run needle
-```
-
-#### Docker + Cloudflare Tunnel
-
-如果 Needle Server 和 cloudflared 都在 Docker 中运行，需要共享同一个网络：
-
-```yaml
-services:
-  needle-server:
-    image: ghcr.io/robinproxy/needle:latest
-    ports:
-      - "${NEEDLE_PORT:-8008}:8008"
-    environment:
-      NEEDLE_TOKEN: "${NEEDLE_TOKEN:?error: set NEEDLE_TOKEN in .env or environment}"
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-    networks:
-      - cf-tunnel
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run
-    environment:
-      TUNNEL_TOKEN: 你的TunnelToken
-    networks:
-      - cf-tunnel
-
-networks:
-  cf-tunnel: {}
-```
-
-cloudflared 通过 `localhost:8008` 访问 Needle Server（同网络下容器名可解析）。
-
-Agent 配置中 `server` 改为 `https://needle.example.com`。
-
----
-
-## 构建
-
-需要 Go 1.26+ 和 gcc（go-sqlite3 需要 CGO）。
-
-```bash
-git clone https://github.com/Robinproxy/Needle.git
-cd Needle
-
-# 本地编译（macOS/Linux）
-make build
-
-# 交叉编译 Linux amd64/arm64 二进制
-make release
-
-# 编译后二进制在 bin/ 或 release/ 目录
-```
-
-### 发布新版本
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-推送 tag 后 GitHub Actions 自动构建：
-- **release.yml** — 编译 Linux 二进制并上传到 Releases
-- **docker.yml** — 构建 Docker 镜像并推送到 `ghcr.io/robinproxy/needle`
-
-Docker 用户后续可以直接 `docker compose pull` 更新镜像。
