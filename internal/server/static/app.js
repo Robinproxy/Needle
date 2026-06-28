@@ -446,18 +446,8 @@ function renderSparkline(elemId, data, color, isPercent) {
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
   const chart = echarts.init(el);
   chart.setOption({
-    grid: { left: 4, right: 4, top: 2, bottom: 18 },
-    xAxis: {
-      type: 'time', show: true,
-      axisLine: { show: false },
-      axisTick: { show: false },
-      splitLine: { show: false },
-      axisLabel: {
-        fontSize: 9, color: 'hsl(var(--muted-foreground) / 0.5)',
-        margin: 2,
-        formatter: v => formatSparkXAxis(v),
-      },
-    },
+    grid: { left: 4, right: 4, top: 2, bottom: 4 },
+    xAxis: { show: false },
     yAxis: {
       type: 'value', show: false,
       min: isPercent ? 0 : 'dataMin',
@@ -469,12 +459,13 @@ function renderSparkline(elemId, data, color, isPercent) {
         const p = params[0];
         if (!p) return '';
         const d = new Date(p.data[0]);
-        const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-        const val = isPercent ? p.data[1].toFixed(1) + '%'
+        const dateStr = (d.getMonth() + 1) + '/' + String(d.getDate()).padStart(2, '0');
+        const timeStr = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        const valStr = isPercent ? p.data[1].toFixed(1) + '%'
           : (p.data[1] >= 1000000 ? (p.data[1] / 1000000).toFixed(2) + 'M/s'
             : p.data[1] >= 1000 ? (p.data[1] / 1000).toFixed(1) + 'K/s'
             : p.data[1].toFixed(0) + '/s');
-        return time + '<br/>' + val;
+        return dateStr + '<br/>' + timeStr + '<br/>' + valStr;
       },
       textStyle: { fontSize: 11 },
     },
