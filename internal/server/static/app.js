@@ -447,7 +447,7 @@ function renderSparkline(elemId, data, color, isPercent) {
   const chart = echarts.init(el);
   chart.setOption({
     grid: { left: 4, right: 4, top: 2, bottom: 4 },
-    xAxis: { show: false },
+    xAxis: { type: 'time', show: false },
     yAxis: {
       type: 'value', show: false,
       min: isPercent ? 0 : 'dataMin',
