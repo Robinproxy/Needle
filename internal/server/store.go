@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"log"
 	"os"
 	"time"
 
@@ -21,6 +22,7 @@ func NewStore(path string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
+	s.startPurgeLoop()
 	return s, nil
 }
 
@@ -66,6 +68,9 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	// migrate cumulative traffic columns (added in v0.3)
+	s.db.Exec("ALTER TABLE metrics ADD COLUMN total_sent INTEGER DEFAULT 0")
+	s.db.Exec("ALTER TABLE metrics ADD COLUMN total_recv INTEGER DEFAULT 0")
 	return nil
 }
 
@@ -89,11 +94,11 @@ func (s *Store) InsertMetric(m *MetricRow) error {
 	_, err := s.db.Exec(
 		`INSERT INTO metrics(agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
-			load1, load5, load15, uptime)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			total_sent, total_recv, load1, load5, load15, uptime)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.AgentID, m.CPUUsage, m.MemoryTotal, m.MemoryUsed,
 		m.DiskTotal, m.DiskUsed, m.NetworkUp, m.NetworkDown,
-		m.Load1, m.Load5, m.Load15, m.Uptime,
+		m.TotalSent, m.TotalRecv, m.Load1, m.Load5, m.Load15, m.Uptime,
 	)
 	return err
 }
@@ -133,14 +138,14 @@ func (s *Store) GetLatestMetric(agentID int64) (*MetricRow, error) {
 	row := s.db.QueryRow(
 		`SELECT id, agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
-			load1, load5, load15, uptime, created_at
+			total_sent, total_recv, load1, load5, load15, uptime, created_at
 		 FROM metrics WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1`,
 		agentID,
 	)
 	var m MetricRow
 	err := row.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 		&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
-		&m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt)
+		&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +156,7 @@ func (s *Store) GetMetrics(agentID int64, since int64) ([]MetricRow, error) {
 	rows, err := s.db.Query(
 		`SELECT id, agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
-			load1, load5, load15, uptime, created_at
+			total_sent, total_recv, load1, load5, load15, uptime, created_at
 		 FROM metrics WHERE agent_id = ? AND created_at >= ? ORDER BY created_at`,
 		agentID, since,
 	)
@@ -165,7 +170,7 @@ func (s *Store) GetMetrics(agentID int64, since int64) ([]MetricRow, error) {
 		var m MetricRow
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
-			&m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt); err != nil {
+			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		metrics = append(metrics, m)
@@ -230,6 +235,64 @@ func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
 	return results, nil
 }
 
+func (s *Store) GetTraffic(agentID int64, resetDay int) (sent, recv int64, err error) {
+	boundary := resetBoundary(resetDay)
+	boundaryUnix := boundary.Unix()
+
+	var baseSent, baseRecv sql.NullInt64
+	err = s.db.QueryRow(
+		`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? AND created_at >= ? ORDER BY created_at LIMIT 1`,
+		agentID, boundaryUnix,
+	).Scan(&baseSent, &baseRecv)
+	if err == sql.ErrNoRows {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var latestSent, latestRecv sql.NullInt64
+	err = s.db.QueryRow(
+		`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1`,
+		agentID,
+	).Scan(&latestSent, &latestRecv)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	sent = latestSent.Int64 - baseSent.Int64
+	recv = latestRecv.Int64 - baseRecv.Int64
+	if sent < 0 {
+		sent = latestSent.Int64
+	}
+	if recv < 0 {
+		recv = latestRecv.Int64
+	}
+	return sent, recv, nil
+}
+
+func resetBoundary(day int) time.Time {
+	now := time.Now()
+	y, m, _ := now.Date()
+	loc := now.Location()
+
+	boundary := time.Date(y, m, day, 0, 0, 0, 0, loc)
+	if boundary.Month() != m {
+		boundary = time.Date(y, m+1, 0, 0, 0, 0, 0, loc)
+	}
+
+	if now.Before(boundary) {
+		boundary = boundary.AddDate(0, -1, 0)
+		y2, m2, _ := boundary.Date()
+		boundary = time.Date(y2, m2, day, 0, 0, 0, 0, loc)
+		if boundary.Month() != m2 {
+			boundary = time.Date(y2, m2+1, 0, 0, 0, 0, 0, loc)
+		}
+	}
+
+	return boundary
+}
+
 func (s *Store) GetStats() (*ServerStats, error) {
 	var stats ServerStats
 	s.db.QueryRow("SELECT COUNT(*) FROM agents").Scan(&stats.AgentCount)
@@ -255,6 +318,29 @@ func (s *Store) DeleteAgent(id int64) error {
 	}
 	_, err = s.db.Exec("DELETE FROM agents WHERE id = ?", id)
 	return err
+}
+
+func (s *Store) PurgeOldData() {
+	cutoff := time.Now().Add(-7 * 24 * time.Hour).Unix()
+	if res, err := s.db.Exec("DELETE FROM metrics WHERE created_at < ?", cutoff); err != nil {
+		log.Printf("purge metrics: %v", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("purged %d old metric rows", n)
+	}
+	if res, err := s.db.Exec("DELETE FROM tcpping_results WHERE created_at < ?", cutoff); err != nil {
+		log.Printf("purge tcpping: %v", err)
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("purged %d old tcpping rows", n)
+	}
+}
+
+func (s *Store) startPurgeLoop() {
+	go func() {
+		s.PurgeOldData()
+		for range time.NewTicker(1 * time.Hour).C {
+			s.PurgeOldData()
+		}
+	}()
 }
 
 func (s *Store) Close() error {

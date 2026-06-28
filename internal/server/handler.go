@@ -121,8 +121,10 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Used  uint64 `json:"used"`
 		} `json:"disk"`
 		Network *struct {
-			Up   int64 `json:"up"`
-			Down int64 `json:"down"`
+			Up        int64 `json:"up"`
+			Down      int64 `json:"down"`
+			TotalSent int64 `json:"total_sent"`
+			TotalRecv int64 `json:"total_recv"`
 		} `json:"network"`
 		Load *struct {
 			Load1  float64 `json:"load1"`
@@ -174,10 +176,12 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			diskTotal = int64(req.Disk.Total)
 			diskUsed = int64(req.Disk.Used)
 		}
-		var netUp, netDown int64
+		var netUp, netDown, totalSent, totalRecv int64
 		if req.Network != nil {
 			netUp = req.Network.Up
 			netDown = req.Network.Down
+			totalSent = req.Network.TotalSent
+			totalRecv = req.Network.TotalRecv
 		}
 		var load1, load5, load15 float64
 		if req.Load != nil {
@@ -195,6 +199,8 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			DiskUsed:    diskUsed,
 			NetworkUp:   float64(netUp),
 			NetworkDown: float64(netDown),
+			TotalSent:   totalSent,
+			TotalRecv:   totalRecv,
 			Load1:       load1,
 			Load5:       load5,
 			Load15:      load15,
@@ -291,6 +297,21 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
+
+	case "traffic":
+		resetDay := 1
+		if dStr := r.URL.Query().Get("reset_day"); dStr != "" {
+			if d, err := strconv.Atoi(dStr); err == nil && d >= 1 && d <= 31 {
+				resetDay = d
+			}
+		}
+		sent, recv, err := h.store.GetTraffic(agentID, resetDay)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]int64{"sent": sent, "recv": recv})
 
 	default:
 		http.Error(w, "not found", http.StatusNotFound)

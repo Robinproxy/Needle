@@ -7,8 +7,9 @@ let cardFormat = localStorage.getItem('cardFormat') || 'card';
 let infoData = null;
 let currentTcppingRange = '24h';
 let currentTcppingId = null;
-let currentMetricsRange = '1h';
+let currentMetricsRange = '24h';
 let gridCols = 4;
+let trafficCache = {};
 
 function escapeHtml(s) {
   if (typeof s !== 'string') return s;
@@ -195,6 +196,7 @@ function renderAll() {
       }, 100);
     }
   }
+  refreshTraffic();
 }
 
 function renderCard(a, idx, isActive) {
@@ -210,14 +212,16 @@ function renderCard(a, idx, isActive) {
   const downSpeed = m ? formatSpeed(m.network_down) : '0';
   const uptime = m ? formatUptime(m.uptime) : '-';
   const sess = String(idx + 1).padStart(2, '0');
+  const resetDay = getCardResetDay(a.agent.id);
 
-  // TCPing card line — always use first target
+  // TCPing card line — selected target or first
   let pingHtml = '';
   if (a.latest_tcpping && a.latest_tcpping.length > 0) {
-    const p = a.latest_tcpping[0];
+    const saved = getCardTcpping(a.agent.id);
+    const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
     const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
     const lossStr = p.success ? '0%' : '100%';
-    pingHtml = '<div class="card-ping"><span class="ping-dot"></span><span class="ping-label">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Latency ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
+    pingHtml = '<div class="card-ping"><span class="ping-dot"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Latency ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
   }
 
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
@@ -226,12 +230,13 @@ function renderCard(a, idx, isActive) {
       + '<span class="card-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
       + '<span class="card-session">' + flagEmoji(a.agent.region) + '</span>'
     + '</div>'
-    + '<div class="card-sub">' + uptime + '</div>'
+    + '<div class="card-sub"><span>' + uptime + '</span><span class="card-reset-day" onclick="event.stopPropagation();cycleCardResetDay(' + a.agent.id + ')" title="Reset day"><span class="reset-num">' + String(resetDay).padStart(2, '0') + '</span></span></div>'
     + '<div class="card-metrics">'
       + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value" style="color:hsl(var(--primary))">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + cpu.toFixed(0) + '%"></div></div></div>'
       + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value" style="color:hsl(var(--success))">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
       + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value" style="color:hsl(var(--warning))">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
     + '</div>'
+    + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-up">\u2191 —</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 —</span></div>'
     + pingHtml
     + '<div class="card-footer-line"><div class="net"><span>\u2193 ' + downSpeed + '</span><span>\u2191 ' + upSpeed + '</span></div><span>' + (m ? relativeTime(m.created_at * 1000) : '') + '</span></div>'
   + '</div>';
@@ -261,6 +266,7 @@ function renderListRow(a, idx, isActive) {
       + '<div class="list-bar"><span class="list-bar-label">MEM</span><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(memPct) + '</span></div>'
       + '<div class="list-bar"><span class="list-bar-label">DSK</span><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(diskPct) + '</span></div>'
     + '</div>'
+    + '<span class="list-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-up">\u2191 \u2014</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 \u2014</span></span>'
     + '<span class="list-net">\u2193' + downSpeed + ' \u2191' + upSpeed + '</span>'
     + '<span class="list-uptime">' + uptime + '</span>'
     + '<span class="list-time">' + (m ? relativeTime(m.created_at * 1000) : '') + '</span>'
@@ -286,6 +292,73 @@ function toggleExpand(id) {
   }
 }
 
+function cycleCardTcpping(id) {
+  const agent = agents.find(a => a.agent.id === id);
+  if (!agent || !agent.latest_tcpping || !agent.latest_tcpping.length) return;
+  const names = agent.latest_tcpping.map(t => t.name);
+  const current = getCardTcpping(id);
+  const idx = current ? names.indexOf(current) : -1;
+  const next = (idx + 1) % names.length;
+  setCardTcpping(id, names[next]);
+  renderAll();
+}
+
+function getCardTcpping(id) {
+  return localStorage.getItem('cardTcpping_' + id) || '';
+}
+
+function setCardTcpping(id, name) {
+  localStorage.setItem('cardTcpping_' + id, name);
+}
+
+function getCardResetDay(id) {
+  return parseInt(localStorage.getItem('cardResetDay_' + id)) || 1;
+}
+
+function setCardResetDay(id, day) {
+  localStorage.setItem('cardResetDay_' + id, String(day));
+}
+
+function cycleCardResetDay(id) {
+  const current = getCardResetDay(id);
+  const next = current >= 31 ? 1 : current + 1;
+  setCardResetDay(id, next);
+  delete trafficCache[id];
+  renderAll();
+}
+
+function fetchTrafficForCard(id) {
+  const resetDay = getCardResetDay(id);
+  fetch('/api/agents/' + id + '/traffic?reset_day=' + resetDay)
+    .then(r => r.json())
+    .then(data => {
+      trafficCache[id] = data;
+      updateTrafficDisplay(id, data);
+    })
+    .catch(() => {});
+}
+
+function updateTrafficDisplay(id, data) {
+  const sentStr = formatBytes(data.sent);
+  const recvStr = formatBytes(data.recv);
+  const el = document.querySelector('[data-traffic-id="' + id + '"]');
+  if (el) {
+    el.innerHTML = '<span class="traffic-up">\u2191 ' + sentStr + '</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 ' + recvStr + '</span>';
+  }
+}
+
+function refreshTraffic() {
+  const filtered = filterAndSort(agents);
+  filtered.forEach(a => {
+    const id = a.agent.id;
+    if (!trafficCache[id]) {
+      fetchTrafficForCard(id);
+    } else {
+      updateTrafficDisplay(id, trafficCache[id]);
+    }
+  });
+}
+
 function destroyDetailCharts() {
   Object.values(sparkCharts).forEach(c => { try { c.dispose(); } catch(e) {} });
   sparkCharts = {};
@@ -303,14 +376,6 @@ function renderDetailContent(id) {
     + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
     + '<button class="btn btn-ghost btn-sm" onclick="toggleExpand(' + id + ')">\u2715</button>'
     + '</div>'
-    + '<div class="detail-range-bar">'
-      + '<div class="range-group">'
-        + '<button class="tcpping-range-btn' + (currentMetricsRange === '1h' ? ' active' : '') + '" data-range="1h" onclick="switchMetricsRange(\'' + id + '\',\'1h\')">1h</button>'
-        + '<button class="tcpping-range-btn' + (currentMetricsRange === '24h' ? ' active' : '') + '" data-range="24h" onclick="switchMetricsRange(\'' + id + '\',\'24h\')">1d</button>'
-        + '<button class="tcpping-range-btn' + (currentMetricsRange === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchMetricsRange(\'' + id + '\',\'168h\')">7d</button>'
-        + '<button class="tcpping-range-btn' + (currentMetricsRange === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchMetricsRange(\'' + id + '\',\'720h\')">30d</button>'
-      + '</div>'
-    + '</div>'
     + '<div class="spark-grid">'
       + '<div class="spark-item"><div class="spark-header"><span class="label">CPU</span><span class="value" id="spark-cpu-val">—</span></div><div id="spark-cpu" class="spark-chart"></div></div>'
       + '<div class="spark-item"><div class="spark-header"><span class="label">Memory</span><span class="value" id="spark-mem-val">—</span></div><div id="spark-mem" class="spark-chart"></div></div>'
@@ -321,11 +386,6 @@ function renderDetailContent(id) {
       + '<div class="tcpping-header">'
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
-          + '<div class="tcpping-range-group">'
-            + '<button class="tcpping-range-btn active" data-range="1h" onclick="switchTcppingRange(\'' + id + '\',\'1h\')">1h</button>'
-            + '<button class="tcpping-range-btn" data-range="24h" onclick="switchTcppingRange(\'' + id + '\',\'24h\')">1d</button>'
-            + '<button class="tcpping-range-btn" data-range="168h" onclick="switchTcppingRange(\'' + id + '\',\'168h\')">7d</button>'
-          + '</div>'
         + '</div>'
         + '<div class="tcpping-controls">'
           + '<button class="btn btn-xs btn-soft" onclick="tcppingSelectAll(\'' + id + '\')">\u2713 All</button>'
@@ -338,34 +398,16 @@ function renderDetailContent(id) {
         + '<div id="tcpping-rows-' + id + '"></div>'
       + '</div>'
     + '</div>'
-    + '<div class="detail-sections">'
-      + '<div class="detail-section"><div class="detail-section-title">System</div><table class="info-table"><tbody id="info-sys-' + id + '"></tbody></table></div>'
-      + '<div class="detail-section"><div class="detail-section-title">Network &amp; Load</div><table class="info-table"><tbody id="info-net-' + id + '"></tbody></table></div>'
     + '</div>';
-
-  const m = agent.latest_metric;
-  if (m) {
-    document.getElementById('info-sys-' + id).innerHTML =
-      '<tr><td>Hostname</td><td>' + escapeHtml(agent.agent.hostname) + '</td></tr>'
-      + '<tr><td>Uptime</td><td>' + formatUptime(m.uptime) + '</td></tr>'
-      + '<tr><td>Memory</td><td>' + formatBytes(m.memory_total) + '</td></tr>'
-      + '<tr><td>Disk</td><td>' + formatBytes(m.disk_total) + '</td></tr>';
-    document.getElementById('info-net-' + id).innerHTML =
-      '<tr><td>Net Up</td><td>' + formatSpeed(m.network_up) + '/s</td></tr>'
-      + '<tr><td>Net Down</td><td>' + formatSpeed(m.network_down) + '/s</td></tr>'
-      + '<tr><td>Load 1m</td><td>' + (m.load1 != null ? m.load1.toFixed(2) : '—') + '</td></tr>'
-      + '<tr><td>Load 5m</td><td>' + (m.load5 != null ? m.load5.toFixed(2) : '—') + '</td></tr>'
-      + '<tr><td>CPU Usage</td><td>' + pct(m.cpu_usage) + '</td></tr>';
-  }
 
   // Fetch sparkline data
   currentTcppingId = id;
-  currentTcppingRange = '1h';
-  currentMetricsRange = '1h';
-  fetch('/api/agents/' + id + '/metrics?range=1h').then(r => r.json()).then(data => {
+  currentTcppingRange = '168h';
+  currentMetricsRange = '168h';
+  fetch('/api/agents/' + id + '/metrics?range=168h').then(r => r.json()).then(data => {
     renderSparklines(id, data);
   }).catch(() => {});
-  fetchTCPingData(id, '1h');
+  fetchTCPingData(id, '168h');
 }
 
 function renderSparklines(id, metrics) {
@@ -384,22 +426,55 @@ function renderSparklines(id, metrics) {
   document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s' : '—';
   document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s' : '—';
 
-  renderSparkline('spark-cpu', cpuData, '#3b82f6');
-  renderSparkline('spark-mem', memData, '#22c55e');
-  renderSparkline('spark-netin', netInData, '#8b5cf6');
-  renderSparkline('spark-netout', netOutData, '#f59e0b');
+  renderSparkline('spark-cpu', cpuData, '#3b82f6', true);
+  renderSparkline('spark-mem', memData, '#22c55e', true);
+  renderSparkline('spark-netin', netInData, '#8b5cf6', false);
+  renderSparkline('spark-netout', netOutData, '#f59e0b', false);
 }
 
-function renderSparkline(elemId, data, color) {
+function formatSparkXAxis(ts) {
+  const d = new Date(ts);
+  return (d.getMonth() + 1) + '/' + d.getDate();
+}
+
+function renderSparkline(elemId, data, color, isPercent) {
   const el = document.getElementById(elemId);
   if (!el) return;
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
   const chart = echarts.init(el);
   chart.setOption({
-    grid: { left: 0, right: 0, top: 0, bottom: 0 },
-    xAxis: { type: 'time', show: false },
-    yAxis: { type: 'value', show: false, min: 'dataMin', max: 'dataMax' },
-    tooltip: { show: false },
+    grid: { left: 0, right: 4, top: 2, bottom: 18 },
+    xAxis: {
+      type: 'time', show: true,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: {
+        fontSize: 9, color: 'hsl(var(--muted-foreground) / 0.5)',
+        margin: 2,
+        formatter: v => formatSparkXAxis(v),
+      },
+    },
+    yAxis: {
+      type: 'value', show: false,
+      min: isPercent ? 0 : 'dataMin',
+      max: isPercent ? 100 : 'dataMax',
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter: params => {
+        const p = params[0];
+        if (!p) return '';
+        const d = new Date(p.data[0]);
+        const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        const val = isPercent ? p.data[1].toFixed(1) + '%'
+          : (p.data[1] >= 1000000 ? (p.data[1] / 1000000).toFixed(2) + 'M/s'
+            : p.data[1] >= 1000 ? (p.data[1] / 1000).toFixed(1) + 'K/s'
+            : p.data[1].toFixed(0) + '/s');
+        return time + '<br/>' + val;
+      },
+      textStyle: { fontSize: 11 },
+    },
     series: [{
       type: 'line', data, smooth: true, symbol: 'none',
       lineStyle: { color, width: 1.5 },
@@ -468,9 +543,23 @@ function renderTCPingChart(id, results) {
       textStyle: { fontSize: 11 },
     },
     legend: { show: false, selected },
-    grid: { left: 48, right: 10, top: 8, bottom: 8 },
-    xAxis: { type: 'time', axisLine: { lineStyle: { color: 'hsl(217,33%,22%)' } }, axisLabel: { color: 'hsl(215,20%,65%)', fontSize: 10 } },
-    yAxis: { type: 'value', name: 'ms', nameTextStyle: { color: 'hsl(215,20%,65%)', fontSize: 10 }, splitLine: { lineStyle: { color: 'hsla(217,33%,17%,0.6)' } }, axisLabel: { color: 'hsl(215,20%,65%)', fontSize: 10 } },
+    grid: { left: 8, right: 32, top: 8, bottom: 20 },
+    xAxis: {
+      type: 'time',
+      axisLine: { lineStyle: { color: 'hsl(var(--border) / 0.5)' } },
+      axisLabel: {
+        color: 'hsl(var(--muted-foreground))', fontSize: 10,
+        formatter: v => { const d = new Date(v); return (d.getMonth() + 1) + '/' + d.getDate(); },
+      },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value', position: 'right',
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: 'hsl(var(--border) / 0.2)', width: 1 } },
+      axisLabel: { color: 'hsl(var(--muted-foreground))', fontSize: 10, margin: 0, formatter: v => v + 'ms' },
+    },
     series,
   });
   tcppingChart = chart;
@@ -527,6 +616,7 @@ function tcppingToggleLine(id, name) {
 
 function refresh() {
   const wasExpanded = expandedId;
+  trafficCache = {};
   Promise.all([
     fetch('/api/agents').then(r => r.json()),
     fetch('/api/info').then(r => r.json()),
@@ -542,21 +632,35 @@ function refresh() {
   }).catch(err => console.error('refresh:', err));
 }
 
-function toggleTheme() {
+let themeMode = localStorage.getItem('themeMode') || 'light';
+
+function setThemeMode(mode) {
+  themeMode = mode;
+  localStorage.setItem('themeMode', mode);
+  applyTheme();
+  highlightThemeBtn();
+}
+
+function applyTheme() {
   const html = document.documentElement;
-  const isDark = html.classList.toggle('dark');
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = isDark ? '\u2600\uFE0F' : '\uD83C\uDF19';
-  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  if (themeMode === 'dark') { html.classList.add('dark'); return; }
+  if (themeMode === 'light') { html.classList.remove('dark'); return; }
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  html.classList.toggle('dark', prefersDark);
+}
+
+function highlightThemeBtn() {
+  document.querySelectorAll('#theme-group .theme-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === themeMode);
+  });
 }
 
 (function initTheme() {
-  const saved = localStorage.getItem('theme');
-  const html = document.documentElement;
-  if (saved === 'light') html.classList.remove('dark');
-  else html.classList.add('dark');
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = html.classList.contains('dark') ? '\u2600\uFE0F' : '\uD83C\uDF19';
+  applyTheme();
+  highlightThemeBtn();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (themeMode === 'system') applyTheme();
+  });
 })();
 
 function updateViewIcon() {
@@ -582,5 +686,5 @@ document.addEventListener('keydown', e => {
 
 loadServerInfo();
 refresh();
-setInterval(refresh, 15000);
+
 updateViewIcon();

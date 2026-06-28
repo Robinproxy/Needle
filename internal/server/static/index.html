@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Needle Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -32,7 +33,17 @@
           <svg id="view-icon-grid" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           <svg id="view-icon-list" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
         </button>
-        <button class="btn btn-ghost btn-sm" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">☀️</button>
+        <div class="theme-btn-group" id="theme-group">
+          <button class="theme-btn" data-mode="light" onclick="setThemeMode('light')" title="Light">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>
+          </button>
+          <button class="theme-btn" data-mode="dark" onclick="setThemeMode('dark')" title="Dark">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9c-4 0-7-3-7-7 0-1 .2-2 .7-3A9 9 0 0 1 12 3z"/></svg>
+          </button>
+          <button class="theme-btn" data-mode="system" onclick="setThemeMode('system')" title="System">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M7 4V2M17 4V2" stroke-width="1.2"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </header>

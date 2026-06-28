@@ -18,6 +18,8 @@ type MetricRow struct {
 	DiskUsed    int64   `json:"disk_used"`
 	NetworkUp   float64 `json:"network_up"`
 	NetworkDown float64 `json:"network_down"`
+	TotalSent   int64   `json:"total_sent"`
+	TotalRecv   int64   `json:"total_recv"`
 	Load1       float64 `json:"load1"`
 	Load5       float64 `json:"load5"`
 	Load15      float64 `json:"load15"`

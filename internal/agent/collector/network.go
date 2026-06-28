@@ -7,8 +7,10 @@ import (
 )
 
 type NetworkStats struct {
-	Up   int64 `json:"up"`
-	Down int64 `json:"down"`
+	Up         int64 `json:"up"`
+	Down       int64 `json:"down"`
+	TotalSent  int64 `json:"total_sent"`
+	TotalRecv  int64 `json:"total_recv"`
 }
 
 type NetworkCollector struct {
@@ -27,6 +29,9 @@ func (nc *NetworkCollector) Collect() (*NetworkStats, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(counters) == 0 {
+		return &NetworkStats{}, nil
+	}
 
 	now := time.Now()
 
@@ -35,7 +40,7 @@ func (nc *NetworkCollector) Collect() (*NetworkStats, error) {
 		nc.prevDown = counters[0].BytesRecv
 		nc.prevTime = now
 		nc.first = false
-		return &NetworkStats{}, nil
+		return &NetworkStats{TotalSent: int64(counters[0].BytesSent), TotalRecv: int64(counters[0].BytesRecv)}, nil
 	}
 
 	elapsed := now.Sub(nc.prevTime).Seconds()
@@ -56,5 +61,8 @@ func (nc *NetworkCollector) Collect() (*NetworkStats, error) {
 		down = 0
 	}
 
-	return &NetworkStats{Up: up, Down: down}, nil
+	totalSent := int64(counters[0].BytesSent)
+	totalRecv := int64(counters[0].BytesRecv)
+
+	return &NetworkStats{Up: up, Down: down, TotalSent: totalSent, TotalRecv: totalRecv}, nil
 }

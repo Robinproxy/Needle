@@ -2,6 +2,7 @@
 bin/
 /agent
 /server
+demo
 *.exe
 *.exe~
 *.dll

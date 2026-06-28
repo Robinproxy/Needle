@@ -37,8 +37,10 @@ type diskStats struct {
 }
 
 type netStats struct {
-	Up   int64 `json:"up"`
-	Down int64 `json:"down"`
+	Up        int64 `json:"up"`
+	Down      int64 `json:"down"`
+	TotalSent int64 `json:"total_sent"`
+	TotalRecv int64 `json:"total_recv"`
 }
 
 type loadStats struct {
@@ -62,6 +64,9 @@ var agents = []struct {
 	{"demo-server", "CN", "China"},
 	{"db-server", "CN", "China"},
 	{"app-server", "US", "United States"},
+	{"sg-gateway", "SG", "Singapore"},
+	{"jp-proxy", "JP", "Japan"},
+	{"de-node", "DE", "Germany"},
 }
 
 var tcppingTargets = []struct {
@@ -84,14 +89,18 @@ func makeReport(hostname, region string, daysAgo int) reportPayload {
 	now := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
 	load := randRange(0.1, 4.0)
 
+	// simulate cumulative traffic counters that grow over time
+	baseSent := int64(500 * (1 << 30))  // start at 500 GB
+	baseRecv := int64(800 * (1 << 30))  // start at 800 GB
+	growth := float64(8-daysAgo) * (randRange(10, 40) * float64(1<<30)) // 0-70 GB per day
 	r := reportPayload{
-		Token:    "your-token",
+		Token:    "test123",
 		Hostname: hostname,
 		Region:   region,
 		CPU:      &cpuStats{Percent: randRange(5, 85)},
 		Memory:   &memStats{Total: 8 << 30, Used: uint64(randRange(1, 6) * (1 << 30))},
 		Disk:     &diskStats{Total: 100 << 30, Used: uint64(randRange(10, 60) * (1 << 30))},
-		Network:  &netStats{Up: int64(randRange(10, 500) * 1000), Down: int64(randRange(50, 900) * 1000)},
+		Network:  &netStats{Up: int64(randRange(10, 500) * 1000), Down: int64(randRange(50, 900) * 1000), TotalSent: baseSent + int64(growth), TotalRecv: baseRecv + int64(growth*1.5)},
 		Load:     &loadStats{Load1: load, Load5: load * 0.7, Load15: load * 0.5},
 		Uptime:   uint64(rand.Intn(30)) * 86400,
 	}

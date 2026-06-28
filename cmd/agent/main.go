@@ -78,12 +78,36 @@ func main() {
 	defer ticker.Stop()
 
 	report := func() {
-		cpu, _ := collector.CollectCPU()
-		mem, _ := collector.CollectMemory()
-		diskStat, _ := collector.CollectDisk()
-		netStat, _ := netCollector.Collect()
-		load, _ := collector.CollectLoad()
-		uptime, _ := collector.CollectUptime()
+		cpu, err := collector.CollectCPU()
+		if err != nil {
+			log.Printf("collect cpu: %v", err)
+			return
+		}
+		mem, err := collector.CollectMemory()
+		if err != nil {
+			log.Printf("collect memory: %v", err)
+			return
+		}
+		diskStat, err := collector.CollectDisk()
+		if err != nil {
+			log.Printf("collect disk: %v", err)
+			return
+		}
+		netStat, err := netCollector.Collect()
+		if err != nil {
+			log.Printf("collect network: %v", err)
+			return
+		}
+		load, err := collector.CollectLoad()
+		if err != nil {
+			log.Printf("collect load: %v", err)
+			return
+		}
+		uptime, err := collector.CollectUptime()
+		if err != nil {
+			log.Printf("collect uptime: %v", err)
+			return
+		}
 		tcpping := collector.TCPing(cfg.TCPing)
 
 		data := &agentpkg.ReportData{
