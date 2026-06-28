@@ -30,11 +30,6 @@
 
 ### Docker 部署（推荐）
 
-#### 前提条件
-
-- 安装了 Docker Engine 和 Docker Compose 的 Linux 服务器
-- 一个用于认证的 Token（任意字符串，Agent 连接时需要用到）
-
 #### 第 1 步：创建目录和配置文件
 
 ```bash
@@ -59,10 +54,6 @@ EOF
 
 echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 ```
-
-> 记下生成的 Token，安装 Agent 时需要用到。想自定义 Token 直接替换 `echo "NEEDLE_TOKEN=你的token" > .env`。
->
-> 如果与 Cloudflare Tunnel 同机部署，需要在 `restart` 下添加 `networks:` 配置（参见 [Cloudflare Tunnel](#cloudflare-tunnel) 章节）。
 
 #### 第 2 步：启动容器
 
