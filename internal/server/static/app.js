@@ -446,7 +446,7 @@ function renderSparkline(elemId, data, color, isPercent) {
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
   const chart = echarts.init(el);
   chart.setOption({
-    grid: { left: 0, right: 4, top: 2, bottom: 18 },
+    grid: { left: 4, right: 4, top: 2, bottom: 18 },
     xAxis: {
       type: 'time', show: true,
       axisLine: { show: false },
