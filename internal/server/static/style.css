@@ -277,6 +277,7 @@ header {
   display: flex; align-items: center; gap: 4px;
   padding: 2px 0;
 }
+.card-traffic .traffic-label { font-size: 11px; color: hsl(var(--muted-foreground)); flex: 1; }
 .card-traffic .traffic-up { color: hsl(var(--primary)); }
 .card-traffic .traffic-down { color: hsl(var(--success)); }
 .card-traffic .traffic-divider { color: hsl(var(--muted-foreground) / 0.4); }
@@ -329,6 +330,7 @@ header {
 .list-bar-label { font-size: 10px; color: hsl(var(--muted-foreground) / 0.6); width: 28px; text-align: right; flex: 0 0 auto; }
 .list-bar-val { font-family: var(--font-mono); font-size: 11px; width: 42px; text-align: right; }
 .list-traffic { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--primary)); white-space: nowrap; width: 120px; text-align: right; display: flex; gap: 2px; justify-content: flex-end; }
+.list-traffic .traffic-label { font-size: 11px; color: hsl(var(--muted-foreground)); }
 .list-traffic .traffic-up { color: hsl(var(--primary)); }
 .list-traffic .traffic-down { color: hsl(var(--success)); }
 .list-traffic .traffic-divider { color: hsl(var(--muted-foreground) / 0.3); }

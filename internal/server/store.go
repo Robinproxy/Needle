@@ -90,28 +90,34 @@ func (s *Store) UpsertAgent(hostname, token, region string) (int64, error) {
 	return id, nil
 }
 
-func (s *Store) InsertMetric(m *MetricRow) error {
+func (s *Store) InsertMetric(m *MetricRow, createdAt int64) error {
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO metrics(agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
-			total_sent, total_recv, load1, load5, load15, uptime)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			total_sent, total_recv, load1, load5, load15, uptime, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.AgentID, m.CPUUsage, m.MemoryTotal, m.MemoryUsed,
 		m.DiskTotal, m.DiskUsed, m.NetworkUp, m.NetworkDown,
-		m.TotalSent, m.TotalRecv, m.Load1, m.Load5, m.Load15, m.Uptime,
+		m.TotalSent, m.TotalRecv, m.Load1, m.Load5, m.Load15, m.Uptime, createdAt,
 	)
 	return err
 }
 
-func (s *Store) InsertTCPing(t *TCPingRow) error {
+func (s *Store) InsertTCPing(t *TCPingRow, createdAt int64) error {
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
 	suc := 0
 	if t.Success {
 		suc = 1
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO tcpping_results(agent_id, name, target, latency_ms, success)
-		 VALUES(?, ?, ?, ?, ?)`,
-		t.AgentID, t.Name, t.Target, t.LatencyMs, suc,
+		`INSERT INTO tcpping_results(agent_id, name, target, latency_ms, success, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
+		t.AgentID, t.Name, t.Target, t.LatencyMs, suc, createdAt,
 	)
 	return err
 }

@@ -10,16 +10,17 @@ import (
 )
 
 type reportPayload struct {
-	Token    string       `json:"token"`
-	Hostname string       `json:"hostname"`
-	Region   string       `json:"region"`
-	CPU      *cpuStats    `json:"cpu"`
-	Memory   *memStats    `json:"memory"`
-	Disk     *diskStats   `json:"disk"`
-	Network  *netStats    `json:"network"`
-	Load     *loadStats   `json:"load"`
-	Uptime   uint64       `json:"uptime"`
-	TCPing   []tcpingRec  `json:"tcpping"`
+	Token     string       `json:"token"`
+	Hostname  string       `json:"hostname"`
+	Region    string       `json:"region"`
+	CPU       *cpuStats    `json:"cpu"`
+	Memory    *memStats    `json:"memory"`
+	Disk      *diskStats   `json:"disk"`
+	Network   *netStats    `json:"network"`
+	Load      *loadStats   `json:"load"`
+	Uptime    uint64       `json:"uptime"`
+	CreatedAt int64        `json:"created_at"`
+	TCPing    []tcpingRec  `json:"tcpping"`
 }
 
 type cpuStats struct {
@@ -85,24 +86,21 @@ func randRange(min, max float64) float64 {
 	return min + rand.Float64()*(max-min)
 }
 
-func makeReport(hostname, region string, daysAgo int) reportPayload {
-	now := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
+func makeReport(hostname, region string, daysAgo, hour int, totalSent, totalRecv int64) reportPayload {
+	now := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour).Add(-time.Duration(23-hour) * time.Hour)
 	load := randRange(0.1, 4.0)
 
-	// simulate cumulative traffic counters that grow over time
-	baseSent := int64(500 * (1 << 30))  // start at 500 GB
-	baseRecv := int64(800 * (1 << 30))  // start at 800 GB
-	growth := float64(8-daysAgo) * (randRange(10, 40) * float64(1<<30)) // 0-70 GB per day
 	r := reportPayload{
-		Token:    "test123",
-		Hostname: hostname,
-		Region:   region,
-		CPU:      &cpuStats{Percent: randRange(5, 85)},
-		Memory:   &memStats{Total: 8 << 30, Used: uint64(randRange(1, 6) * (1 << 30))},
-		Disk:     &diskStats{Total: 100 << 30, Used: uint64(randRange(10, 60) * (1 << 30))},
-		Network:  &netStats{Up: int64(randRange(10, 500) * 1000), Down: int64(randRange(50, 900) * 1000), TotalSent: baseSent + int64(growth), TotalRecv: baseRecv + int64(growth*1.5)},
-		Load:     &loadStats{Load1: load, Load5: load * 0.7, Load15: load * 0.5},
-		Uptime:   uint64(rand.Intn(30)) * 86400,
+		Token:     "test123",
+		Hostname:  hostname,
+		Region:    region,
+		CreatedAt: now.Unix(),
+		CPU:       &cpuStats{Percent: randRange(5, 85)},
+		Memory:    &memStats{Total: 8 << 30, Used: uint64(randRange(1, 6) * (1 << 30))},
+		Disk:      &diskStats{Total: 100 << 30, Used: uint64(randRange(10, 60) * (1 << 30))},
+		Network:   &netStats{Up: int64(randRange(10, 500) * 1000), Down: int64(randRange(50, 900) * 1000), TotalSent: totalSent, TotalRecv: totalRecv},
+		Load:      &loadStats{Load1: load, Load5: load * 0.7, Load15: load * 0.5},
+		Uptime:    uint64(rand.Intn(30)) * 86400,
 	}
 
 	for _, t := range tcppingTargets {
@@ -123,7 +121,6 @@ func makeReport(hostname, region string, daysAgo int) reportPayload {
 		})
 	}
 
-	_ = now
 	return r
 }
 
@@ -146,10 +143,13 @@ func main() {
 
 	total := 0
 	for _, a := range agents {
+		runningSent := int64(500 * 1 << 30)
+		runningRecv := int64(800 * 1 << 30)
 		for day := 7; day >= 0; day-- {
 			for hour := 0; hour < 24; hour++ {
-				_ = hour
-				p := makeReport(a.hostname, a.region, day)
+				runningSent += int64(randRange(0.1, 0.5) * (1 << 30))
+				runningRecv += int64(randRange(0.15, 0.8) * (1 << 30))
+				p := makeReport(a.hostname, a.region, day, hour, runningSent, runningRecv)
 				if err := sendReport(baseURL, p); err != nil {
 					fmt.Printf("ERROR [%s] day=%d: %v\n", a.hostname, day, err)
 				} else {

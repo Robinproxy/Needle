@@ -236,7 +236,7 @@ function renderCard(a, idx, isActive) {
       + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value" style="color:hsl(var(--success))">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
       + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value" style="color:hsl(var(--warning))">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
     + '</div>'
-    + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-up">\u2191 —</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 —</span></div>'
+    + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-label">TRAFFIC</span><span class="traffic-up">\u2191 —</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 —</span></div>'
     + pingHtml
     + '<div class="card-footer-line"><div class="net"><span>\u2193 ' + downSpeed + '</span><span>\u2191 ' + upSpeed + '</span></div><span>' + (m ? relativeTime(m.created_at * 1000) : '') + '</span></div>'
   + '</div>';
@@ -266,7 +266,7 @@ function renderListRow(a, idx, isActive) {
       + '<div class="list-bar"><span class="list-bar-label">MEM</span><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(memPct) + '</span></div>'
       + '<div class="list-bar"><span class="list-bar-label">DSK</span><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(diskPct) + '</span></div>'
     + '</div>'
-    + '<span class="list-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-up">\u2191 \u2014</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 \u2014</span></span>'
+    + '<span class="list-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-label">TRAFFIC</span><span class="traffic-up">\u2191 \u2014</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 \u2014</span></span>'
     + '<span class="list-net">\u2193' + downSpeed + ' \u2191' + upSpeed + '</span>'
     + '<span class="list-uptime">' + uptime + '</span>'
     + '<span class="list-time">' + (m ? relativeTime(m.created_at * 1000) : '') + '</span>'
@@ -343,7 +343,7 @@ function updateTrafficDisplay(id, data) {
   const recvStr = formatBytes(data.recv);
   const el = document.querySelector('[data-traffic-id="' + id + '"]');
   if (el) {
-    el.innerHTML = '<span class="traffic-up">\u2191 ' + sentStr + '</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 ' + recvStr + '</span>';
+    el.innerHTML = '<span class="traffic-label">TRAFFIC</span><span class="traffic-up">\u2191 ' + sentStr + '</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 ' + recvStr + '</span>';
   }
 }
 

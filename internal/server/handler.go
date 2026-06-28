@@ -132,6 +132,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Load15 float64 `json:"load15"`
 		} `json:"load"`
 		Uptime uint64 `json:"uptime"`
+		CreatedAt *int64 `json:"created_at"`
 		TCPing []struct {
 			Name      string  `json:"name"`
 			Target    string  `json:"target"`
@@ -164,6 +165,11 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+
+	var createdAt int64
+	if req.CreatedAt != nil {
+		createdAt = *req.CreatedAt
 	}
 
 	if req.CPU != nil {
@@ -205,7 +211,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Load5:       load5,
 			Load15:      load15,
 			Uptime:      int64(req.Uptime),
-		})
+		}, createdAt)
 	}
 
 	for _, t := range req.TCPing {
@@ -215,7 +221,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Target:    t.Target,
 			LatencyMs: t.LatencyMs,
 			Success:   t.Success,
-		})
+		}, createdAt)
 	}
 
 	w.WriteHeader(http.StatusOK)
