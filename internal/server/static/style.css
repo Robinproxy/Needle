@@ -181,25 +181,25 @@ header {
 }
 .card {
   background: hsl(var(--card));
-  border: 1px solid hsl(40 4% 42%);
+  border: 1px solid hsl(var(--border) / 0.7);
   border-radius: var(--radius);
   padding: 16px;
   cursor: pointer;
   transition: all 0.15s;
   display: flex; flex-direction: column; gap: 10px;
-  box-shadow: 0 2px 6px hsl(0 0% 0% / 0.07);
+  box-shadow: 0 1px 3px hsl(0 0% 0% / 0.05);
 }
 .dark .card {
-  border-color: hsl(40 3% 48%);
-  box-shadow: 0 2px 8px hsl(0 0% 0% / 0.45);
+  border-color: hsl(var(--border) / 0.5);
+  box-shadow: 0 1px 4px hsl(0 0% 0% / 0.3);
 }
 .card:hover {
   border-color: hsl(var(--primary) / 0.4);
-  box-shadow: 0 2px 10px hsl(0 0% 0% / 0.1);
+  box-shadow: 0 1px 6px hsl(0 0% 0% / 0.08);
 }
 .card.active {
   border-color: hsl(var(--primary) / 0.65);
-  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 4px 24px hsl(var(--primary) / 0.12);
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 2px 12px hsl(var(--primary) / 0.1);
 }
 .card.offline { opacity: 0.55; }
 
@@ -339,14 +339,12 @@ header {
 /* INLINE DETAIL */
 .inline-detail {
   grid-column: 1 / -1;
-  background: hsl(var(--background));
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   padding: 20px;
 }
-.dark .inline-detail {
-  background: hsl(40 3% 24%);
-}
+
 .detail-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 16px;
@@ -378,7 +376,7 @@ header {
 }
 .spark-header .label { color: hsl(var(--muted-foreground)); }
 .spark-header .value { font-family: var(--font-mono); font-weight: 500; }
-.spark-chart { height: 150px; }
+.spark-chart { height: 130px; }
 
 /* DETAIL SECTIONS */
 .detail-sections {
@@ -476,7 +474,7 @@ footer {
 }
 .footer-inner {
   display: flex; align-items: center; justify-content: space-between;
-  height: 40px; font-size: 11px; color: hsl(var(--muted-foreground));
+  height: 48px; font-size: 11px; color: hsl(var(--muted-foreground));
 }
 .footer-status { color: hsl(var(--success)); }
 
