@@ -610,7 +610,7 @@ function tcppingToggleLine(id, name) {
 
 function refresh() {
   const wasExpanded = expandedId;
-  trafficCache = {};
+  const scrollY = window.scrollY;
   Promise.all([
     fetch('/api/agents').then(r => r.json()),
     fetch('/api/info').then(r => r.json()),
@@ -627,7 +627,67 @@ function refresh() {
     }
     renderAll();
     updateViewIcon();
+    if (expandedId) updateDetailCharts(expandedId);
+    window.scrollTo(0, scrollY);
   }).catch(err => console.error('refresh:', err));
+}
+
+function updateDetailCharts(id) {
+  fetch('/api/agents/' + id + '/metrics?range=168h').then(r => r.json()).then(metrics => {
+    if (!metrics || !metrics.length) return;
+    const cpuData = metrics.map(m => [m.created_at * 1000, m.cpu_usage]);
+    const memData = metrics.map(m => {
+      const pctVal = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
+      return [m.created_at * 1000, pctVal];
+    });
+    const netInData = metrics.map(m => [m.created_at * 1000, m.network_up]);
+    const netOutData = metrics.map(m => [m.created_at * 1000, m.network_down]);
+
+    document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%' : '—';
+    document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%' : '—';
+    document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s' : '—';
+    document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s' : '—';
+
+    const configs = [
+      ['spark-cpu', cpuData], ['spark-mem', memData],
+      ['spark-netin', netInData], ['spark-netout', netOutData],
+    ];
+    configs.forEach(([elemId, data]) => {
+      const chart = sparkCharts[elemId];
+      if (chart) chart.setOption({ series: [{ data }] });
+    });
+  }).catch(() => {});
+
+  fetch('/api/agents/' + id + '/tcpping?range=168h').then(r => r.json()).then(results => {
+    if (!results || !results.length) return;
+    const names = [...new Set(results.map(r => r.name))];
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4897'];
+    const series = names.map((name, i) => {
+      const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
+      return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: colors[i % colors.length] } };
+    });
+    if (tcppingChart) tcppingChart.setOption({ series });
+
+    const statsHtml = names.map((name, i) => {
+      const targetResults = results.filter(r => r.name === name);
+      const avg = targetResults.reduce((s, r, _, a) => s + (r.success ? r.latency_ms : 0), 0) / targetResults.filter(r => r.success).length || 0;
+      const vals = targetResults.filter(r => r.success).map(r => r.latency_ms);
+      const jitter = vals.length > 1 ? vals.reduce((s, v, idx, a) => idx > 0 ? s + Math.abs(v - a[idx - 1]) : s, 0) / (vals.length - 1) : 0;
+      const losses = targetResults.filter(r => !r.success).length;
+      const lossPct = (losses / targetResults.length * 100);
+      const color = colors[i % colors.length];
+      const displayName = mapCarrier(name);
+      return '<div class="tcpping-stat-row" onclick="tcppingToggleLine(' + id + ',\'' + escapeHtml(name) + '\')" data-name="' + escapeHtml(name) + '">'
+        + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
+        + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
+        + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
+        + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
+        + '<span class="col-stat ' + (lossPct >= 5 ? 'high-loss' : '') + '">' + lossPct.toFixed(1) + '%</span>'
+      + '</div>';
+    }).join('');
+    const rowsEl = document.getElementById('tcpping-rows-' + id);
+    if (rowsEl) rowsEl.innerHTML = statsHtml;
+  }).catch(() => {});
 }
 
 let themeMode = localStorage.getItem('themeMode') || 'light';
@@ -684,5 +744,6 @@ document.addEventListener('keydown', e => {
 
 loadServerInfo();
 refresh();
+setInterval(refresh, 30000);
 
 updateViewIcon();
