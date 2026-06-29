@@ -608,9 +608,8 @@ function tcppingToggleLine(id, name) {
   });
 }
 
-function refresh() {
+function fullRefresh() {
   const wasExpanded = expandedId;
-  const scrollY = window.scrollY;
   Promise.all([
     fetch('/api/agents').then(r => r.json()),
     fetch('/api/info').then(r => r.json()),
@@ -628,8 +627,97 @@ function refresh() {
     renderAll();
     updateViewIcon();
     if (expandedId) updateDetailCharts(expandedId);
-    window.scrollTo(0, scrollY);
-  }).catch(err => console.error('refresh:', err));
+  }).catch(err => console.error('fullRefresh:', err));
+}
+
+function softRefresh() {
+  Promise.all([
+    fetch('/api/agents').then(r => r.json()),
+    fetch('/api/info').then(r => r.json()),
+  ]).then(([data, info]) => {
+    agents = data;
+    agents.forEach(a => {
+      const m = a.latest_metric;
+      a._online = m && (Date.now() - m.created_at * 1000 < 120000);
+    });
+    infoData = info;
+    renderInfoBar();
+
+    data.forEach(a => {
+      const card = document.querySelector('[data-id="' + a.agent.id + '"]');
+      if (!card) return;
+      const m = a.latest_metric;
+      const isOnline = a._online || false;
+
+      card.classList.toggle('offline', !isOnline);
+      const dot = card.querySelector('.status-dot');
+      if (dot) dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
+
+      if (!m) return;
+      const cpu = m.cpu_usage;
+      const memPct = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
+      const diskPct = m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : 0;
+
+      const isCard = card.classList.contains('card');
+      if (isCard) {
+        const metrics = card.querySelectorAll('.metric');
+        if (metrics.length >= 3) {
+          const cpuFill = metrics[0].querySelector('.metric-fill');
+          if (cpuFill) { cpuFill.style.width = cpu.toFixed(0) + '%'; cpuFill.className = 'metric-fill ' + metricColor(cpu); }
+          const cpuVal = metrics[0].querySelector('.value');
+          if (cpuVal) cpuVal.textContent = pct(cpu);
+
+          const memFill = metrics[1].querySelector('.metric-fill');
+          if (memFill) { memFill.style.width = memPct.toFixed(0) + '%'; memFill.className = 'metric-fill ' + metricColor(memPct); }
+          const memVal = metrics[1].querySelector('.value');
+          if (memVal) memVal.textContent = pct(memPct);
+          const memSub = metrics[1].querySelector('.metric-sub');
+          if (memSub) memSub.textContent = formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total);
+
+          const diskFill = metrics[2].querySelector('.metric-fill');
+          if (diskFill) { diskFill.style.width = diskPct.toFixed(0) + '%'; diskFill.className = 'metric-fill ' + metricColor(diskPct); }
+          const diskVal = metrics[2].querySelector('.value');
+          if (diskVal) diskVal.textContent = pct(diskPct);
+          const diskSub = metrics[2].querySelector('.metric-sub');
+          if (diskSub) diskSub.textContent = formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total);
+        }
+
+        const sub = card.querySelector('.card-sub');
+        if (sub) { const u = sub.querySelector('span:first-child'); if (u) u.textContent = formatUptime(m.uptime); }
+
+        const net = card.querySelectorAll('.card-footer-line .net span');
+        if (net.length >= 2) { net[0].textContent = '\u2193 ' + formatSpeed(m.network_down); net[1].textContent = '\u2191 ' + formatSpeed(m.network_up); }
+        const timeEl = card.querySelector('.card-footer-line > span:last-child');
+        if (timeEl) timeEl.textContent = relativeTime(m.created_at * 1000);
+
+        const pingLabel = card.querySelector('.ping-label');
+        const pingLat = card.querySelector('.ping-lat');
+        const pingLoss = card.querySelector('.ping-loss');
+        if (a.latest_tcpping && a.latest_tcpping.length > 0 && pingLabel) {
+          const saved = getCardTcpping(a.agent.id);
+          const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
+          pingLabel.textContent = mapCarrier(p.name);
+          if (pingLat) pingLat.textContent = 'Latency ' + (p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout');
+          if (pingLoss) pingLoss.textContent = 'Loss ' + (p.success ? '0%' : '100%');
+        }
+      } else {
+        const bars = card.querySelectorAll('.list-bar');
+        if (bars.length >= 3) {
+          const upd = (i, v) => { const f = bars[i].querySelector('.metric-fill'); if (f) { f.style.width = v.toFixed(0) + '%'; f.className = 'metric-fill ' + metricColor(v); } const l = bars[i].querySelector('.list-bar-val'); if (l) l.textContent = pct(v); };
+          upd(0, cpu); upd(1, memPct); upd(2, diskPct);
+        }
+        const netEl = card.querySelector('.list-net');
+        if (netEl) netEl.textContent = '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up);
+        const uptimeEl = card.querySelector('.list-uptime');
+        if (uptimeEl) uptimeEl.textContent = formatUptime(m.uptime);
+        const timeEl = card.querySelector('.list-time');
+        if (timeEl) timeEl.textContent = relativeTime(m.created_at * 1000);
+      }
+    });
+
+    refreshTraffic();
+    if (expandedId) updateDetailCharts(expandedId);
+  }).catch(err => console.error('softRefresh:', err));
 }
 
 function updateDetailCharts(id) {
@@ -743,7 +831,7 @@ document.addEventListener('keydown', e => {
 });
 
 loadServerInfo();
-refresh();
-setInterval(refresh, 30000);
+fullRefresh();
+setInterval(softRefresh, 30000);
 
 updateViewIcon();
