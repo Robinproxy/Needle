@@ -2,6 +2,8 @@ hostname: ""     # optional, defaults to os.Hostname()
 server: http://127.0.0.1:8008
 token: your-server-token
 region: SG
+billing_period: "1m"        # 1m/3m/6m/12m, optional, for dashboard countdown and traffic reset
+expires_at: "2026-08-15"    # YYYY-MM-DD, optional, next renewal date
 interval: 30
 insecure: false
 tcpping:

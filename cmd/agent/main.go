@@ -15,13 +15,15 @@ import (
 )
 
 type Config struct {
-	Hostname string                    `yaml:"hostname"`
-	Server   string                    `yaml:"server"`
-	Token    string                    `yaml:"token"`
-	Region   string                    `yaml:"region"`
-	Interval int                       `yaml:"interval"`
-	Insecure bool                      `yaml:"insecure"`
-	TCPing   []collector.TCPingTarget  `yaml:"tcpping"`
+	Hostname      string                    `yaml:"hostname"`
+	Server        string                    `yaml:"server"`
+	Token         string                    `yaml:"token"`
+	Region        string                    `yaml:"region"`
+	ExpiresAt     string                    `yaml:"expires_at"`
+	BillingPeriod string                    `yaml:"billing_period"`
+	Interval      int                       `yaml:"interval"`
+	Insecure      bool                      `yaml:"insecure"`
+	TCPing        []collector.TCPingTarget  `yaml:"tcpping"`
 }
 
 func main() {
@@ -110,9 +112,20 @@ func main() {
 		}
 		tcpping := collector.TCPing(cfg.TCPing)
 
+		var expiresAtUnix *int64
+		if cfg.ExpiresAt != "" {
+			t, err := time.Parse("2006-01-02", cfg.ExpiresAt)
+			if err == nil {
+				unix := t.Unix()
+				expiresAtUnix = &unix
+			}
+		}
+
 		data := &agentpkg.ReportData{
-			Hostname: hostname,
-			Region:   cfg.Region,
+			Hostname:      hostname,
+			Region:        cfg.Region,
+			ExpiresAt:     expiresAtUnix,
+			BillingPeriod: cfg.BillingPeriod,
 			CPU:      cpu,
 			Memory:   mem,
 			Disk:     diskStat,

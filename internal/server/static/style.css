@@ -211,17 +211,13 @@ header {
 .status-dot.offline { background: hsl(var(--destructive)); }
 .card-hostname { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.01em; }
 .card-session { font-size: 22px; line-height: 1; flex: 0 0 auto; align-self: flex-start; }
-.card-reset-day { cursor: pointer; transition: opacity 0.15s; }
-.card-reset-day:hover { opacity: 0.7; }
-.reset-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  min-width: 22px; height: 18px; padding: 0 4px;
-  border-radius: 4px;
-  background: hsl(var(--muted) / 0.5);
-  color: hsl(var(--muted-foreground) / 0.7);
-  line-height: 1;
+.expiry-days {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: help;
 }
+.expiry-days.expiry-urgent { color: hsl(var(--warning)); }
 
 .card-sub {
   font-family: var(--font-mono);

@@ -85,6 +85,31 @@ read -rp "  Target 5 address [${T9}]: " V < /dev/tty; T9="${V:-$T9}"
 read -rp "  Target 6 name [${N11}]: " V < /dev/tty; N11="${V:-$N11}"
 read -rp "  Target 6 address [${T11}]: " V < /dev/tty; T11="${V:-$T11}"
 
+# VPS billing setup
+echo
+echo "VPS billing setup (for dashboard expiry countdown and traffic reset):"
+echo "  1) Monthly (1m)"
+echo "  2) Quarterly (3m)"
+echo "  3) Semi-annual (6m)"
+echo "  4) Annual (12m)"
+echo "  0) Skip"
+read -rp "Select billing period [0]: " PERIOD_CHOICE < /dev/tty
+
+EXPIRES_AT=""
+BILLING_PERIOD=""
+case "$PERIOD_CHOICE" in
+  1) BILLING_PERIOD="1m";  DEFAULT_EXPIRY=$(date -d "+1 month" +%Y-%m-%d 2>/dev/null || date -v+1m +%Y-%m-%d) ;;
+  2) BILLING_PERIOD="3m";  DEFAULT_EXPIRY=$(date -d "+3 months" +%Y-%m-%d 2>/dev/null || date -v+3m +%Y-%m-%d) ;;
+  3) BILLING_PERIOD="6m";  DEFAULT_EXPIRY=$(date -d "+6 months" +%Y-%m-%d 2>/dev/null || date -v+6m +%Y-%m-%d) ;;
+  4) BILLING_PERIOD="12m"; DEFAULT_EXPIRY=$(date -d "+1 year" +%Y-%m-%d 2>/dev/null || date -v+1y +%Y-%m-%d) ;;
+  *) BILLING_PERIOD="" ;;
+esac
+
+if [ -n "$BILLING_PERIOD" ]; then
+    read -rp "Next renewal date [${DEFAULT_EXPIRY}]: " EXPIRES_AT < /dev/tty
+    EXPIRES_AT="${EXPIRES_AT:-$DEFAULT_EXPIRY}"
+fi
+
 # Generate agent.yaml
 AGENT_YAML="$INSTALL_DIR/agent.yaml"
 cat > "$AGENT_YAML" <<YAML
@@ -92,6 +117,8 @@ hostname: "${HOSTNAME}"
 server: ${SERVER_URL}
 token: ${TOKEN}
 region: ${REGION}
+billing_period: "${BILLING_PERIOD}"
+expires_at: "${EXPIRES_AT}"
 interval: ${INTERVAL}
 insecure: false
 tcpping:

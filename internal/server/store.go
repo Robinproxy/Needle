@@ -33,6 +33,8 @@ func (s *Store) migrate() error {
 			hostname TEXT UNIQUE NOT NULL,
 			token TEXT NOT NULL,
 			region TEXT DEFAULT '',
+			expires_at INTEGER,
+			billing_period TEXT DEFAULT '',
 			created_at INTEGER DEFAULT (strftime('%s','now'))
 		)`,
 		`CREATE TABLE IF NOT EXISTS metrics (
@@ -71,14 +73,21 @@ func (s *Store) migrate() error {
 	// migrate cumulative traffic columns (added in v0.3)
 	s.db.Exec("ALTER TABLE metrics ADD COLUMN total_sent INTEGER DEFAULT 0")
 	s.db.Exec("ALTER TABLE metrics ADD COLUMN total_recv INTEGER DEFAULT 0")
+	// migrate expires_at and billing_period (added in v0.3.5)
+	s.db.Exec("ALTER TABLE agents ADD COLUMN expires_at INTEGER")
+	s.db.Exec("ALTER TABLE agents ADD COLUMN billing_period TEXT DEFAULT ''")
 	return nil
 }
 
-func (s *Store) UpsertAgent(hostname, token, region string) (int64, error) {
+func (s *Store) UpsertAgent(hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
 	_, err := s.db.Exec(
-		`INSERT INTO agents(hostname, token, region) VALUES(?, ?, ?)
-		 ON CONFLICT(hostname) DO UPDATE SET token = excluded.token, region = excluded.region`,
-		hostname, token, region,
+		`INSERT INTO agents(hostname, token, region, expires_at, billing_period) VALUES(?, ?, ?, ?, ?)
+		 ON CONFLICT(hostname) DO UPDATE SET
+		   token = excluded.token,
+		   region = excluded.region,
+		   expires_at = excluded.expires_at,
+		   billing_period = excluded.billing_period`,
+		hostname, token, region, expiresAt, billingPeriod,
 	)
 	if err != nil {
 		return 0, err
@@ -123,7 +132,7 @@ func (s *Store) InsertTCPing(t *TCPingRow, createdAt int64) error {
 }
 
 func (s *Store) GetAgents() ([]AgentRow, error) {
-	rows, err := s.db.Query("SELECT id, hostname, created_at, region FROM agents ORDER BY id")
+	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period FROM agents ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +141,7 @@ func (s *Store) GetAgents() ([]AgentRow, error) {
 	var agents []AgentRow
 	for rows.Next() {
 		var a AgentRow
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region); err != nil {
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -241,8 +250,17 @@ func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
 	return results, nil
 }
 
-func (s *Store) GetTraffic(agentID int64, resetDay int) (sent, recv int64, err error) {
-	boundary := resetBoundary(resetDay)
+func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
+	var expiresAt sql.NullInt64
+	var billingPeriod string
+	err = s.db.QueryRow(
+		"SELECT expires_at, billing_period FROM agents WHERE id = ?", agentID,
+	).Scan(&expiresAt, &billingPeriod)
+	if err != nil || !expiresAt.Valid || billingPeriod == "" {
+		return 0, 0, nil
+	}
+
+	boundary := billingBoundary(expiresAt.Int64, billingPeriod)
 	boundaryUnix := boundary.Unix()
 
 	var baseSent, baseRecv sql.NullInt64
@@ -277,26 +295,49 @@ func (s *Store) GetTraffic(agentID int64, resetDay int) (sent, recv int64, err e
 	return sent, recv, nil
 }
 
-func resetBoundary(day int) time.Time {
+func billingBoundary(expiresAtUnix int64, period string) time.Time {
+	anchor := time.Unix(expiresAtUnix, 0)
 	now := time.Now()
-	y, m, _ := now.Date()
-	loc := now.Location()
-
-	boundary := time.Date(y, m, day, 0, 0, 0, 0, loc)
-	if boundary.Month() != m {
-		boundary = time.Date(y, m+1, 0, 0, 0, 0, 0, loc)
+	addMonths := 0
+	switch period {
+	case "1m": addMonths = 1
+	case "3m": addMonths = 3
+	case "6m": addMonths = 6
+	case "12m": addMonths = 12
 	}
-
-	if now.Before(boundary) {
-		boundary = boundary.AddDate(0, -1, 0)
-		y2, m2, _ := boundary.Date()
-		boundary = time.Date(y2, m2, day, 0, 0, 0, 0, loc)
-		if boundary.Month() != m2 {
-			boundary = time.Date(y2, m2+1, 0, 0, 0, 0, 0, loc)
+	if addMonths == 0 {
+		return now
+	}
+	boundary := anchor
+	for {
+		next := boundary.AddDate(0, addMonths, 0)
+		if next.After(now) {
+			break
 		}
+		boundary = next
 	}
-
 	return boundary
+}
+
+func calcNextReset(expiresAtUnix int64, period string) (int, string) {
+	anchor := time.Unix(expiresAtUnix, 0)
+	now := time.Now()
+	addMonths := 0
+	switch period {
+	case "1m": addMonths = 1
+	case "3m": addMonths = 3
+	case "6m": addMonths = 6
+	case "12m": addMonths = 12
+	}
+	if addMonths == 0 {
+		return 0, ""
+	}
+	nextReset := anchor
+	for !nextReset.After(now) {
+		nextReset = nextReset.AddDate(0, addMonths, 0)
+	}
+	days := int(nextReset.Sub(now).Hours()/24) + 1
+	return days, nextReset.Format("2006-01-02")
 }
 
 func (s *Store) GetStats() (*ServerStats, error) {

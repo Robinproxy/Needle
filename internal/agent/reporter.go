@@ -14,8 +14,10 @@ import (
 )
 
 type ReportData struct {
-	Hostname string                   `json:"hostname"`
-	Region   string                   `json:"region"`
+	Hostname      string                   `json:"hostname"`
+	Region        string                   `json:"region"`
+	ExpiresAt     *int64                   `json:"expires_at,omitempty"`
+	BillingPeriod string                   `json:"billing_period,omitempty"`
 	CPU       *collector.CPUStats     `json:"cpu"`
 	Memory    *collector.MemoryStats  `json:"memory"`
 	Disk      *collector.DiskStats    `json:"disk"`

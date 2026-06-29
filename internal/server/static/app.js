@@ -217,7 +217,8 @@ function renderCard(a, idx, isActive) {
   const downSpeed = m ? formatSpeed(m.network_down) : '0';
   const uptime = m ? formatUptime(m.uptime) : '-';
   const sess = String(idx + 1).padStart(2, '0');
-  const resetDay = getCardResetDay(a.agent.id);
+  const expiryDays = a.expiry_days || 0;
+  const expiryDate = a.expiry_date || '';
 
   // TCPing card line — selected target or first
   let pingHtml = '';
@@ -229,13 +230,19 @@ function renderCard(a, idx, isActive) {
     pingHtml = '<div class="card-ping"><span class="ping-dot"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Latency ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
   }
 
+  let expiryHtml = '';
+  if (expiryDays > 0) {
+    const ec = expiryDays < 7 ? ' expiry-urgent' : '';
+    expiryHtml = '<span class="expiry-days' + ec + '" title="\u5230\u671f: ' + expiryDate + '">' + expiryDays + '</span>';
+  }
+
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<div class="card-top">'
       + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
       + '<span class="card-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
       + '<span class="card-session">' + flagEmoji(a.agent.region) + '</span>'
     + '</div>'
-    + '<div class="card-sub"><span>' + uptime + '</span><span class="card-reset-day" onclick="event.stopPropagation();cycleCardResetDay(' + a.agent.id + ')" title="Reset day"><span class="reset-num">' + String(resetDay).padStart(2, '0') + '</span></span></div>'
+    + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
     + '<div class="card-metrics">'
       + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value" style="color:hsl(var(--primary))">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + cpu.toFixed(0) + '%"></div></div></div>'
       + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value" style="color:hsl(var(--success))">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
@@ -315,28 +322,10 @@ function setCardTcpping(id, name) {
   localStorage.setItem('cardTcpping_' + id, name);
 }
 
-function getCardResetDay(id) {
-  return parseInt(localStorage.getItem('cardResetDay_' + id)) || 1;
-}
 
-function setCardResetDay(id, day) {
-  localStorage.setItem('cardResetDay_' + id, String(day));
-}
-
-function cycleCardResetDay(id) {
-  const current = getCardResetDay(id);
-  const input = prompt('Reset day (1-31):', String(current));
-  if (!input) return;
-  const day = parseInt(input);
-  if (isNaN(day) || day < 1 || day > 31) return;
-  setCardResetDay(id, day);
-  delete trafficCache[id];
-  renderAll();
-}
 
 function fetchTrafficForCard(id) {
-  const resetDay = getCardResetDay(id);
-  fetch('/api/agents/' + id + '/traffic?reset_day=' + resetDay)
+  fetch('/api/agents/' + id + '/traffic')
     .then(r => r.json())
     .then(data => {
       trafficCache[id] = data;
@@ -723,6 +712,12 @@ function softRefresh() {
 
         const sub = card.querySelector('.card-sub');
         if (sub) { const u = sub.querySelector('span:first-child'); if (u) u.textContent = formatUptime(m.uptime); }
+        const expiryEl = sub ? sub.querySelector('.expiry-days') : null;
+        if (a.expiry_days > 0 && expiryEl) {
+          expiryEl.textContent = a.expiry_days;
+          expiryEl.className = 'expiry-days' + (a.expiry_days < 7 ? ' expiry-urgent' : '');
+          expiryEl.title = '\u5230\u671f: ' + (a.expiry_date || '');
+        }
 
         const net = card.querySelectorAll('.card-footer-line .net span');
         if (net.length >= 2) { net[0].textContent = '\u2193 ' + formatSpeed(m.network_down); net[1].textContent = '\u2191 ' + formatSpeed(m.network_up); }

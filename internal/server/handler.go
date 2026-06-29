@@ -124,9 +124,11 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Token    string `json:"token"`
-		Hostname string `json:"hostname"`
-		Region   string `json:"region"`
+		Token         string `json:"token"`
+		Hostname      string `json:"hostname"`
+		Region        string `json:"region"`
+		ExpiresAt     *int64 `json:"expires_at"`
+		BillingPeriod string `json:"billing_period"`
 		CPU      *struct {
 			Percent float64 `json:"percent"`
 		} `json:"cpu"`
@@ -179,7 +181,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, err := h.store.UpsertAgent(req.Hostname, req.Token, req.Region)
+	agentID, err := h.store.UpsertAgent(req.Hostname, req.Token, req.Region, req.ExpiresAt, req.BillingPeriod)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -280,13 +282,19 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		Agent        AgentRow     `json:"agent"`
 		Metric       *MetricRow   `json:"latest_metric,omitempty"`
 		LatestTCPing []TCPingRow  `json:"latest_tcpping,omitempty"`
+		ExpiryDays   int          `json:"expiry_days"`
+		ExpiryDate   string       `json:"expiry_date"`
 	}
 
 	result := make([]agentWithMetric, 0, len(agents))
 	for _, a := range agents {
 		m, _ := h.store.GetLatestMetric(a.ID)
 		t, _ := h.store.GetLatestTCPing(a.ID)
-		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t})
+		expiryDays, expiryDate := 0, ""
+		if a.ExpiresAt != nil && a.BillingPeriod != "" {
+			expiryDays, expiryDate = calcNextReset(*a.ExpiresAt, a.BillingPeriod)
+		}
+		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -353,13 +361,7 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(results)
 
 	case "traffic":
-		resetDay := 1
-		if dStr := r.URL.Query().Get("reset_day"); dStr != "" {
-			if d, err := strconv.Atoi(dStr); err == nil && d >= 1 && d <= 31 {
-				resetDay = d
-			}
-		}
-		sent, recv, err := h.store.GetTraffic(agentID, resetDay)
+		sent, recv, err := h.store.GetTraffic(agentID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

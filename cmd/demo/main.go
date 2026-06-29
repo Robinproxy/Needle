@@ -10,9 +10,11 @@ import (
 )
 
 type reportPayload struct {
-	Token     string       `json:"token"`
-	Hostname  string       `json:"hostname"`
-	Region    string       `json:"region"`
+	Token         string       `json:"token"`
+	Hostname      string       `json:"hostname"`
+	Region        string       `json:"region"`
+	ExpiresAt     int64        `json:"expires_at"`
+	BillingPeriod string       `json:"billing_period"`
 	CPU       *cpuStats    `json:"cpu"`
 	Memory    *memStats    `json:"memory"`
 	Disk      *diskStats   `json:"disk"`
@@ -91,9 +93,11 @@ func makeReport(hostname, region string, daysAgo, hour int, totalSent, totalRecv
 	load := randRange(0.1, 4.0)
 
 	r := reportPayload{
-		Token:     "test123",
-		Hostname:  hostname,
-		Region:    region,
+		Token:         "test123",
+		Hostname:      hostname,
+		Region:        region,
+		ExpiresAt:     time.Now().AddDate(0, 3, 0).Unix(),
+		BillingPeriod: "3m",
 		CreatedAt: now.Unix(),
 		CPU:       &cpuStats{Percent: randRange(5, 85)},
 		Memory:    &memStats{Total: 8 << 30, Used: uint64(randRange(1, 6) * (1 << 30))},
