@@ -113,18 +113,17 @@ header {
 .brand-icon .brand-spark { fill: hsl(var(--primary)); }
 .brand-text h1 { font-family: var(--font-sans); font-size: 16px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.2; }
 .brand-text p { font-size: 11px; color: hsl(var(--muted-foreground)); line-height: 1; margin-top: 1px; }
-.header-actions { display: flex; align-items: center; gap: 6px; }
-
+.header-actions { display: flex; align-items: center; gap: 4px; }
 
 .theme-btn-group {
   display: flex; gap: 2px;
-  background: hsl(var(--muted) / 0.5);
+  background: hsl(var(--muted) / 0.3);
   border-radius: calc(var(--radius) - 2px);
   padding: 2px;
 }
 .theme-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px;
+  width: 22px; height: 22px;
   border: none; border-radius: calc(var(--radius) - 4px);
   background: transparent; color: hsl(var(--muted-foreground) / 0.5);
   cursor: pointer; transition: all 0.15s;
