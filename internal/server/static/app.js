@@ -123,14 +123,17 @@ function filterAndSort(list) {
   return arr;
 }
 
-function toggleCardFormat() {
-  cardFormat = cardFormat === 'card' ? 'list' : 'card';
-  localStorage.setItem('cardFormat', cardFormat);
+function switchCardFormat(mode) {
+  cardFormat = mode;
+  localStorage.setItem('cardFormat', mode);
   renderAll();
   if (expandedId) {
     const agent = agents.find(a => a.agent.id === expandedId);
     if (!agent) expandedId = null;
   }
+  document.querySelectorAll('#view-group .theme-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === mode);
+  });
 }
 
 function renderAll() {
@@ -391,8 +394,10 @@ function renderDetailContent(id) {
           + '<h3>TCP Ping</h3>'
         + '</div>'
         + '<div class="tcpping-controls">'
-          + '<button class="btn btn-xs btn-soft" onclick="tcppingSelectAll(\'' + id + '\')">\u2713 All</button>'
-          + '<button class="btn btn-xs btn-ghost" onclick="tcppingSelectNone(\'' + id + '\')">Hide All</button>'
+          + '<div class="theme-btn-group">'
+            + '<button class="theme-btn active" onclick="tcppingSelectAll(\'' + id + '\')">Show</button>'
+            + '<button class="theme-btn" onclick="tcppingSelectNone(\'' + id + '\')">Hide</button>'
+          + '</div>'
         + '</div>'
       + '</div>'
       + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div></div>'
@@ -600,6 +605,10 @@ function applyTcppingSelections(id, names) {
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
     r.classList.toggle('hidden', selected[r.dataset.name] === false);
   });
+  const allHidden = names.every(n => selected[n] === false);
+  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === (allHidden ? 1 : 0));
+  });
 }
 
 function tcppingSelectAll(id) {
@@ -609,6 +618,9 @@ function tcppingSelectAll(id) {
   tcppingChart.setOption({ legend: { selected } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => r.classList.remove('hidden'));
   saveTcppingSelections(id);
+  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === 0);
+  });
 }
 
 function tcppingSelectNone(id) {
@@ -618,6 +630,9 @@ function tcppingSelectNone(id) {
   tcppingChart.setOption({ legend: { selected } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => r.classList.add('hidden'));
   saveTcppingSelections(id);
+  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === 1);
+  });
 }
 
 function tcppingToggleLine(id, name) {
@@ -649,7 +664,6 @@ function fullRefresh() {
       expandedId = null;
     }
     renderAll();
-    updateViewIcon();
     if (expandedId) updateDetailCharts(expandedId);
   }).catch(err => console.error('fullRefresh:', err));
 }
@@ -833,15 +847,6 @@ function highlightThemeBtn() {
     if (themeMode === 'system') applyTheme();
   });
 })();
-
-function updateViewIcon() {
-  const gridIcon = document.getElementById('view-icon-grid');
-  const listIcon = document.getElementById('view-icon-list');
-  if (gridIcon && listIcon) {
-    gridIcon.style.display = cardFormat === 'card' ? 'none' : '';
-    listIcon.style.display = cardFormat === 'card' ? '' : 'none';
-  }
-}
 
 window.addEventListener('resize', () => {
   const prev = gridCols;

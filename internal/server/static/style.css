@@ -115,7 +115,6 @@ header {
 .brand-text p { font-size: 11px; color: hsl(var(--muted-foreground)); line-height: 1; margin-top: 1px; }
 .header-actions { display: flex; align-items: center; gap: 6px; }
 
-.view-toggle { cursor: pointer; }
 
 .theme-btn-group {
   display: flex; gap: 2px;
@@ -422,6 +421,8 @@ header {
 .tcpping-range-btn:last-child { border-radius: 0 4px 4px 0; }
 .tcpping-range-btn.active { background: hsl(var(--primary) / 0.15); color: hsl(var(--primary)); border-color: hsl(var(--primary) / 0.3); }
 .tcpping-controls { display: flex; gap: 4px; }
+.tcpping-controls .theme-btn-group { height: 22px; padding: 1px; border-radius: 3px; }
+.tcpping-controls .theme-btn { width: auto; height: 18px; padding: 0 8px; font-size: 10px; }
 .tcpping-chart-wrap {
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   padding: 12px; margin-bottom: 10px;
@@ -504,7 +505,6 @@ footer {
 }
 @media (max-width: 479px) {
   .brand-text p { display: none; }
-  .header-actions .btn-label { display: none; }
   .list-region { display: none; }
   .list-session { display: none; }
 }
