@@ -260,4 +260,13 @@ tcpping:
 
 ---
 
+# 3. 删除旧记录
+curl -X POST http://127.0.0.1:8008/api/unregister \
+  -H "Content-Type: application/json" \
+  -d '{"hostname":"Legendvps-DE","token":"你的token"}'
+
+# 4. 删除重复的 Legend-DE 记录
+curl -X POST http://127.0.0.1:8008/api/unregister \
+  -H "Content-Type: application/json" \
+  -d '{"hostname":"Legend-DE","token":"你的token"}'
 
