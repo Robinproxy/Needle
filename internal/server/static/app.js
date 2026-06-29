@@ -136,7 +136,7 @@ function switchCardFormat(mode) {
   });
 }
 
-function renderAll() {
+function renderAll(scrollToDetail) {
   const container = document.getElementById('card-grid');
   const empty = document.getElementById('empty-state');
 
@@ -194,11 +194,12 @@ function renderAll() {
     const agent = filtered.find(a => a.agent.id === expandedId);
     if (agent) {
       renderDetailContent(expandedId);
-      // scroll to detail
-      setTimeout(() => {
-        const el = document.getElementById('detail-' + expandedId);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 100);
+      if (scrollToDetail) {
+        setTimeout(() => {
+          const el = document.getElementById('detail-' + expandedId);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 100);
+      }
     }
   }
   refreshTraffic();
@@ -291,7 +292,7 @@ function toggleExpand(id) {
   } else {
     destroyDetailCharts();
     expandedId = id;
-    renderAll();
+    renderAll(true);
   }
 }
 
