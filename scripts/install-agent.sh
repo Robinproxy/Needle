@@ -40,17 +40,29 @@ trap "rm -rf $TMP_DIR" EXIT
 echo "Downloading needle-agent $VERSION ($ARCH)..."
 curl -sL "$DOWNLOAD_URL" | tar xz -C "$TMP_DIR"
 
-# Create directories
+# Read old config before stopping anything
+OLD_HOSTNAME=""
+OLD_TOKEN=""
+OLD_SERVER=""
+if [ -f "$INSTALL_DIR/agent.yaml" ]; then
+    OLD_HOSTNAME=$(grep -oP '^hostname:\s*"\K[^"]+' "$INSTALL_DIR/agent.yaml" 2>/dev/null || grep -oP '^hostname:\s*\K\S+' "$INSTALL_DIR/agent.yaml" 2>/dev/null || true)
+    OLD_TOKEN=$(grep -oP '^token:\s*\K\S+' "$INSTALL_DIR/agent.yaml" 2>/dev/null || true)
+    OLD_SERVER=$(grep -oP '^server:\s*\K\S+' "$INSTALL_DIR/agent.yaml" 2>/dev/null || true)
+fi
+
+# Stop old service and remove old binary
+systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+
 mkdir -p "$BIN_DIR"
+rm -f "$BIN_DIR/needle-agent"
 
 # Install binary
 cp "$TMP_DIR/needle-agent" "$BIN_DIR/"
 chmod +x "$BIN_DIR/needle-agent"
 
 # Interactive config
-DEFAULT_HOSTNAME=$(hostname)
-read -rp "Hostname [${DEFAULT_HOSTNAME}]: " HOSTNAME < /dev/tty
-HOSTNAME="${HOSTNAME:-$DEFAULT_HOSTNAME}"
+read -rp "Hostname (leave empty for auto-detection) []: " HOSTNAME < /dev/tty
+HOSTNAME="${HOSTNAME:-}"
 
 read -rp "Region (ISO country code, e.g. CN/SG/US) [SG]: " REGION < /dev/tty
 REGION="${REGION:-SG}"
@@ -144,6 +156,15 @@ YAML
 
 chmod 600 "$AGENT_YAML"
 
+# Auto-unregister old hostname if it changed
+if [ -n "$OLD_HOSTNAME" ] && [ "$OLD_HOSTNAME" != "$HOSTNAME" ] && [ -n "$OLD_TOKEN" ] && [ -n "$OLD_SERVER" ]; then
+    echo "Hostname changed: '$OLD_HOSTNAME' → '$HOSTNAME'"
+    echo "Unregistering old agent from server..."
+    curl -s -X POST "$OLD_SERVER/api/unregister" \
+        -H "Content-Type: application/json" \
+        -d "{\"hostname\":\"$OLD_HOSTNAME\",\"token\":\"$OLD_TOKEN\"}" >/dev/null 2>&1 || true
+fi
+
 echo "Installing systemd service..."
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
 [Unit]
@@ -168,7 +189,7 @@ echo
 echo "========================================="
 echo " Needle Agent installed!"
 echo " Version:  $VERSION"
-echo " Hostname: $HOSTNAME"
+echo " Hostname: ${HOSTNAME:-auto-detected}"
 echo " Region:   $REGION"
 echo " Server:   $SERVER_URL"
 echo " Config:   $AGENT_YAML"
