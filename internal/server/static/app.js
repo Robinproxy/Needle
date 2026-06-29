@@ -578,6 +578,28 @@ function renderTCPingChart(id, results) {
     + '</div>';
   }).join('');
   document.getElementById('tcpping-rows-' + id).innerHTML = statsHtml;
+  applyTcppingSelections(id, names);
+}
+
+function saveTcppingSelections(id) {
+  if (!tcppingChart) return;
+  const sel = tcppingChart.getOption().legend?.[0]?.selected || {};
+  localStorage.setItem('tcppingSel_' + id, JSON.stringify(sel));
+}
+
+function loadTcppingSelections(id) {
+  try { return JSON.parse(localStorage.getItem('tcppingSel_' + id)); } catch(e) { return null; }
+}
+
+function applyTcppingSelections(id, names) {
+  const saved = loadTcppingSelections(id);
+  if (!saved || !tcppingChart) return;
+  const selected = {};
+  names.forEach(n => { selected[n] = saved[n] !== undefined ? saved[n] : true; });
+  tcppingChart.setOption({ legend: { selected } });
+  document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
+    r.classList.toggle('hidden', selected[r.dataset.name] === false);
+  });
 }
 
 function tcppingSelectAll(id) {
@@ -586,6 +608,7 @@ function tcppingSelectAll(id) {
   tcppingChart.getOption().series.forEach(s => { selected[s.name] = true; });
   tcppingChart.setOption({ legend: { selected } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => r.classList.remove('hidden'));
+  saveTcppingSelections(id);
 }
 
 function tcppingSelectNone(id) {
@@ -594,6 +617,7 @@ function tcppingSelectNone(id) {
   tcppingChart.getOption().series.forEach(s => { selected[s.name] = false; });
   tcppingChart.setOption({ legend: { selected } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => r.classList.add('hidden'));
+  saveTcppingSelections(id);
 }
 
 function tcppingToggleLine(id, name) {
@@ -602,10 +626,10 @@ function tcppingToggleLine(id, name) {
   const sel = option.legend?.[0]?.selected || {};
   sel[name] = !sel[name];
   tcppingChart.setOption({ legend: { selected: { ...sel } } });
-  // Toggle row highlight
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
     if (r.dataset.name === name) r.classList.toggle('hidden');
   });
+  saveTcppingSelections(id);
 }
 
 function fullRefresh() {
@@ -775,6 +799,7 @@ function updateDetailCharts(id) {
     }).join('');
     const rowsEl = document.getElementById('tcpping-rows-' + id);
     if (rowsEl) rowsEl.innerHTML = statsHtml;
+    applyTcppingSelections(id, names);
   }).catch(() => {});
 }
 
