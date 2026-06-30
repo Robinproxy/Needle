@@ -21,6 +21,21 @@ function mapCarrier(name) {
   return name.replace(/^移动/, 'CM').replace(/^联通/, 'CU').replace(/^电信/, 'CT');
 }
 
+function pingLatColor(ms) {
+  if (!ms || ms === Infinity) return 'red';
+  if (ms < 80) return 'green';
+  if (ms < 161) return 'amber';
+  return 'red';
+}
+function pingLossColor(pct) {
+  if (pct === 0) return 'gray';
+  if (pct < 3) return 'amber';
+  return 'red';
+}
+function valCss(c) {
+  const m = { green: 'var(--success)', amber: 'var(--warning)', red: 'var(--destructive)', gray: 'var(--muted-foreground)' };
+  return 'hsl(' + m[c] + ')';
+}
 
 function getGridCols() {
   const w = window.innerWidth;
@@ -230,7 +245,9 @@ function renderCard(a, idx, isActive) {
     const names = [...new Set(a.latest_tcpping.map(t => t.name))];
     const dotIdx = names.indexOf(p.name);
     const dotBg = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
-    pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Lat ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
+    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('red');
+    const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
+    pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat"><span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + latClr + '">' + latStr + '</span></span><span class="ping-loss"><span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lossClr + '">' + lossStr + '</span></span></div>';
   }
 
   let expiryHtml = '';
@@ -255,7 +272,7 @@ function renderCard(a, idx, isActive) {
     + '</div>'
     + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-label">TRAFFIC</span><span class="traffic-up">\u2191 —</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 —</span></div>'
     + pingHtml
-    + '<div class="card-footer-line"><div class="net"><span>\u2193 ' + downSpeed + '</span><span>\u2191 ' + upSpeed + '</span></div><span>' + (m ? relativeTime(m.created_at * 1000) : '') + '</span></div>'
+    + '<div class="card-footer-line"><div class="net"><span class="net-down">\u2193 ' + downSpeed + '</span><span class="net-up">\u2191 ' + upSpeed + '</span></div><span>' + (m ? relativeTime(m.created_at * 1000) : '') + '</span></div>'
   + '</div>';
 }
 
@@ -734,8 +751,10 @@ function softRefresh() {
           expiryEl.title = 'Due ' + (a.expiry_date || '');
         }
 
-        const net = card.querySelectorAll('.card-footer-line .net span');
-        if (net.length >= 2) { net[0].textContent = '\u2193 ' + formatSpeed(m.network_down); net[1].textContent = '\u2191 ' + formatSpeed(m.network_up); }
+        const netDown = card.querySelector('.card-footer-line .net-down');
+        const netUp = card.querySelector('.card-footer-line .net-up');
+        if (netDown) netDown.textContent = '\u2193 ' + formatSpeed(m.network_down);
+        if (netUp) netUp.textContent = '\u2191 ' + formatSpeed(m.network_up);
         const timeEl = card.querySelector('.card-footer-line > span:last-child');
         if (timeEl) timeEl.textContent = relativeTime(m.created_at * 1000);
 
@@ -752,8 +771,16 @@ function softRefresh() {
             const dotIdx = names.indexOf(p.name);
             pingDot.style.background = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
           }
-          if (pingLat) pingLat.textContent = 'Lat ' + (p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout');
-          if (pingLoss) pingLoss.textContent = 'Loss ' + (p.success ? '0%' : '100%');
+          if (pingLat) {
+            const lv = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
+            const lc = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('red');
+            pingLat.innerHTML = '<span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + lc + '">' + lv + '</span>';
+          }
+          if (pingLoss) {
+            const lv = p.success ? '0%' : '100%';
+            const lc = valCss(pingLossColor(p.success ? 0 : 100));
+            pingLoss.innerHTML = '<span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lc + '">' + lv + '</span>';
+          }
         }
       } else {
         const bars = card.querySelectorAll('.list-bar');

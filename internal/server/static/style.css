@@ -271,6 +271,8 @@ header {
   color: hsl(var(--muted-foreground));
 }
 .card-footer-line .net { display: flex; gap: 14px; }
+.card-footer-line .net-down { color: hsl(var(--success)); }
+.card-footer-line .net-up { color: hsl(var(--primary)); }
 
 .card-traffic {
   font-family: var(--font-mono); font-size: 12px; font-weight: 600;
@@ -295,8 +297,10 @@ header {
   flex: 0 0 auto;
 }
 .card-ping .ping-label { color: hsl(var(--foreground)); font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-ping .ping-lat { font-weight: 700; color: hsl(var(--warning)); margin-right: 4px; }
+.card-ping .ping-lat { color: hsl(var(--muted-foreground)); margin-right: 4px; }
 .card-ping .ping-loss { color: hsl(var(--muted-foreground)); }
+.card-ping .ping-tag { color: hsl(var(--muted-foreground)); }
+.card-ping .ping-val { font-weight: 700; }
 
 /* LIST GRID */
 .list-grid {
