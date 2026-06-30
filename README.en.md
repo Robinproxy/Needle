@@ -137,7 +137,7 @@ region: SG                                       # ISO country code, e.g. CN/SG/
 billing_period: "1m"                             # 1m/3m/6m/12m, optional, billing cycle
 expires_at: "2026-08-15"                         # YYYY-MM-DD, optional, expiry date
 interval: 30                                     # Report interval (seconds)
-insecure: false                                  # Disable TLS verification (self-signed certs)
+insecure: false                                  # true = skip TLS certificate verification
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
