@@ -446,12 +446,23 @@ function renderSparkline(elemId, data, color, isPercent) {
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
   const chart = echarts.init(el);
   chart.setOption({
-    grid: { left: 4, right: 4, top: 2, bottom: 4 },
+    grid: { left: 4, right: 20, top: 2, bottom: 4 },
     xAxis: { type: 'time', show: false },
     yAxis: {
-      type: 'value', show: false,
+      type: 'value', show: !isPercent,
       min: isPercent ? 0 : 'dataMin',
       max: isPercent ? 100 : 'dataMax',
+      splitLine: { show: false },
+      axisLabel: {
+        fontSize: 9, color: '#888', padding: [0, 2, 0, 0],
+        formatter: v => isPercent ? v + '%'
+          : v >= 1000000 ? (v / 1000000).toFixed(2) + 'M'
+          : v >= 1000 ? (v / 1000).toFixed(1) + 'K'
+          : v.toFixed(0),
+      },
+      axisTick: { show: false },
+      axisLine: { show: false },
+      position: 'right',
     },
     tooltip: {
       trigger: 'axis',
