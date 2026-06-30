@@ -10,6 +10,7 @@ let currentTcppingId = null;
 let currentMetricsRange = '24h';
 let gridCols = 4;
 let trafficCache = {};
+const TCPPING_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
 function escapeHtml(s) {
   if (typeof s !== 'string') return s;
@@ -226,7 +227,10 @@ function renderCard(a, idx, isActive) {
     const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
     const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
     const lossStr = p.success ? '0%' : '100%';
-    pingHtml = '<div class="card-ping"><span class="ping-dot"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Lat ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
+    const names = [...new Set(a.latest_tcpping.map(t => t.name))];
+    const dotIdx = names.indexOf(p.name);
+    const dotBg = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
+    pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Lat ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
   }
 
   let expiryHtml = '';
@@ -521,13 +525,12 @@ function renderTCPingChart(id, results) {
   }
 
   const names = [...new Set(results.map(r => r.name))];
-  const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
   const selected = {};
   names.forEach((n, i) => { selected[n] = true; });
 
   const series = names.map((name, i) => {
     const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
-    return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: colors[i % colors.length] } };
+    return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: TCPPING_COLORS[i % TCPPING_COLORS.length] } };
   });
 
   const chartEl = document.getElementById('tcpping-chart-' + id);
@@ -570,7 +573,7 @@ function renderTCPingChart(id, results) {
     const jitter = vals.length > 1 ? vals.reduce((s, v, idx, a) => idx > 0 ? s + Math.abs(v - a[idx - 1]) : s, 0) / (vals.length - 1) : 0;
     const losses = targetResults.filter(r => !r.success).length;
     const lossPct = (losses / targetResults.length * 100);
-    const color = colors[i % colors.length];
+    const color = TCPPING_COLORS[i % TCPPING_COLORS.length];
 
     const displayName = mapCarrier(name);
     return '<div class="tcpping-stat-row" onclick="tcppingToggleLine(' + id + ',\'' + escapeHtml(name) + '\')" data-name="' + escapeHtml(name) + '">'
@@ -743,6 +746,12 @@ function softRefresh() {
           const saved = getCardTcpping(a.agent.id);
           const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
           pingLabel.textContent = mapCarrier(p.name);
+          const pingDot = card.querySelector('.ping-dot');
+          if (pingDot) {
+            const names = [...new Set(a.latest_tcpping.map(t => t.name))];
+            const dotIdx = names.indexOf(p.name);
+            pingDot.style.background = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
+          }
           if (pingLat) pingLat.textContent = 'Lat ' + (p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout');
           if (pingLoss) pingLoss.textContent = 'Loss ' + (p.success ? '0%' : '100%');
         }
@@ -808,10 +817,9 @@ function updateDetailCharts(id) {
   fetch('/api/agents/' + id + '/tcpping?range=168h').then(r => r.json()).then(results => {
     if (!results || !results.length) return;
     const names = [...new Set(results.map(r => r.name))];
-    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4897'];
     const series = names.map((name, i) => {
-      const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
-      return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: colors[i % colors.length] } };
+    const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
+    return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: TCPPING_COLORS[i % TCPPING_COLORS.length] } };
     });
     if (tcppingChart) tcppingChart.setOption({ series });
 
@@ -822,7 +830,7 @@ function updateDetailCharts(id) {
       const jitter = vals.length > 1 ? vals.reduce((s, v, idx, a) => idx > 0 ? s + Math.abs(v - a[idx - 1]) : s, 0) / (vals.length - 1) : 0;
       const losses = targetResults.filter(r => !r.success).length;
       const lossPct = (losses / targetResults.length * 100);
-      const color = colors[i % colors.length];
+      const color = TCPPING_COLORS[i % TCPPING_COLORS.length];
       const displayName = mapCarrier(name);
       return '<div class="tcpping-stat-row" onclick="tcppingToggleLine(' + id + ',\'' + escapeHtml(name) + '\')" data-name="' + escapeHtml(name) + '">'
         + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
