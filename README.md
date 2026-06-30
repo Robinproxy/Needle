@@ -1,13 +1,40 @@
-# Needle
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Robinproxy/Needle/main/internal/server/static/favicon.svg" width="72" height="72" alt="Needle">
+</p>
 
-轻量级、纯出站上报的 VPS 监控面板
+<h1 align="center">Needle</h1>
+
+<p align="center">
+  轻量级、纯出站上报的 VPS 监控面板
+</p>
+
+<p align="center">
+  <a href="https://github.com/Robinproxy/Needle/releases"><img src="https://img.shields.io/github/v/release/Robinproxy/Needle?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/Robinproxy/Needle/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Robinproxy/Needle?style=flat-square" alt="License"></a>
+  <a href="https://github.com/Robinproxy/Needle/actions"><img src="https://img.shields.io/github/actions/workflow/status/Robinproxy/Needle/docker.yml?branch=main&style=flat-square" alt="Build"></a>
+</p>
+
+---
 
 ## 设计理念
 
-- **安全最小化** — Agent 纯上报，Server 永不主动连接 Agent，无 WebSSH，无命令执行
-- **灵活升级** — 不强制 Agent 升级，新功能通过可选字段扩展，旧版本兼容运行
-- **极简部署** — Server + Agent 两个独立二进制，SQLite 零配置，无外部依赖
-- **隐私优先** — 自定义 Hostname/Region，数据存你自己手里
+| 理念 | 说明 |
+|------|------|
+| 🔒 **安全最小化** | Agent 纯上报，Server 永不主动连接，无 WebSSH，无命令执行 |
+| 🔄 **灵活升级** | 不强制 Agent 升级，新功能通过可选字段扩展，旧版本兼容运行 |
+| 📦 **极简部署** | Server + Agent 两个独立二进制，SQLite 零配置，无外部依赖 |
+| 🕶️ **隐私优先** | 自定义 Hostname/Region，数据存你自己手里 |
+
+## 特色功能
+
+| 功能 | 说明 |
+|------|------|
+| ⏱ **续费倒计时** | 卡片上实时显示距下次续费天数，悬停显示到期日，按付费周期自动延续 |
+| 🎯 **TCPing 目标切换** | 点击卡片上的 CMv4/CUv6 标签循环切换显示线路，选择保存到浏览器 |
+| 📊 **Sparkline 趋势图** | 展开卡片查看 CPU / Memory / 网络流量的迷你趋势图表 |
+| 🔄 **30 秒软刷新** | 数据原地更新，不重置展开状态，无闪烁 |
+| 🔴 **一键删除离线节点** | 点击离线的红色状态点即删除节点及其所有数据 |
+| 🌍 **区域筛选** | 顶部信息栏显示各国国旗和节点数，点击按国家筛选 |
 
 ## 架构
 
