@@ -167,7 +167,7 @@ header {
 .server-info::-webkit-scrollbar { display: none; }
 .server-info .item {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 0 12px; border-right: 1px solid hsl(var(--border));
+  padding: 0 12px;
 }
 .server-info .item:first-child { padding-left: 0; }
 .server-info .item:last-child { border-right: none; }
