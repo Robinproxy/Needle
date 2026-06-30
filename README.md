@@ -1,27 +1,30 @@
 # Needle
 
-轻量级、纯出站上报的服务器监控探针
+轻量级、纯出站上报的 VPS 监控面板
 
 ## 设计理念
 
 - **安全最小化** — Agent 纯上报，Server 永不主动连接 Agent，无 WebSSH，无命令执行
-- **零升级麻烦** — 无需升级 Agent，数据格式向前兼容
-- **极简部署** — 单二进制（Server ~12MB，Agent ~9MB），SQLite 零配置，无外部依赖
-- **隐私优先** — 自定义 Hostname/Region，Server 仅存你配置的数据
+- **灵活升级** — 不强制 Agent 升级，新功能通过可选字段扩展，旧版本兼容运行
+- **极简部署** — Server + Agent 两个独立二进制（~12MB / ~9MB），SQLite 零配置，无外部依赖
+- **隐私优先** — 自定义 Hostname/Region，数据存你自己手里
 
 ## 架构
 
 ```
-┌──────────────┐     POST /api/report     ┌──────────────┐
-│  Needle Agent │ ───────────────────────→ │ Needle Server│
-│  (VPS/节点)   │      Bearer Token       │  (Dashboard) │
-│              │ ←─ HTTP 200 {"status":"ok"}│              │
-└──────────────┘                           └──────┬───────┘
-                                                   │
-                                           ┌───────┴───────┐
-                                           │   SQLite DB    │
-                                           │  (./data/)     │
-                                           └───────────────┘
+                        ┌─ Agent (VPS 1) ─┐
+                        │  CMv4/CUv6/CTv4 │
+                        └───────┬─────────┘
+                                │ POST /api/report
+                        ┌─ Agent (VPS 2) ─┐      Bearer Token
+                        │  CMv4/CUv6/CTv4 │──────────┐
+                        └───────┬─────────┘          │
+                                │ POST /api/report   │
+                                                 ┌───┴──────────┐
+                        ┌─ Agent (VPS N) ─┐      │ Needle Server│
+                        │  CMv4/CUv6/CTv4 │─────→│  (Dashboard) │
+                        └─────────────────┘      │  SQLite DB   │
+                                                 └──────────────┘
 ```
 
 ---
