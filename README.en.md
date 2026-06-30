@@ -35,9 +35,7 @@
 |---------|-------------|
 | ⏱ **Billing Countdown** | Real-time days-until-next-billing display, hover for due date, auto-renewal by billing period |
 | 🎯 **TCPing Target Switching** | Click CMv4/CUv6 labels on cards to cycle through probe lines |
-| 📊 **Sparkline Trends** | Expand a card to view CPU / Memory / Network traffic mini trend charts |
 | 🔴 **One-Click Offline Cleanup** | Click the red status dot on an offline node to delete it and all its data |
-| 🌍 **Region Filtering** | Top info bar shows country flags and node counts. Click to filter by region |
 
 ## Architecture
 
@@ -216,6 +214,6 @@ sudo rm -rf /opt/needle-agent
 
 ## Credits
 
+- **Development Tools** — [opencode](https://opencode.ai) + [DeepSeek V4 Flash](https://deepseek.com/) for AI-assisted coding
 - **TCPing Nodes** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) provides global probe endpoints
 - **UI Inspiration** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) dashboard design
-- **Development Tools** — [opencode](https://opencode.ai) + DeepSeek V4 Flash for AI-assisted coding

@@ -35,9 +35,7 @@
 |------|------|
 | ⏱ **续费倒计时** | 实时显示距下次续费天数，悬停显示到期日，按付费周期自动延续 |
 | 🎯 **TCPing 目标切换** | 点击卡片上的 CMv4/CUv6 标签循环切换显示线路 |
-| 📊 **Sparkline 趋势图** | 展开卡片查看 CPU / Memory / 网络流量的迷你趋势图表 |
 | 🔴 **一键删除离线节点** | 点击离线的红色状态点即删除节点及其所有数据 |
-| 🌍 **区域筛选** | 顶部信息栏显示各国国旗和节点数，点击按国家筛选 |
 
 ## 架构
 
@@ -216,7 +214,7 @@ sudo rm -rf /opt/needle-agent
 
 ## 感谢
 
+- **开发工具** — [opencode](https://opencode.ai) + [DeepSeek V4 Flash](https://deepseek.com/) 提供 AI 辅助编码
 - **TCPing 节点** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) 提供全球探测节点
 - **主题 UI 参考** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) 的仪表盘设计灵感
-- **开发工具** — [opencode](https://opencode.ai) + DeepSeek V4 Flash 提供 AI 辅助编码
 
