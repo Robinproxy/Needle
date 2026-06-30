@@ -424,10 +424,16 @@ function renderSparklines(id, metrics) {
   const netInData = metrics.map(m => [m.created_at * 1000, m.network_up]);
   const netOutData = metrics.map(m => [m.created_at * 1000, m.network_down]);
 
-  document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%' : '—';
-  document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%' : '—';
-  document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s' : '—';
-  document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s' : '—';
+  const peak = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
+  const cpuPeak = peak(cpuData);
+  const memPeak = peak(memData);
+  const netInPeak = peak(netInData);
+  const netOutPeak = peak(netOutData);
+
+  document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + cpuPeak.toFixed(1) + '%' : '—';
+  document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + memPeak.toFixed(1) + '%' : '—';
+  document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  peak ' + formatSpeed(netInPeak) : '—';
+  document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  peak ' + formatSpeed(netOutPeak) : '—';
 
   renderSparkline('spark-cpu', cpuData, '#3b82f6', true);
   renderSparkline('spark-mem', memData, '#22c55e', true);
@@ -446,23 +452,12 @@ function renderSparkline(elemId, data, color, isPercent) {
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
   const chart = echarts.init(el);
   chart.setOption({
-    grid: { left: 4, right: 20, top: 2, bottom: 4 },
+    grid: { left: 4, right: 4, top: 2, bottom: 4 },
     xAxis: { type: 'time', show: false },
     yAxis: {
-      type: 'value', show: !isPercent,
+      type: 'value', show: false,
       min: isPercent ? 0 : 'dataMin',
       max: isPercent ? 100 : 'dataMax',
-      splitLine: { show: false },
-      axisLabel: {
-        fontSize: 9, color: '#888', padding: [0, 2, 0, 0],
-        formatter: v => isPercent ? v + '%'
-          : v >= 1000000 ? (v / 1000000).toFixed(2) + 'M'
-          : v >= 1000 ? (v / 1000).toFixed(1) + 'K'
-          : v.toFixed(0),
-      },
-      axisTick: { show: false },
-      axisLine: { show: false },
-      position: 'right',
     },
     tooltip: {
       trigger: 'axis',
@@ -796,10 +791,11 @@ function updateDetailCharts(id) {
     const netInData = metrics.map(m => [m.created_at * 1000, m.network_up]);
     const netOutData = metrics.map(m => [m.created_at * 1000, m.network_down]);
 
-    document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%' : '—';
-    document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%' : '—';
-    document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s' : '—';
-    document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s' : '—';
+    const peak2 = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
+    document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + peak2(cpuData).toFixed(1) + '%' : '—';
+    document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + peak2(memData).toFixed(1) + '%' : '—';
+    document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  peak ' + formatSpeed(peak2(netInData)) : '—';
+    document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  peak ' + formatSpeed(peak2(netOutData)) : '—';
 
     const configs = [
       ['spark-cpu', cpuData], ['spark-mem', memData],
