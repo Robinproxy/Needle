@@ -69,6 +69,7 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 20px; width: 100%; }
+main { padding-top: 16px; }
 
 /* BUTTONS */
 .btn {
@@ -145,7 +146,6 @@ header {
   height: 34px;
   font-family: var(--font-mono); font-size: 11px;
   color: hsl(var(--muted-foreground));
-  border-bottom: 1px solid hsl(var(--border));
   overflow-x: auto; white-space: nowrap;
 }
 .server-info::-webkit-scrollbar { display: none; }
