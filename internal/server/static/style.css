@@ -215,7 +215,6 @@ header {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
-  cursor: help;
 }
 .expiry-days.expiry-urgent { color: hsl(var(--warning)); }
 
