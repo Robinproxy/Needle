@@ -252,15 +252,15 @@ func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
 
 func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
 	var expiresAt sql.NullInt64
-	var billingPeriod string
 	err = s.db.QueryRow(
-		"SELECT expires_at, billing_period FROM agents WHERE id = ?", agentID,
-	).Scan(&expiresAt, &billingPeriod)
-	if err != nil || !expiresAt.Valid || billingPeriod == "" {
+		"SELECT expires_at FROM agents WHERE id = ?", agentID,
+	).Scan(&expiresAt)
+	if err != nil || !expiresAt.Valid {
 		return 0, 0, nil
 	}
 
-	boundary := billingBoundary(expiresAt.Int64, billingPeriod)
+	resetDay := time.Unix(expiresAt.Int64, 0).Day()
+	boundary := monthlyBoundary(resetDay)
 	boundaryUnix := boundary.Unix()
 
 	var baseSent, baseRecv sql.NullInt64
@@ -295,27 +295,25 @@ func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
 	return sent, recv, nil
 }
 
-func billingBoundary(expiresAtUnix int64, period string) time.Time {
-	anchor := time.Unix(expiresAtUnix, 0)
+func monthlyBoundary(day int) time.Time {
 	now := time.Now()
-	addMonths := 0
-	switch period {
-	case "1m": addMonths = 1
-	case "3m": addMonths = 3
-	case "6m": addMonths = 6
-	case "12m": addMonths = 12
+	y, m, _ := now.Date()
+	loc := now.Location()
+
+	boundary := time.Date(y, m, day, 0, 0, 0, 0, loc)
+	if boundary.Month() != m {
+		boundary = time.Date(y, m+1, 0, 0, 0, 0, 0, loc)
 	}
-	if addMonths == 0 {
-		return now
-	}
-	boundary := anchor
-	for {
-		next := boundary.AddDate(0, addMonths, 0)
-		if next.After(now) {
-			break
+
+	if now.Before(boundary) {
+		boundary = boundary.AddDate(0, -1, 0)
+		y2, m2, _ := boundary.Date()
+		boundary = time.Date(y2, m2, day, 0, 0, 0, 0, loc)
+		if boundary.Month() != m2 {
+			boundary = time.Date(y2, m2+1, 0, 0, 0, 0, 0, loc)
 		}
-		boundary = next
 	}
+
 	return boundary
 }
 
