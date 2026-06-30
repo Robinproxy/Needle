@@ -141,9 +141,13 @@ header {
 }
 
 /* SERVER INFO */
-.server-info {
+.server-info-bar {
   display: flex; align-items: center; gap: 0;
   height: 34px;
+}
+.server-info {
+  display: flex; align-items: center; gap: 0;
+  flex: 1; min-width: 0;
   font-family: var(--font-mono); font-size: 11px;
   color: hsl(var(--muted-foreground));
   overflow-x: auto; white-space: nowrap;
@@ -162,6 +166,15 @@ header {
 .server-info .label { color: hsl(var(--muted-foreground) / 0.6); }
 .server-info .value { color: hsl(var(--foreground)); font-weight: 500; }
 .server-info .value.pri { color: hsl(var(--primary)); }
+.github-link {
+  display: flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  color: hsl(var(--muted-foreground) / 0.5);
+  transition: color 0.15s;
+}
+.github-link:hover { color: hsl(var(--foreground)); }
+.github-link svg { width: 13px; height: 13px; }
 
 /* CARD GRID */
 .card-grid {
