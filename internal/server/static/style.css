@@ -114,7 +114,19 @@ header {
 .brand-icon .brand-spark { fill: hsl(var(--primary)); }
 .brand-text h1 { font-family: var(--font-sans); font-size: 16px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.2; }
 .brand-text p { font-size: 11px; color: hsl(var(--muted-foreground)); line-height: 1; margin-top: 1px; }
-.header-actions { display: flex; align-items: center; gap: 4px; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+
+.header-icon-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: none; border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--muted) / 0.3);
+  color: hsl(var(--muted-foreground) / 0.5);
+  cursor: pointer; transition: all 0.15s;
+  padding: 0;
+}
+.header-icon-btn:hover { color: hsl(var(--foreground)); background: hsl(var(--muted) / 0.5); }
+.header-icon-btn svg { width: 14px; height: 14px; }
 
 .theme-btn-group {
   display: flex; gap: 2px;

@@ -148,9 +148,33 @@ function switchCardFormat(mode) {
     const agent = agents.find(a => a.agent.id === expandedId);
     if (!agent) expandedId = null;
   }
-  document.querySelectorAll('#view-group .theme-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.view === mode);
-  });
+  updateHeaderIcons();
+}
+
+const VIEW_ICONS = {
+  card: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  list: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="21" y2="6"/></svg>',
+};
+const THEME_ICONS = {
+  light: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>',
+  dark: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9c-4 0-7-3-7-7 0-1 .2-2 .7-3A9 9 0 0 1 12 3z"/></svg>',
+  system: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M7 4V2M17 4V2" stroke-width="1.2"/></svg>',
+};
+
+function toggleView() {
+  switchCardFormat(cardFormat === 'card' ? 'list' : 'card');
+}
+
+function cycleTheme() {
+  const modes = ['light', 'dark', 'system'];
+  setThemeMode(modes[(modes.indexOf(themeMode) + 1) % modes.length]);
+}
+
+function updateHeaderIcons() {
+  const viewIcon = document.getElementById('view-icon');
+  if (viewIcon) viewIcon.outerHTML = VIEW_ICONS[cardFormat];
+  const themeIcon = document.getElementById('theme-icon');
+  if (themeIcon) themeIcon.outerHTML = THEME_ICONS[themeMode];
 }
 
 function renderAll(scrollToDetail) {
@@ -879,7 +903,7 @@ function setThemeMode(mode) {
   themeMode = mode;
   localStorage.setItem('themeMode', mode);
   applyTheme();
-  highlightThemeBtn();
+  updateHeaderIcons();
 }
 
 function applyTheme() {
@@ -890,15 +914,9 @@ function applyTheme() {
   html.classList.toggle('dark', prefersDark);
 }
 
-function highlightThemeBtn() {
-  document.querySelectorAll('#theme-group .theme-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.mode === themeMode);
-  });
-}
-
 (function initTheme() {
   applyTheme();
-  highlightThemeBtn();
+  updateHeaderIcons();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     if (themeMode === 'system') applyTheme();
   });
