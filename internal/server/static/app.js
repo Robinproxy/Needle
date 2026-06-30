@@ -315,6 +315,25 @@ function renderListRow(a, idx, isActive) {
 
   const delClick = isOnline ? '' : ' onclick="event.stopPropagation();deleteAgent(' + a.agent.id + ',\'' + escapeHtml(a.agent.hostname) + '\')"';
 
+  let pingHtml = '';
+  if (a.latest_tcpping && a.latest_tcpping.length > 0) {
+    const saved = getCardTcpping(a.agent.id);
+    const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
+    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
+    const lossStr = p.success ? '0%' : '100%';
+    const names = [...new Set(a.latest_tcpping.map(t => t.name))];
+    const dotIdx = names.indexOf(p.name);
+    const dotBg = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
+    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('red');
+    const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
+    pingHtml = '<span class="list-ping">'
+      + '<span class="ping-dot" style="background:' + dotBg + '"></span>'
+      + '<span class="list-ping-name">' + escapeHtml(mapCarrier(p.name)) + '</span>'
+      + '<span class="list-ping-lat" style="color:' + latClr + '">' + latStr + '</span>'
+      + '<span class="list-ping-loss" style="color:' + lossClr + '">' + lossStr + '</span>'
+      + '</span>';
+  }
+
   return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<span class="status-dot ' + (isOnline ? 'online' : 'offline clickable') + '"' + delClick + '></span>'
     + '<span class="list-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
@@ -325,7 +344,7 @@ function renderListRow(a, idx, isActive) {
       + '<div class="list-bar"><span class="list-bar-label">MEM</span><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(memPct) + '</span></div>'
       + '<div class="list-bar"><span class="list-bar-label">DSK</span><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(diskPct) + '</span></div>'
     + '</div>'
-    + '<span class="list-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-label">TRF</span><span class="traffic-down">\u2193 \u2014</span><span class="traffic-divider">/</span><span class="traffic-up">\u2191 \u2014</span></span>'
+    + pingHtml
     + '<span class="list-net">\u2193' + downSpeed + ' \u2191' + upSpeed + '</span>'
     + '<span class="list-uptime">' + uptime + '</span>'
     + '<span class="list-time">' + (m ? relativeTime(m.created_at * 1000) : '') + '</span>'
