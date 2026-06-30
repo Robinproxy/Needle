@@ -210,3 +210,9 @@ sudo rm -rf /opt/needle-agent
 ```
 
 ---
+
+## 感谢
+
+- **TCPing 节点** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) 提供全球探测节点
+- **主题 UI 参考** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) 的仪表盘设计灵感
+
