@@ -218,3 +218,4 @@ sudo rm -rf /opt/needle-agent
 
 - **TCPing Nodes** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) provides global probe endpoints
 - **UI Inspiration** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) dashboard design
+- **Development Tools** — [opencode](https://opencode.ai) + DeepSeek V4 Flash for AI-assisted coding
