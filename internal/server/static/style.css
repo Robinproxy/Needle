@@ -338,10 +338,7 @@ header {
 /* INLINE DETAIL */
 .inline-detail {
   grid-column: 1 / -1;
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius);
-  padding: 20px;
+  padding: 4px 0;
 }
 
 .detail-header {
