@@ -27,14 +27,15 @@
 | 🔒 **Security Minimal** | Agent reports only, Server never initiates connections. No WebSSH, no command execution |
 | 🔄 **Graceful Upgrade** | No forced Agent upgrades. New features via optional fields, backward compatible |
 | 📦 **Minimal Deployment** | Two standalone binaries for Server + Agent. SQLite zero configuration, no external dependencies |
-| 🕶️ **Privacy First** | Customizable Hostname/Region. Your data stays on your infrastructure |
+
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| ⏱ **Billing Countdown** | Real-time days-until-next-billing display, hover for due date, auto-renewal by billing period |
+| ⏱ **Traffic Auto-Reset** | Traffic counters reset automatically per billing cycle, with cumulative per-cycle tracking |
 | 🎯 **TCPing Target Switching** | Click CMv4/CUv6 labels on cards to cycle through probe lines |
+| 🏁 **Custom Flags** | Set your own Region flags to light up your global presence |
 | 🔴 **One-Click Offline Cleanup** | Click the red status dot on an offline node to delete it and all its data |
 
 ## Architecture
