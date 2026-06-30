@@ -24,7 +24,7 @@
 
 | Principle | Description |
 |-----------|-------------|
-| 🔒 **Security Minimal** | Agent reports only, Server never initiates connections. No WebSSH, no command execution |
+| 🔒 **Zero-Trust Reporting** | Built on zero-trust architecture. Agent reports only, Server never initiates connections. No WebSSH, no command execution |
 | 🔄 **Graceful Upgrade** | No forced Agent upgrades. New features via optional fields, backward compatible |
 | 📦 **Minimal Deployment** | Two standalone binaries for Server + Agent. SQLite zero configuration, no external dependencies |
 
@@ -33,10 +33,10 @@
 
 | Feature | Description |
 |---------|-------------|
-| ⏱ **Traffic Auto-Reset** | Traffic counters reset automatically per billing cycle, with cumulative per-cycle tracking |
+| ⏱ **Traffic Auto-Reset** | Traffic counters reset automatically per billing cycle, with per-cycle tracking |
 | 🎯 **TCPing Target Switching** | Click CMv4/CUv6 labels on cards to cycle through probe lines |
-| 🏁 **Custom Flags** | Set your own Region flags to light up your global presence |
 | 🔴 **One-Click Offline Cleanup** | Click the red status dot on an offline node to delete it and all its data |
+| 🏁 **Custom Flags** | Set your own Region flags for a clear global view on the dashboard |
 
 ## Architecture
 
