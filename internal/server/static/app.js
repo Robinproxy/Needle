@@ -234,7 +234,7 @@ function renderCard(a, idx, isActive) {
   let expiryHtml = '';
   if (expiryDays > 0) {
     const ec = expiryDays < 7 ? ' expiry-urgent' : '';
-    expiryHtml = '<span class="expiry-days' + ec + '" title="\u5230\u671f: ' + expiryDate + '">' + expiryDays + '</span>';
+    expiryHtml = '<span class="expiry-days' + ec + '" title="Due ' + expiryDate + '">' + expiryDays + '</span>';
   }
 
   const delClick = isOnline ? '' : ' onclick="event.stopPropagation();deleteAgent(' + a.agent.id + ',\'' + escapeHtml(a.agent.hostname) + '\')"';
@@ -724,7 +724,7 @@ function softRefresh() {
         if (a.expiry_days > 0 && expiryEl) {
           expiryEl.textContent = a.expiry_days;
           expiryEl.className = 'expiry-days' + (a.expiry_days < 7 ? ' expiry-urgent' : '');
-          expiryEl.title = '\u5230\u671f: ' + (a.expiry_date || '');
+          expiryEl.title = 'Due ' + (a.expiry_date || '');
         }
 
         const net = card.querySelectorAll('.card-footer-line .net span');
