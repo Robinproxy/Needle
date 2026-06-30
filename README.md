@@ -80,8 +80,6 @@ echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 docker compose up -d
 ```
 
-访问 `http://你的VPSIP:8008` 查看仪表盘。
-
 自定义端口：
 
 ```bash
@@ -102,11 +100,15 @@ nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
 
 ### 一键脚本安装（systemd）
 
-```bash
-# Server
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
+Server：
 
-# Agent（在每台 VPS 上）
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
+```
+
+Agent（在每台 VPS 上运行）：
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
 ```
 
