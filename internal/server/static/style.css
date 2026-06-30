@@ -239,6 +239,10 @@ header {
 }
 .metric-header .label { color: hsl(var(--muted-foreground)); font-weight: 600; }
 .metric-header .value { font-family: var(--font-mono); font-weight: 700; }
+.metric-header .value.blue { color: hsl(var(--primary)); }
+.metric-header .value.green { color: hsl(var(--success)); }
+.metric-header .value.amber { color: hsl(var(--warning)); }
+.metric-header .value.red { color: hsl(var(--destructive)); }
 .metric-bar {
   height: 8px;
   background: hsl(var(--muted));

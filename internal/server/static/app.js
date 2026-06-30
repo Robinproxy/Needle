@@ -247,9 +247,9 @@ function renderCard(a, idx, isActive) {
     + '</div>'
     + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
     + '<div class="card-metrics">'
-      + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value" style="color:hsl(var(--primary))">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + cpu.toFixed(0) + '%"></div></div></div>'
-      + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value" style="color:hsl(var(--success))">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
-      + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value" style="color:hsl(var(--warning))">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
+      + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value ' + metricColor(cpu) + '">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + cpu.toFixed(0) + '%"></div></div></div>'
+      + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value ' + metricColor(memPct) + '">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
+      + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value ' + metricColor(diskPct) + '">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
     + '</div>'
     + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-label">TRAFFIC</span><span class="traffic-up">\u2191 —</span><span class="traffic-divider">/</span><span class="traffic-down">\u2193 —</span></div>'
     + pingHtml
