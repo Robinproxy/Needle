@@ -6,7 +6,7 @@
 
 - **安全最小化** — Agent 纯上报，Server 永不主动连接 Agent，无 WebSSH，无命令执行
 - **灵活升级** — 不强制 Agent 升级，新功能通过可选字段扩展，旧版本兼容运行
-- **极简部署** — Server + Agent 两个独立二进制（~12MB / ~9MB），SQLite 零配置，无外部依赖
+- **极简部署** — Server + Agent 两个独立二进制，SQLite 零配置，无外部依赖
 - **隐私优先** — 自定义 Hostname/Region，数据存你自己手里
 
 ## 架构
