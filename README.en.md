@@ -5,11 +5,11 @@
 <h1 align="center">Needle</h1>
 
 <p align="center">
-  轻量级、纯出站上报的 VPS 监控面板
+  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
-  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
+  Lightweight, pure-outbound VPS monitoring dashboard
 </p>
 
 <p align="center">
@@ -20,26 +20,26 @@
 
 ---
 
-## 设计理念
+## Design Principles
 
-| 理念 | 说明 |
-|------|------|
-| 🔒 **安全最小化** | Agent 纯上报，Server 永不主动连接，无 WebSSH，无命令执行 |
-| 🔄 **灵活升级** | 不强制 Agent 升级，新功能通过可选字段扩展，旧版本兼容运行 |
-| 📦 **极简部署** | Server + Agent 两个独立二进制，SQLite 零配置，无外部依赖 |
-| 🕶️ **隐私优先** | 自定义 Hostname/Region，数据存你自己手里 |
+| Principle | Description |
+|-----------|-------------|
+| 🔒 **Security Minimal** | Agent reports only, Server never initiates connections. No WebSSH, no command execution |
+| 🔄 **Graceful Upgrade** | No forced Agent upgrades. New features via optional fields, backward compatible |
+| 📦 **Minimal Deployment** | Two standalone binaries for Server + Agent. SQLite zero configuration, no external dependencies |
+| 🕶️ **Privacy First** | Customizable Hostname/Region. Your data stays on your infrastructure |
 
-## 特色功能
+## Features
 
-| 功能 | 说明 |
-|------|------|
-| ⏱ **续费倒计时** | 实时显示距下次续费天数，悬停显示到期日，按付费周期自动延续 |
-| 🎯 **TCPing 目标切换** | 点击卡片上的 CMv4/CUv6 标签循环切换显示线路 |
-| 📊 **Sparkline 趋势图** | 展开卡片查看 CPU / Memory / 网络流量的迷你趋势图表 |
-| 🔴 **一键删除离线节点** | 点击离线的红色状态点即删除节点及其所有数据 |
-| 🌍 **区域筛选** | 顶部信息栏显示各国国旗和节点数，点击按国家筛选 |
+| Feature | Description |
+|---------|-------------|
+| ⏱ **Billing Countdown** | Real-time days-until-next-billing display, hover for due date, auto-renewal by billing period |
+| 🎯 **TCPing Target Switching** | Click CMv4/CUv6 labels on cards to cycle through probe lines |
+| 📊 **Sparkline Trends** | Expand a card to view CPU / Memory / Network traffic mini trend charts |
+| 🔴 **One-Click Offline Cleanup** | Click the red status dot on an offline node to delete it and all its data |
+| 🌍 **Region Filtering** | Top info bar shows country flags and node counts. Click to filter by region |
 
-## 架构
+## Architecture
 
 ```
                         ┌─ Agent (VPS 1) ─┐
@@ -59,9 +59,9 @@
 
 ---
 
-## 快速开始
+## Quick Start
 
-### Docker 部署（推荐）
+### Docker (Recommended)
 
 ```bash
 mkdir -p ~/needle && cd ~/needle
@@ -83,39 +83,39 @@ echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 docker compose up -d
 ```
 
-自定义端口：
+Custom port:
 
 ```bash
 echo "NEEDLE_PORT=8080" >> .env
 docker compose up -d
 ```
 
-### 二进制部署
+### Binary
 
 ```bash
-# 从 Releases 下载对应架构的 tar.gz
+# Download the tarball for your architecture from Releases
 TOKEN=$(openssl rand -hex 16)
 tar xzf needle-linux-amd64.tar.gz needle-server
 ./needle-server -l :8008 -token "$TOKEN"
-# 或后台运行
+# Or run in background
 nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
 ```
 
-### 一键脚本安装（systemd）
+### One-Line Install (systemd)
 
-Server：
+Server:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
 ```
 
-Agent（在每台 VPS 上运行）：
+Agent (run on each VPS):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
 ```
 
-### Docker 本地构建
+### Docker Build Locally
 
 ```bash
 git clone https://github.com/Robinproxy/Needle.git
@@ -126,19 +126,19 @@ docker compose up -d --build
 
 ---
 
-## 配置
+## Configuration
 
 ### agent.yaml
 
 ```yaml
-hostname: ""                                     # 可选，默认系统主机名
-server: http://1.2.3.4:8008                      # 必填，Server 地址
-token: your-token                                # 必填，和 Server 一致
-region: SG                                       # ISO 国家码，如 CN/SG/US
-billing_period: "1m"                             # 1m/3m/6m/12m，可选，计费周期
-expires_at: "2026-08-15"                         # YYYY-MM-DD，可选，续费日期
-interval: 30                                     # 上报间隔（秒）
-insecure: false                                  # 关闭 TLS 验证（自签名证书用）
+hostname: ""                                     # Optional, defaults to OS hostname
+server: http://1.2.3.4:8008                      # Required, Server address
+token: your-token                                # Required, must match Server token
+region: SG                                       # ISO country code, e.g. CN/SG/US
+billing_period: "1m"                             # 1m/3m/6m/12m, optional, billing cycle
+expires_at: "2026-08-15"                         # YYYY-MM-DD, optional, expiry date
+interval: 30                                     # Report interval (seconds)
+insecure: false                                  # Disable TLS verification (self-signed certs)
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
@@ -154,54 +154,54 @@ tcpping:
     target: "sh-ct-v6.ip.zstaticcdn.com:80"
 ```
 
-### Server 环境变量
+### Server Environment Variables
 
-| 变量 | 说明 | 默认 |
-|---|---|---|
-| `NEEDLE_TOKEN` | 认证 Token，Agent 连接必须携带 | **必填** |
-| `NEEDLE_LISTEN` | 监听地址（二进制运行用，如 `:9000`） | `:8008` |
-| `NEEDLE_PORT` | Docker 宿主机端口映射（仅数字） | `8008` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NEEDLE_TOKEN` | Auth token, required for Agent connections | **Required** |
+| `NEEDLE_LISTEN` | Listen address (binary mode, e.g. `:9000`) | `:8008` |
+| `NEEDLE_PORT` | Docker host port mapping (digits only) | `8008` |
 
 ---
 
-## 安装路径
+## Install Paths
 
-### Server（systemd）
+### Server (systemd)
 
-| 内容 | 路径 |
-|---|---|
-| 二进制 | `/opt/needle/bin/needle-server` |
-| 环境变量 | `/opt/needle/.env` |
-| 数据库 | `/opt/needle/data/needle.db` |
-| 日志 | `journalctl -u needle-server -f` |
+| Item | Path |
+|------|------|
+| Binary | `/opt/needle/bin/needle-server` |
+| Environment file | `/opt/needle/.env` |
+| Database | `/opt/needle/data/needle.db` |
+| Logs | `journalctl -u needle-server -f` |
 
 ### Docker
 
-| 内容 | 路径 |
-|---|---|
-| 数据目录 | `./data/` |
-| 数据库 | `./data/needle.db` |
+| Item | Path |
+|------|------|
+| Data directory | `./data/` |
+| Database | `./data/needle.db` |
 
-### Agent（systemd）
+### Agent (systemd)
 
-| 内容 | 路径 |
-|---|---|
-| 二进制 | `/opt/needle-agent/bin/needle-agent` |
-| 配置文件 | `/opt/needle-agent/agent.yaml` |
-| 日志 | `journalctl -u needle-agent -f` |
+| Item | Path |
+|------|------|
+| Binary | `/opt/needle-agent/bin/needle-agent` |
+| Config file | `/opt/needle-agent/agent.yaml` |
+| Logs | `journalctl -u needle-agent -f` |
 
 ---
 
-## 卸载
+## Uninstall
 
 ```bash
-# Server（二进制 + systemd）
+# Server (binary + systemd)
 sudo systemctl stop needle-server
 sudo systemctl disable needle-server
 sudo rm /etc/systemd/system/needle-server.service
 sudo rm -rf /opt/needle
 
-# Server（Docker）
+# Server (Docker)
 docker compose down -v
 rm -rf ./data
 
@@ -214,8 +214,7 @@ sudo rm -rf /opt/needle-agent
 
 ---
 
-## 感谢
+## Credits
 
-- **TCPing 节点** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) 提供全球探测节点
-- **主题 UI 参考** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) 的仪表盘设计灵感
-
+- **TCPing Nodes** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) provides global probe endpoints
+- **UI Inspiration** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) dashboard design
