@@ -145,13 +145,11 @@ function renderAll(scrollToDetail) {
   if (!agents.length) {
     container.innerHTML = '';
     empty.style.display = 'flex';
-    document.getElementById('node-count-sub').textContent = '';
     return;
   }
   empty.style.display = 'none';
 
   const filtered = filterAndSort(agents);
-  document.getElementById('node-count-sub').textContent = filtered.length + ' of ' + agents.length;
 
   if (!filtered.length) {
     container.innerHTML = '<div class="empty-state" style="display:flex;grid-column:1/-1">No matching nodes</div>';

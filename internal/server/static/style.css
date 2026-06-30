@@ -163,16 +163,6 @@ header {
 .server-info .value { color: hsl(var(--foreground)); font-weight: 500; }
 .server-info .value.pri { color: hsl(var(--primary)); }
 
-/* AGENTS HEADER */
-.agents-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px; gap: 8px; flex-wrap: wrap;
-}
-.agents-header-left { display: flex; align-items: center; gap: 10px; }
-.agents-header-left h2 { font-size: 16px; font-weight: 600; }
-.agents-header-left .count { font-size: 12px; color: hsl(var(--muted-foreground)); }
-.agents-header-right { display: flex; align-items: center; gap: 6px; }
-
 /* CARD GRID */
 .card-grid {
   display: grid;
