@@ -69,7 +69,7 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 20px; width: 100%; }
-main { padding-top: 16px; padding-bottom: 16px; }
+main { padding-top: 16px; }
 
 /* BUTTONS */
 .btn {
