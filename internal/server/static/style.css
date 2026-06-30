@@ -271,8 +271,8 @@ header {
   color: hsl(var(--muted-foreground));
 }
 .card-footer-line .net { display: flex; gap: 14px; }
-.card-footer-line .net-down { color: hsl(var(--success)); }
-.card-footer-line .net-up { color: hsl(var(--primary)); }
+.card-footer-line .net-down { color: #8b5cf6; }
+.card-footer-line .net-up { color: #f59e0b; }
 
 .card-traffic {
   font-family: var(--font-mono); font-size: 12px; font-weight: 600;
@@ -281,8 +281,8 @@ header {
   padding: 2px 0;
 }
 .card-traffic .traffic-label { font-size: 11px; color: hsl(var(--muted-foreground)); flex: 1; }
-.card-traffic .traffic-up { color: hsl(var(--primary)); }
-.card-traffic .traffic-down { color: hsl(var(--success)); }
+.card-traffic .traffic-up { color: #f59e0b; }
+.card-traffic .traffic-down { color: #8b5cf6; }
 .card-traffic .traffic-divider { color: hsl(var(--muted-foreground) / 0.4); }
 
 .card-ping {

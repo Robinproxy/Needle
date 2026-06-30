@@ -440,8 +440,8 @@ function renderSparklines(id, metrics) {
     const pctVal = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
     return [m.created_at * 1000, pctVal];
   });
-  const netInData = metrics.map(m => [m.created_at * 1000, m.network_up]);
-  const netOutData = metrics.map(m => [m.created_at * 1000, m.network_down]);
+  const netInData = metrics.map(m => [m.created_at * 1000, m.network_down]);
+  const netOutData = metrics.map(m => [m.created_at * 1000, m.network_up]);
 
   const peak = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
   const cpuPeak = peak(cpuData);
@@ -451,8 +451,8 @@ function renderSparklines(id, metrics) {
 
   document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + cpuPeak.toFixed(1) + '%' : '—';
   document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + memPeak.toFixed(1) + '%' : '—';
-  document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  peak ' + formatSpeed(netInPeak) : '—';
-  document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  peak ' + formatSpeed(netOutPeak) : '—';
+  document.getElementById('spark-netin-val').innerHTML = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  <span style="color:#8b5cf6">peak ' + formatSpeed(netInPeak) + '</span>' : '—';
+  document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(netOutPeak) + '</span>' : '—';
 
   renderSparkline('spark-cpu', cpuData, '#3b82f6', true);
   renderSparkline('spark-mem', memData, '#22c55e', true);
@@ -822,14 +822,14 @@ function updateDetailCharts(id) {
       const pctVal = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
       return [m.created_at * 1000, pctVal];
     });
-    const netInData = metrics.map(m => [m.created_at * 1000, m.network_up]);
-    const netOutData = metrics.map(m => [m.created_at * 1000, m.network_down]);
+    const netInData = metrics.map(m => [m.created_at * 1000, m.network_down]);
+    const netOutData = metrics.map(m => [m.created_at * 1000, m.network_up]);
 
     const peak2 = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
     document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + peak2(cpuData).toFixed(1) + '%' : '—';
     document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + peak2(memData).toFixed(1) + '%' : '—';
-    document.getElementById('spark-netin-val').textContent = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  peak ' + formatSpeed(peak2(netInData)) : '—';
-    document.getElementById('spark-netout-val').textContent = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  peak ' + formatSpeed(peak2(netOutData)) : '—';
+    document.getElementById('spark-netin-val').innerHTML = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  <span style="color:#8b5cf6">peak ' + formatSpeed(peak2(netInData)) + '</span>' : '—';
+    document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(peak2(netOutData)) + '</span>' : '—';
 
     const configs = [
       ['spark-cpu', cpuData], ['spark-mem', memData],
