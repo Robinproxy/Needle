@@ -54,9 +54,7 @@ function formatUptime(s) {
 
 function flagEmoji(code) {
   if (!code || code.length !== 2) return '\u{1F310}';
-  const cp = 0x1F1E6 + code.toUpperCase().charCodeAt(0) - 65;
-  const cp2 = 0x1F1E6 + code.toUpperCase().charCodeAt(1) - 65;
-  return String.fromCodePoint(cp) + String.fromCodePoint(cp2);
+  return '<span class="fi fi-' + code.toLowerCase() + '"></span>';
 }
 
 function pct(v) {
