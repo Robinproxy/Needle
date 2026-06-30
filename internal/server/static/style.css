@@ -214,7 +214,7 @@ header {
 .status-dot.offline { background: hsl(var(--destructive)); }
 .status-dot.offline.clickable { cursor: pointer; }
 .card-hostname { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.01em; }
-.card-session { display: flex; align-items: center; font-size: 22px; flex: 0 0 auto; }
+.card-session { display: flex; align-items: center; font-size: 18px; flex: 0 0 auto; }
 .expiry-days {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -323,7 +323,7 @@ header {
 .list-row.offline { opacity: 0.55; }
 .list-row .status-dot { flex: 0 0 auto; }
 .list-hostname { font-weight: 600; min-width: 120px; }
-.server-info .fi { font-size: 14px; }
+.server-info .fi { font-size: 12px; }
 .list-region { font-size: 14px; min-width: 28px; text-align: center; }
 .list-session { font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-foreground) / 0.5); min-width: 28px; }
 .list-bars { display: flex; gap: 12px; flex: 1; min-width: 0; }
