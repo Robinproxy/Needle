@@ -226,7 +226,7 @@ function renderCard(a, idx, isActive) {
     const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
     const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
     const lossStr = p.success ? '0%' : '100%';
-    pingHtml = '<div class="card-ping"><span class="ping-dot"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Latency ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
+    pingHtml = '<div class="card-ping"><span class="ping-dot"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat">Lat ' + latStr + '</span><span class="ping-loss">Loss ' + lossStr + '</span></div>';
   }
 
   let expiryHtml = '';
@@ -743,7 +743,7 @@ function softRefresh() {
           const saved = getCardTcpping(a.agent.id);
           const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
           pingLabel.textContent = mapCarrier(p.name);
-          if (pingLat) pingLat.textContent = 'Latency ' + (p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout');
+          if (pingLat) pingLat.textContent = 'Lat ' + (p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout');
           if (pingLoss) pingLoss.textContent = 'Loss ' + (p.success ? '0%' : '100%');
         }
       } else {

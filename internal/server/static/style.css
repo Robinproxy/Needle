@@ -292,10 +292,10 @@ header {
 }
 .card-ping .ping-dot {
   width: 6px; height: 6px; border-radius: 50%;
-  background: hsl(var(--primary)); flex: 0 0 auto;
+  background: hsl(var(--warning)); flex: 0 0 auto;
 }
 .card-ping .ping-label { color: hsl(var(--foreground)); font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-ping .ping-lat { font-weight: 700; color: hsl(var(--primary)); margin-right: 4px; }
+.card-ping .ping-lat { font-weight: 700; color: hsl(var(--warning)); margin-right: 4px; }
 .card-ping .ping-loss { color: hsl(var(--muted-foreground)); }
 
 /* LIST GRID */
