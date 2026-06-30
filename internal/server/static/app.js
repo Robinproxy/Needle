@@ -115,7 +115,7 @@ function renderInfoBar() {
     .join('');
 
   document.getElementById('server-info').innerHTML =
-    '<span class="item' + (!filterRegion ? ' active' : '') + '" onclick="setRegionFilter(\'\')" style="cursor:pointer"><span class="label">NODES</span> <span class="value">' + total + '</span> <span class="value pri">(' + online + ' online, ' + (total - online) + ' offline)</span></span>'
+    '<span class="item' + (!filterRegion ? ' active' : '') + '" onclick="setRegionFilter(\'\')" style="cursor:pointer"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></span>'
     + regionHtml;
 }
 
