@@ -6,9 +6,8 @@ import (
 )
 
 type TCPingTarget struct {
-	Name     string `yaml:"name"`
-	Target   string `yaml:"target"`
-	Interval int    `yaml:"interval"`
+	Name   string `yaml:"name"`
+	Target string `yaml:"target"`
 }
 
 type TCPingResult struct {

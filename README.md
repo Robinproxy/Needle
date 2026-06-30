@@ -110,22 +110,16 @@ insecure: false                                  # 关闭 TLS 验证（自签名
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
-    interval: 60
   - name: "CMv6"
     target: "sh-cm-v6.ip.zstaticcdn.com:80"
-    interval: 60
   - name: "CUv4"
     target: "sh-cu-v4.ip.zstaticcdn.com:80"
-    interval: 60
   - name: "CUv6"
     target: "sh-cu-v6.ip.zstaticcdn.com:80"
-    interval: 60
   - name: "CTv4"
     target: "sh-ct-v4.ip.zstaticcdn.com:80"
-    interval: 60
   - name: "CTv6"
     target: "sh-ct-v6.ip.zstaticcdn.com:80"
-    interval: 60
 ```
 
 ### Server 环境变量

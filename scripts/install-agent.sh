@@ -136,22 +136,16 @@ insecure: false
 tcpping:
   - name: "${N1}"
     target: "${T1}"
-    interval: 60
   - name: "${N3}"
     target: "${T3}"
-    interval: 60
   - name: "${N5}"
     target: "${T5}"
-    interval: 60
   - name: "${N7}"
     target: "${T7}"
-    interval: 60
   - name: "${N9}"
     target: "${T9}"
-    interval: 60
   - name: "${N11}"
     target: "${T11}"
-    interval: 60
 YAML
 
 chmod 600 "$AGENT_YAML"
