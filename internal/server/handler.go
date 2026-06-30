@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,6 +45,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/agents", h.handleAgents)
 	mux.HandleFunc("/api/agents/", h.handleAgentDetail)
 
+	mime.AddExtensionType(".svg", "image/svg+xml")
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		log.Fatalf("static files: %v", err)
