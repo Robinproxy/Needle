@@ -302,10 +302,6 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
 	parts := strings.Split(path, "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -316,6 +312,26 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	agentID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		http.Error(w, "invalid agent id", http.StatusBadRequest)
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		m, err := h.store.GetLatestMetric(agentID)
+		if err == nil && m != nil && time.Now().Unix()-m.CreatedAt < 120 {
+			http.Error(w, "agent is online", http.StatusConflict)
+			return
+		}
+		if err := h.store.DeleteAgent(agentID); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
