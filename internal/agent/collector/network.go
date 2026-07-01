@@ -44,6 +44,15 @@ func (nc *NetworkCollector) Collect() (*NetworkStats, error) {
 	}
 
 	elapsed := now.Sub(nc.prevTime).Seconds()
+
+	// detect OS counter reset (e.g. system reboot) and re-baseline
+	if counters[0].BytesSent < nc.prevUp {
+		nc.prevUp = counters[0].BytesSent
+	}
+	if counters[0].BytesRecv < nc.prevDown {
+		nc.prevDown = counters[0].BytesRecv
+	}
+
 	var up, down int64
 	if elapsed > 0 {
 		up = int64(float64(counters[0].BytesSent-nc.prevUp) / elapsed)
