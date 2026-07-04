@@ -538,7 +538,7 @@ function renderSparkline(elemId, data, color, isPercent) {
       textStyle: { fontSize: 11 },
     },
     series: [{
-      type: 'line', data, smooth: true, symbol: 'none',
+      type: 'line', data, smooth: true, symbol: 'none', sampling: 'lttb',
       lineStyle: { color, width: 1.5 },
       areaStyle: { color: color + '30' },
     }]
