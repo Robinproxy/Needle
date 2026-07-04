@@ -366,6 +366,14 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		for i := range metrics {
+			if metrics[i].NetworkUp > 1e12 {
+				metrics[i].NetworkUp = 0
+			}
+			if metrics[i].NetworkDown > 1e12 {
+				metrics[i].NetworkDown = 0
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(metrics)
 

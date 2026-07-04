@@ -76,8 +76,6 @@ func (s *Store) migrate() error {
 	// migrate expires_at and billing_period (added in v0.3.5)
 	s.db.Exec("ALTER TABLE agents ADD COLUMN expires_at INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN billing_period TEXT DEFAULT ''")
-	// cleanup junk network speed values from counter-reset bug (added in v0.3.6)
-	s.db.Exec("DELETE FROM metrics WHERE network_up > 1e12 OR network_down > 1e12")
 	return nil
 }
 
