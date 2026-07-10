@@ -30,11 +30,31 @@ if [ -z "$VERSION" ]; then
 fi
 
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/needle-linux-$GOARCH.tar.gz"
+CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo "Downloading needle-server $VERSION ($ARCH)..."
-curl -sL "$DOWNLOAD_URL" | tar xz -C "$TMP_DIR"
+curl -sL "$DOWNLOAD_URL" -o "$TMP_DIR/needle-linux-$GOARCH.tar.gz"
+
+# SHA256 checksum verification
+echo "Verifying checksum..."
+EXPECTED_CHECKSUM=$(curl -sL "$CHECKSUM_URL" | awk '{print $1}')
+if [ -n "$EXPECTED_CHECKSUM" ]; then
+  ACTUAL_CHECKSUM=$(sha256sum "$TMP_DIR/needle-linux-$GOARCH.tar.gz" | awk '{print $1}')
+  if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then
+    echo "ERROR: Checksum verification failed!"
+    echo "  Expected: $EXPECTED_CHECKSUM"
+    echo "  Actual:   $ACTUAL_CHECKSUM"
+    echo "The downloaded file may be tampered with. Aborting installation."
+    exit 1
+  fi
+  echo "Checksum verified successfully."
+else
+  echo "WARNING: Could not fetch checksum. Skipping verification."
+fi
+
+tar xzf "$TMP_DIR/needle-linux-$GOARCH.tar.gz" -C "$TMP_DIR"
 
 # Create directories
 mkdir -p "$BIN_DIR" "$DATA_DIR"

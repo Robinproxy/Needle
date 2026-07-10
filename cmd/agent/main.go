@@ -6,25 +6,27 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Hostname      string                    `yaml:"hostname"`
-	Server        string                    `yaml:"server"`
-	Token         string                    `yaml:"token"`
-	Region        string                    `yaml:"region"`
-	ExpiresAt     string                    `yaml:"expires_at"`
-	BillingPeriod string                    `yaml:"billing_period"`
-	Interval      int                       `yaml:"interval"`
-	Insecure      bool                      `yaml:"insecure"`
-	TCPing        []collector.TCPingTarget  `yaml:"tcpping"`
+	Hostname      string                   `yaml:"hostname"`
+	Server        string                   `yaml:"server"`
+	Token         string                   `yaml:"token"`
+	Region        string                   `yaml:"region"`
+	ExpiresAt     string                   `yaml:"expires_at"`
+	BillingPeriod string                   `yaml:"billing_period"`
+	Interval      int                      `yaml:"interval"`
+	Insecure      bool                     `yaml:"insecure"`
+	TCPing        []collector.TCPingTarget `yaml:"tcpping"`
 }
 
 func main() {
@@ -47,6 +49,12 @@ func main() {
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 30
+	}
+
+	// Warn if using plain HTTP without TLS
+	if strings.HasPrefix(cfg.Server, "http://") && !cfg.Insecure {
+		log.Println("WARNING: Using HTTP without TLS. Token will be transmitted in plaintext.")
+		log.Println("Set 'insecure: true' in config to suppress this warning, or use HTTPS.")
 	}
 
 	reporter := agentpkg.NewReporter(cfg.Server, cfg.Token, cfg.Insecure)
@@ -135,13 +143,13 @@ func main() {
 			Region:        cfg.Region,
 			ExpiresAt:     expiresAtUnix,
 			BillingPeriod: cfg.BillingPeriod,
-			CPU:      cpu,
-			Memory:   mem,
-			Disk:     diskStat,
-			Network:  netStat,
-			Load:     load,
-			Uptime:   uptime,
-			TCPing:   tcpping,
+			CPU:           cpu,
+			Memory:        mem,
+			Disk:          diskStat,
+			Network:       netStat,
+			Load:          load,
+			Uptime:        uptime,
+			TCPing:        tcpping,
 		}
 
 		if err := reporter.Send(ctx, data); err != nil {

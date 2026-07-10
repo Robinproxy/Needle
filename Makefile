@@ -34,7 +34,10 @@ release:
 	    needle-server needle-agent \
 	    install-server.sh install-agent.sh agent.yaml.example && \
 	  rm needle-server needle-agent && \
-	  sha256sum needle-*.tar.gz > checksums.txt
+	  sha256sum needle-*.tar.gz > checksums.txt && \
+	  for f in needle-*.tar.gz; do \
+	    sha256sum "$$f" > "$$f.sha256"; \
+	  done
 
 clean:
 	rm -rf bin/ data/ release/

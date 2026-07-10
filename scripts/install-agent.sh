@@ -34,11 +34,31 @@ if [ -z "$VERSION" ]; then
 fi
 
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/needle-linux-$GOARCH.tar.gz"
+CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo "Downloading needle-agent $VERSION ($ARCH)..."
-curl -sL "$DOWNLOAD_URL" | tar xz -C "$TMP_DIR"
+curl -sL "$DOWNLOAD_URL" -o "$TMP_DIR/needle-linux-$GOARCH.tar.gz"
+
+# SHA256 checksum verification
+echo "Verifying checksum..."
+EXPECTED_CHECKSUM=$(curl -sL "$CHECKSUM_URL" | awk '{print $1}')
+if [ -n "$EXPECTED_CHECKSUM" ]; then
+  ACTUAL_CHECKSUM=$(sha256sum "$TMP_DIR/needle-linux-$GOARCH.tar.gz" | awk '{print $1}')
+  if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then
+    echo "ERROR: Checksum verification failed!"
+    echo "  Expected: $EXPECTED_CHECKSUM"
+    echo "  Actual:   $ACTUAL_CHECKSUM"
+    echo "The downloaded file may be tampered with. Aborting installation."
+    exit 1
+  fi
+  echo "Checksum verified successfully."
+else
+  echo "WARNING: Could not fetch checksum. Skipping verification."
+fi
+
+tar xzf "$TMP_DIR/needle-linux-$GOARCH.tar.gz" -C "$TMP_DIR"
 
 # Read old config before stopping anything
 OLD_HOSTNAME=""
@@ -154,9 +174,10 @@ chmod 600 "$AGENT_YAML"
 if [ -n "$OLD_HOSTNAME" ] && [ "$OLD_HOSTNAME" != "$HOSTNAME" ] && [ -n "$OLD_TOKEN" ] && [ -n "$OLD_SERVER" ]; then
     echo "Hostname changed: '$OLD_HOSTNAME' → '$HOSTNAME'"
     echo "Unregistering old agent from server..."
-    curl -s -X POST "$OLD_SERVER/api/unregister" \
+    echo "{\"hostname\":\"$OLD_HOSTNAME\",\"token\":\"$OLD_TOKEN\"}" | \
+        curl -s -X POST "$OLD_SERVER/api/unregister" \
         -H "Content-Type: application/json" \
-        -d "{\"hostname\":\"$OLD_HOSTNAME\",\"token\":\"$OLD_TOKEN\"}" >/dev/null 2>&1 || true
+        --data-binary @- >/dev/null 2>&1 || true
 fi
 
 echo "Installing systemd service..."
@@ -171,6 +192,20 @@ Type=simple
 ExecStart=${BIN_DIR}/needle-agent ${AGENT_YAML}
 Restart=always
 RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=${INSTALL_DIR}
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target

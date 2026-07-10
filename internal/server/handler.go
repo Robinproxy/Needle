@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -55,6 +56,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/", fileServer)
 }
 
+func (h *Handler) validateToken(token string) bool {
+	return subtle.ConstantTimeCompare([]byte(token), []byte(h.serverToken)) == 1
+}
+
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -101,7 +106,7 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 	if token == "" {
 		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	}
-	if token != h.serverToken {
+	if !h.validateToken(token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -121,6 +126,7 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
+			reportThrottle.Delete(a.ID)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 			return
@@ -136,12 +142,11 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Token         string `json:"token"`
 		Hostname      string `json:"hostname"`
 		Region        string `json:"region"`
 		ExpiresAt     *int64 `json:"expires_at"`
 		BillingPeriod string `json:"billing_period"`
-		CPU      *struct {
+		CPU           *struct {
 			Percent float64 `json:"percent"`
 		} `json:"cpu"`
 		Memory *struct {
@@ -163,9 +168,9 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Load5  float64 `json:"load5"`
 			Load15 float64 `json:"load15"`
 		} `json:"load"`
-		Uptime uint64 `json:"uptime"`
+		Uptime    uint64 `json:"uptime"`
 		CreatedAt *int64 `json:"created_at"`
-		TCPing []struct {
+		TCPing    []struct {
 			Name      string  `json:"name"`
 			Target    string  `json:"target"`
 			LatencyMs float64 `json:"latency_ms"`
@@ -180,11 +185,8 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := req.Token
-	if token == "" {
-		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	}
-	if token != h.serverToken {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !h.validateToken(token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -193,7 +195,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, err := h.store.UpsertAgent(req.Hostname, req.Token, req.Region, req.ExpiresAt, req.BillingPeriod)
+	agentID, err := h.store.UpsertAgent(req.Hostname, token, req.Region, req.ExpiresAt, req.BillingPeriod)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -291,11 +293,11 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type agentWithMetric struct {
-		Agent        AgentRow     `json:"agent"`
-		Metric       *MetricRow   `json:"latest_metric,omitempty"`
-		LatestTCPing []TCPingRow  `json:"latest_tcpping,omitempty"`
-		ExpiryDays   int          `json:"expiry_days"`
-		ExpiryDate   string       `json:"expiry_date"`
+		Agent        AgentRow    `json:"agent"`
+		Metric       *MetricRow  `json:"latest_metric,omitempty"`
+		LatestTCPing []TCPingRow `json:"latest_tcpping,omitempty"`
+		ExpiryDays   int         `json:"expiry_days"`
+		ExpiryDate   string      `json:"expiry_date"`
 	}
 
 	result := make([]agentWithMetric, 0, len(agents))
@@ -337,6 +339,7 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		reportThrottle.Delete(agentID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return

@@ -18,13 +18,13 @@ type ReportData struct {
 	Region        string                   `json:"region"`
 	ExpiresAt     *int64                   `json:"expires_at,omitempty"`
 	BillingPeriod string                   `json:"billing_period,omitempty"`
-	CPU       *collector.CPUStats     `json:"cpu"`
-	Memory    *collector.MemoryStats  `json:"memory"`
-	Disk      *collector.DiskStats    `json:"disk"`
-	Network   *collector.NetworkStats `json:"network"`
-	Load      *collector.LoadStats    `json:"load"`
-	Uptime    uint64                  `json:"uptime"`
-	TCPing    []collector.TCPingResult `json:"tcpping,omitempty"`
+	CPU           *collector.CPUStats      `json:"cpu"`
+	Memory        *collector.MemoryStats   `json:"memory"`
+	Disk          *collector.DiskStats     `json:"disk"`
+	Network       *collector.NetworkStats  `json:"network"`
+	Load          *collector.LoadStats     `json:"load"`
+	Uptime        uint64                   `json:"uptime"`
+	TCPing        []collector.TCPingResult `json:"tcpping,omitempty"`
 }
 
 type Reporter struct {
@@ -45,15 +45,7 @@ func NewReporter(serverURL, token string, insecure bool) *Reporter {
 }
 
 func (r *Reporter) Send(ctx context.Context, data *ReportData) error {
-	payload := struct {
-		Token string `json:"token"`
-		ReportData
-	}{
-		Token:      r.token,
-		ReportData: *data,
-	}
-
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
