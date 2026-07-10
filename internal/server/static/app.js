@@ -264,12 +264,12 @@ function renderCard(a, idx, isActive) {
   if (a.latest_tcpping && a.latest_tcpping.length > 0) {
     const saved = getCardTcpping(a.agent.id);
     const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
-    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
-    const lossStr = p.success ? '0%' : '100%';
+    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
+    const lossStr = p.success ? '0%' : '-';
     const names = [...new Set(a.latest_tcpping.map(t => t.name))];
     const dotIdx = names.indexOf(p.name);
     const dotBg = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
-    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('red');
+    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
     const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
     pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat"><span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + latClr + '">' + latStr + '</span></span><span class="ping-loss"><span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lossClr + '">' + lossStr + '</span></span></div>';
   }
@@ -319,12 +319,12 @@ function renderListRow(a, idx, isActive) {
   if (a.latest_tcpping && a.latest_tcpping.length > 0) {
     const saved = getCardTcpping(a.agent.id);
     const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
-    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
-    const lossStr = p.success ? '0%' : '100%';
+    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
+    const lossStr = p.success ? '0%' : '-';
     const names = [...new Set(a.latest_tcpping.map(t => t.name))];
     const dotIdx = names.indexOf(p.name);
     const dotBg = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
-    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('red');
+    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
     const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
     pingHtml = '<span class="list-ping">'
       + '<span class="ping-dot" style="background:' + dotBg + '"></span>'
@@ -815,12 +815,12 @@ function softRefresh() {
             pingDot.style.background = TCPPING_COLORS[dotIdx >= 0 ? dotIdx % TCPPING_COLORS.length : 0];
           }
           if (pingLat) {
-            const lv = p.success ? p.latency_ms.toFixed(1) + 'ms' : 'timeout';
-            const lc = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('red');
+            const lv = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
+            const lc = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
             pingLat.innerHTML = '<span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + lc + '">' + lv + '</span>';
           }
           if (pingLoss) {
-            const lv = p.success ? '0%' : '100%';
+            const lv = p.success ? '0%' : '-';
             const lc = valCss(pingLossColor(p.success ? 0 : 100));
             pingLoss.innerHTML = '<span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lc + '">' + lv + '</span>';
           }
