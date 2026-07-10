@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -76,10 +77,18 @@ func main() {
 
 	collector.CollectCPU()
 
-	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
-	defer ticker.Stop()
+	// protect reportFn with a mutex so we wait for an in-flight report
+	var reportMu sync.Mutex
 
-	report := func() {
+	reportFn := func() {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+
+		// after receiving shutdown signal, skip new reports
+		if ctx.Err() != nil {
+			return
+		}
+
 		cpu, err := collector.CollectCPU()
 		if err != nil {
 			log.Printf("collect cpu: %v", err)
@@ -140,15 +149,20 @@ func main() {
 		}
 	}
 
-	report()
+	reportFn()
+
+	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			report()
+			reportFn()
 		case <-sigCh:
-			log.Println("shutting down...")
+			log.Println("shutting down...waiting for in-flight report...")
+			reportMu.Lock()
 			cancel()
+			reportMu.Unlock()
 			return
 		}
 	}

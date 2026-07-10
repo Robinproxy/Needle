@@ -41,6 +41,7 @@ func NewHandler(store *Store, serverToken string) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/report", h.handleReport)
 	mux.HandleFunc("/api/unregister", h.handleUnregister)
+	mux.HandleFunc("/api/health", h.handleHealth)
 	mux.HandleFunc("/api/info", h.handleInfo)
 	mux.HandleFunc("/api/agents", h.handleAgents)
 	mux.HandleFunc("/api/agents/", h.handleAgentDetail)
@@ -52,6 +53,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.Handle("/", fileServer)
+}
+
+func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
