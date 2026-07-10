@@ -641,11 +641,11 @@ function renderTCPingChart(id, results) {
       + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
       + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
       + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
-      + '<span class="col-stat ' + (lossPct >= 5 ? 'high-loss' : '') + '">' + lossPct.toFixed(1) + '%</span>'
-    + '</div>';
-  }).join('');
-  document.getElementById('tcpping-rows-' + id).innerHTML = statsHtml;
-  applyTcppingSelections(id, names);
+       + '<span class="col-stat ' + (lossPct >= 5 && vals.length > 0 ? 'high-loss' : '') + '">' + (vals.length > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
+     + '</div>';
+   }).join('');
+   document.getElementById('tcpping-rows-' + id).innerHTML = statsHtml;
+   applyTcppingSelections(id, names);
 }
 
 function saveTcppingSelections(id) {
@@ -907,7 +907,7 @@ function updateDetailCharts(id) {
         + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
         + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
         + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
-        + '<span class="col-stat ' + (lossPct >= 5 ? 'high-loss' : '') + '">' + lossPct.toFixed(1) + '%</span>'
+        + '<span class="col-stat ' + (lossPct >= 5 && vals.length > 0 ? 'high-loss' : '') + '">' + (vals.length > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
       + '</div>';
     }).join('');
     const rowsEl = document.getElementById('tcpping-rows-' + id);
