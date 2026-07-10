@@ -50,11 +50,14 @@ jobs:
           cd ..
 
       - name: Generate checksums
-        run: sha256sum needle-*.tar.gz > checksums.txt
+        run: |
+          sha256sum needle-*.tar.gz > checksums.txt
+          for f in needle-*.tar.gz; do sha256sum "$f" > "$f.sha256"; done
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
             needle-linux-*.tar.gz
+            needle-linux-*.tar.gz.sha256
             checksums.txt
