@@ -28,6 +28,18 @@
 | 🔄 **灵活升级** | 不强制 Agent 升级，新功能通过可选字段扩展，旧版本兼容运行 |
 | 📦 **极简部署** | Server + Agent 两个独立二进制，SQLite 零配置，无外部依赖 |
 
+## 安全设计
+
+| 类别 | 措施 | 说明 |
+|------|------|------|
+| 🔐 **完整性** | 二进制 SHA256 校验 | 每次 Release 自动生成 `.sha256`，安装/升级脚本下载后即时校验，防止供应链篡改 |
+| 🔑 **Token 保护** | Header-only 传输 | Token 仅通过 `Authorization: Bearer` 头传输，不出现在 JSON body 中，减少日志/审计暴露面 |
+| 🔑 **Token 保护** | 常量时间比较 | 服务端使用 `crypto/subtle.ConstantTimeCompare` 进行 token 比对，防止时序攻击 |
+| 🔑 **Token 保护** | 不暴露在进程列表 | 安装/升级脚本的 curl 使用 `--data-binary @-` 从 stdin 读取 token，不出现在 `ps` 中 |
+| 🔑 **Token 保护** | 配置文件权限 | `agent.yaml` 权限设置为 `600`，仅 root 可读 |
+| 🛡️ **Agent 沙箱** | systemd 安全加固 | 进程运行时启用 `NoNewPrivileges`、`ProtectSystem=strict`、`ProtectHome=true`、`PrivateTmp=true`、`RestrictNamespaces=true`、`LockPersonality=true`、`RestrictRealtime=true`、`RestrictSUIDSGID=true`、`RemoveIPC=true`、清空 Capability |
+| 📡 **传输安全** | HTTP 明文警告 | Agent 使用 HTTP 连接时自动打印警告，提醒生产环境应使用 HTTPS |
+| 🔄 **向后兼容** | 旧版 Agent 无需升级 | 旧 Agent 同时携带 Header + Body token，新 Server 只读 Header，完全兼容 |
 
 ## 特色功能
 
@@ -112,6 +124,14 @@ Agent（在每台 VPS 上运行）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
+```
+
+### Agent 一键升级
+
+```bash
+# 零交互升级，自动读取现有配置（/opt/needle-agent/agent.yaml）
+# 自动下载最新版、校验 SHA256、替换二进制、更新 systemd 安全配置、重启服务
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh | sudo bash
 ```
 
 ### Docker 本地构建

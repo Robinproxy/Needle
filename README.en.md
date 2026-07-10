@@ -28,6 +28,18 @@
 | 🔄 **Graceful Upgrade** | No forced Agent upgrades. New features via optional fields, backward compatible |
 | 📦 **Minimal Deployment** | Two standalone binaries for Server + Agent. SQLite zero configuration, no external dependencies |
 
+## Security Design
+
+| Category | Measure | Description |
+|----------|---------|-------------|
+| 🔐 **Integrity** | Binary SHA256 checksum | Each Release auto-generates `.sha256`, install/upgrade scripts verify immediately after download to prevent supply chain tampering |
+| 🔑 **Token Protection** | Header-only transport | Token is transmitted exclusively via `Authorization: Bearer` header, never in JSON body — reduces log/audit exposure |
+| 🔑 **Token Protection** | Constant-time comparison | Server uses `crypto/subtle.ConstantTimeCompare` for token verification to prevent timing attacks |
+| 🔑 **Token Protection** | Hidden from process list | Install/upgrade scripts use `--data-binary @-` to read token from stdin, never visible in `ps` output |
+| 🔑 **Token Protection** | Config file permissions | `agent.yaml` permissions set to `600`, readable by root only |
+| 🛡️ **Agent Sandbox** | systemd security hardening | Process runs with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `RestrictNamespaces=true`, `LockPersonality=true`, `RestrictRealtime=true`, `RestrictSUIDSGID=true`, `RemoveIPC=true`, empty Capability set |
+| 📡 **Transport Security** | HTTP plaintext warning | Agent prints a warning when connecting over HTTP, reminding production should use HTTPS |
+| 🔄 **Backward Compatible** | Old Agents need no upgrade | Old Agents send token in both Header and Body, new Server reads Header only — fully compatible |
 
 ## Features
 
@@ -112,6 +124,15 @@ Agent (run on each VPS):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
+```
+
+### Agent One-Click Upgrade
+
+```bash
+# Zero-interaction upgrade — reuses existing config (/opt/needle-agent/agent.yaml)
+# Automatically fetches latest release, verifies SHA256, replaces binary,
+# updates systemd security config, and restarts the service
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh | sudo bash
 ```
 
 ### Docker Build Locally
