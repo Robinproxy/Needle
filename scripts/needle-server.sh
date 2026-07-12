@@ -229,6 +229,20 @@ EnvironmentFile=${ENV_FILE}
 Restart=always
 RestartSec=5
 
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=${DATA_DIR}
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
 [Install]
 WantedBy=multi-user.target
 UNIT
@@ -240,6 +254,7 @@ cmd_install() {
   download_release_server interactive
 
   mkdir -p "$BIN_DIR" "$DATA_DIR"
+  chmod 700 "$DATA_DIR"
   cp "$TMP_DIR/needle-server" "$SERVER_BIN"
   chmod +x "$SERVER_BIN"
 
@@ -251,6 +266,7 @@ cmd_install() {
 NEEDLE_LISTEN=${LISTEN}
 EOF
   chmod 600 "$ENV_FILE"
+  [ -f "$DB_PATH" ] && chmod 600 "$DB_PATH"
 
   echo "Installing systemd service..."
   write_systemd_unit
@@ -293,8 +309,10 @@ cmd_upgrade() {
 
   echo "Installing new binary..."
   mkdir -p "$BIN_DIR" "$DATA_DIR"
+  chmod 700 "$DATA_DIR"
   cp "$TMP_DIR/needle-server" "$SERVER_BIN"
   chmod +x "$SERVER_BIN"
+  [ -f "$DB_PATH" ] && chmod 600 "$DB_PATH"
 
   if [ -f "$ENV_FILE" ]; then
     echo "Updating systemd unit (config preserved)..."

@@ -36,6 +36,8 @@ func newStore(path string, purge bool) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Restrict DB file perms (tokens live here). Best-effort for existing files.
+	_ = os.Chmod(path, 0600)
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()

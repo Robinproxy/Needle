@@ -29,8 +29,23 @@ function tcppingColor(name) {
 }
 
 function escapeHtml(s) {
-  if (typeof s !== 'string') return s;
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function mapCarrier(name) {
@@ -85,7 +100,7 @@ function formatUptime(s) {
 }
 
 function flagEmoji(code) {
-  if (!code || code.length !== 2) return '\u{1F310}';
+  if (!code || !/^[a-zA-Z]{2}$/.test(code)) return '\u{1F310}';
   return '<span class="fi fi-' + code.toLowerCase() + '"></span>';
 }
 
@@ -124,14 +139,14 @@ function renderInfoBar() {
   const regionHtml = Object.entries(regions)
     .sort((a, b) => b[1] - a[1])
     .map(([code, count]) => {
-      const label = code.length === 2 ? flagEmoji(code) : code;
+      const label = /^[a-zA-Z]{2}$/.test(code) ? flagEmoji(code) : escapeHtml(code);
       const active = filterRegion === code;
-      return '<span class="item region-filter' + (active ? ' active' : '') + '" onclick="setRegionFilter(\'' + escapeHtml(code) + '\')"><span class="value pri">' + label + '</span> <span class="value">' + count + '</span></span>';
+      return '<span class="item region-filter' + (active ? ' active' : '') + '" data-region="' + escapeAttr(code) + '" style="cursor:pointer"><span class="value pri">' + label + '</span> <span class="value">' + count + '</span></span>';
     })
     .join('');
 
   document.getElementById('server-info').innerHTML =
-    '<span class="item' + (!filterRegion ? ' active' : '') + '" onclick="setRegionFilter(\'\')" style="cursor:pointer"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></span>'
+    '<span class="item' + (!filterRegion ? ' active' : '') + '" data-region="" style="cursor:pointer"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></span>'
     + regionHtml;
 }
 
@@ -644,7 +659,7 @@ function renderTCPingChart(id, results) {
     const color = tcppingColor(name);
 
     const displayName = mapCarrier(name);
-    return '<div class="tcpping-stat-row" onclick="tcppingToggleLine(' + id + ',\'' + escapeHtml(name) + '\')" data-name="' + escapeHtml(name) + '">'
+    return '<div class="tcpping-stat-row" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
       + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
       + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
       + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
@@ -896,7 +911,7 @@ function updateDetailCharts(id) {
       const lossPct = (losses / targetResults.length * 100);
       const color = tcppingColor(name);
       const displayName = mapCarrier(name);
-      return '<div class="tcpping-stat-row" onclick="tcppingToggleLine(' + id + ',\'' + escapeHtml(name) + '\')" data-name="' + escapeHtml(name) + '">'
+      return '<div class="tcpping-stat-row" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
         + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
         + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
         + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
@@ -945,6 +960,21 @@ window.addEventListener('resize', () => {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && expandedId) { toggleExpand(expandedId); }
+});
+
+document.getElementById('server-info')?.addEventListener('click', e => {
+  const el = e.target.closest('[data-region]');
+  if (!el || !e.currentTarget.contains(el)) return;
+  setRegionFilter(el.getAttribute('data-region') || '');
+});
+
+document.addEventListener('click', e => {
+  const row = e.target.closest('.tcpping-stat-row[data-name]');
+  if (!row) return;
+  const id = parseInt(row.getAttribute('data-agent-id'), 10);
+  const name = row.getAttribute('data-name');
+  if (!Number.isFinite(id) || name == null) return;
+  tcppingToggleLine(id, name);
 });
 
 loadServerInfo();

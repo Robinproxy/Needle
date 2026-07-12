@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -72,8 +73,10 @@ func main() {
 		}
 	}
 
-	if err := os.MkdirAll("./data", 0755); err != nil {
-		log.Fatalf("create data dir: %v", err)
+	if dir := filepath.Dir(*dbPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			log.Fatalf("create data dir: %v", err)
+		}
 	}
 
 	store, err := server.NewStore(*dbPath)
@@ -87,8 +90,12 @@ func main() {
 	handler.Register(mux)
 
 	srv := &http.Server{
-		Addr:    *addr,
-		Handler: server.SecurityHeaders(mux),
+		Addr:              *addr,
+		Handler:           server.SecurityHeaders(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {

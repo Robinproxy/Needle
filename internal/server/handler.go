@@ -8,11 +8,56 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+var regionCodeRe = regexp.MustCompile(`(?i)^[a-z]{2}$`)
+
+const (
+	maxRegionLen      = 32
+	maxTCPingNameLen  = 64
+	maxTCPingTargetLen = 256
+	maxTCPingPerReport = 32
+)
+
+func stripControlsCap(s string, maxRunes int) string {
+	var b strings.Builder
+	n := 0
+	for _, ch := range s {
+		if ch < 32 || ch == 127 {
+			continue
+		}
+		b.WriteRune(ch)
+		n++
+		if n >= maxRunes {
+			break
+		}
+	}
+	return b.String()
+}
+
+func sanitizeRegion(r string) string {
+	r = strings.TrimSpace(r)
+	if r == "" {
+		return ""
+	}
+	if regionCodeRe.MatchString(r) {
+		return strings.ToUpper(r)
+	}
+	return stripControlsCap(r, maxRegionLen)
+}
+
+func sanitizeTCPingName(s string) string {
+	return stripControlsCap(strings.TrimSpace(s), maxTCPingNameLen)
+}
+
+func sanitizeTCPingTarget(s string) string {
+	return stripControlsCap(strings.TrimSpace(s), maxTCPingTargetLen)
+}
 
 //go:embed static/*
 var staticFiles embed.FS
@@ -234,7 +279,8 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, err := h.store.UpsertAgent(req.Hostname, token, req.Region, req.ExpiresAt, req.BillingPeriod)
+	region := sanitizeRegion(req.Region)
+	agentID, err := h.store.UpsertAgent(req.Hostname, token, region, req.ExpiresAt, req.BillingPeriod)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -303,11 +349,19 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, t := range req.TCPing {
+	tcpping := req.TCPing
+	if len(tcpping) > maxTCPingPerReport {
+		tcpping = tcpping[:maxTCPingPerReport]
+	}
+	for _, t := range tcpping {
+		name := sanitizeTCPingName(t.Name)
+		if name == "" {
+			continue
+		}
 		if err := h.store.InsertTCPing(&TCPingRow{
 			AgentID:   agentID,
-			Name:      t.Name,
-			Target:    t.Target,
+			Name:      name,
+			Target:    sanitizeTCPingTarget(t.Target),
 			LatencyMs: t.LatencyMs,
 			Success:   t.Success,
 		}, createdAt); err != nil {
