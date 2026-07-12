@@ -52,7 +52,7 @@ func newStore(path string, purge bool) (*Store, error) {
 func (s *Store) migrate() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS agents (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id INTEGER PRIMARY KEY,
 			hostname TEXT UNIQUE NOT NULL,
 			token TEXT NOT NULL,
 			region TEXT DEFAULT '',
@@ -88,7 +88,7 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_metrics_agent_time ON metrics(agent_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tcpping_agent_time ON tcpping_results(agent_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS agent_tokens (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id INTEGER PRIMARY KEY,
 			token TEXT UNIQUE NOT NULL,
 			hostname TEXT,
 			created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
@@ -108,7 +108,94 @@ func (s *Store) migrate() error {
 	// migrate expires_at and billing_period (added in v0.3.5)
 	s.db.Exec("ALTER TABLE agents ADD COLUMN expires_at INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN billing_period TEXT DEFAULT ''")
+	return s.migrateDropAutoIncrement()
+}
+
+// migrateDropAutoIncrement rebuilds tables that historically used AUTOINCREMENT.
+// With AUTOINCREMENT, INSERT ... ON CONFLICT DO UPDATE/NOTHING advances
+// sqlite_sequence even on the UPDATE/IGNORE branch, so agents burned one id
+// per report (upsert). Rebuild as plain INTEGER PRIMARY KEY (max(id)+1),
+// which does not preallocate rowids. Idempotent.
+func (s *Store) migrateDropAutoIncrement() error {
+	for _, t := range []string{"agents", "agent_tokens"} {
+		if err := s.rebuildWithoutAutoInc(t); err != nil {
+			return fmt.Errorf("migrate %s: %w", t, err)
+		}
+	}
 	return nil
+}
+
+func (s *Store) rebuildWithoutAutoInc(table string) error {
+	var sqlText string
+	err := s.db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table,
+	).Scan(&sqlText)
+	if err == sql.ErrNoRows {
+		return nil // table not created yet; CREATE handles it
+	}
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(strings.ToUpper(sqlText), "AUTOINCREMENT") {
+		return nil // already migrated
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	defs := map[string]string{
+		"agents": `CREATE TABLE agents_new (
+			id INTEGER PRIMARY KEY,
+			hostname TEXT UNIQUE NOT NULL,
+			token TEXT NOT NULL,
+			region TEXT DEFAULT '',
+			expires_at INTEGER,
+			billing_period TEXT DEFAULT '',
+			created_at INTEGER DEFAULT (strftime('%s','now'))
+		)`,
+		"agent_tokens": `CREATE TABLE agent_tokens_new (
+			id INTEGER PRIMARY KEY,
+			token TEXT UNIQUE NOT NULL,
+			hostname TEXT,
+			created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+			bound_at INTEGER
+		)`,
+	}
+	cols := map[string]string{
+		"agents":       "id, hostname, token, region, expires_at, billing_period, created_at",
+		"agent_tokens": "id, token, hostname, created_at, bound_at",
+	}
+
+	tmp := table + "_new"
+	if _, err := tx.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s`, tmp)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(defs[table]); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf(
+		`INSERT INTO %s(%s) SELECT %s FROM %s`, tmp, cols[table], cols[table], table,
+	)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`DROP TABLE %s`, table)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME TO %s`, tmp, table)); err != nil {
+		return err
+	}
+	// Rebuild standalone indexes dropped with the table.
+	// agents: hostname UNIQUE is inline, nothing to rebuild.
+	if table == "agent_tokens" {
+		if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hostname
+			ON agent_tokens(hostname) WHERE hostname IS NOT NULL AND hostname != ''`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) AllowToken(token string) error {
