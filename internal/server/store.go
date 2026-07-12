@@ -2,11 +2,20 @@ package server
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+)
+
+var (
+	ErrTokenNotFound      = errors.New("token not found")
+	ErrTokenAlreadyBound = errors.New("token already bound to another hostname")
+	ErrHostnameTaken      = errors.New("hostname already bound to another token")
 )
 
 type Store struct {
@@ -76,6 +85,15 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_metrics_agent_time ON metrics(agent_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tcpping_agent_time ON tcpping_results(agent_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS agent_tokens (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			token TEXT UNIQUE NOT NULL,
+			hostname TEXT,
+			created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+			bound_at INTEGER
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hostname
+			ON agent_tokens(hostname) WHERE hostname IS NOT NULL AND hostname != ''`,
 	}
 	for _, q := range queries {
 		if _, err := s.db.Exec(q); err != nil {
@@ -89,6 +107,160 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN expires_at INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN billing_period TEXT DEFAULT ''")
 	return nil
+}
+
+func (s *Store) AllowToken(token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return fmt.Errorf("token is required")
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO agent_tokens(token, hostname, created_at) VALUES(?, NULL, ?)
+		 ON CONFLICT(token) DO NOTHING`,
+		token, time.Now().Unix(),
+	)
+	return err
+}
+
+func (s *Store) LookupToken(token string) (*TokenRow, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, ErrTokenNotFound
+	}
+	row := s.db.QueryRow(
+		`SELECT id, token, hostname, created_at, bound_at FROM agent_tokens WHERE token = ?`,
+		token,
+	)
+	var t TokenRow
+	var hostname sql.NullString
+	var boundAt sql.NullInt64
+	err := row.Scan(&t.ID, &t.Token, &hostname, &t.CreatedAt, &boundAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrTokenNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if hostname.Valid {
+		t.Hostname = hostname.String
+	}
+	if boundAt.Valid {
+		v := boundAt.Int64
+		t.BoundAt = &v
+	}
+	return &t, nil
+}
+
+// BindToken binds an unbound token to hostname on first report.
+func (s *Store) BindToken(token, hostname string) error {
+	token = strings.TrimSpace(token)
+	hostname = strings.TrimSpace(hostname)
+	if token == "" || hostname == "" {
+		return fmt.Errorf("token and hostname are required")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var curHost sql.NullString
+	err = tx.QueryRow(`SELECT hostname FROM agent_tokens WHERE token = ?`, token).Scan(&curHost)
+	if err == sql.ErrNoRows {
+		return ErrTokenNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if curHost.Valid && curHost.String != "" {
+		if curHost.String != hostname {
+			return ErrTokenAlreadyBound
+		}
+		return tx.Commit()
+	}
+
+	var other string
+	err = tx.QueryRow(
+		`SELECT token FROM agent_tokens WHERE hostname = ? AND token != ?`,
+		hostname, token,
+	).Scan(&other)
+	if err == nil {
+		return ErrHostnameTaken
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+
+	now := time.Now().Unix()
+	res, err := tx.Exec(
+		`UPDATE agent_tokens SET hostname = ?, bound_at = ? WHERE token = ? AND (hostname IS NULL OR hostname = '')`,
+		hostname, now, token,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrTokenAlreadyBound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RevokeToken(token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return fmt.Errorf("token is required")
+	}
+	t, err := s.LookupToken(token)
+	if err != nil {
+		return err
+	}
+	if t.Hostname != "" {
+		var agentID int64
+		err = s.db.QueryRow(`SELECT id FROM agents WHERE hostname = ?`, t.Hostname).Scan(&agentID)
+		if err == nil {
+			_ = s.DeleteAgent(agentID)
+		} else if err != sql.ErrNoRows {
+			return err
+		}
+	}
+	_, err = s.db.Exec(`DELETE FROM agent_tokens WHERE token = ?`, token)
+	return err
+}
+
+func (s *Store) ListTokens() ([]TokenRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, token, hostname, created_at, bound_at FROM agent_tokens ORDER BY id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []TokenRow
+	for rows.Next() {
+		var t TokenRow
+		var hostname sql.NullString
+		var boundAt sql.NullInt64
+		if err := rows.Scan(&t.ID, &t.Token, &hostname, &t.CreatedAt, &boundAt); err != nil {
+			return nil, err
+		}
+		if hostname.Valid {
+			t.Hostname = hostname.String
+		}
+		if boundAt.Valid {
+			v := boundAt.Int64
+			t.BoundAt = &v
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (s *Store) DeleteTokenByHostname(hostname string) error {
+	_, err := s.db.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname)
+	return err
 }
 
 func (s *Store) UpsertAgent(hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
@@ -365,6 +537,9 @@ func (s *Store) GetStats() (*ServerStats, error) {
 }
 
 func (s *Store) DeleteAgent(id int64) error {
+	var hostname string
+	_ = s.db.QueryRow(`SELECT hostname FROM agents WHERE id = ?`, id).Scan(&hostname)
+
 	_, err := s.db.Exec("DELETE FROM metrics WHERE agent_id = ?", id)
 	if err != nil {
 		return err
@@ -374,7 +549,13 @@ func (s *Store) DeleteAgent(id int64) error {
 		return err
 	}
 	_, err = s.db.Exec("DELETE FROM agents WHERE id = ?", id)
-	return err
+	if err != nil {
+		return err
+	}
+	if hostname != "" {
+		_, _ = s.db.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname)
+	}
+	return nil
 }
 
 func (s *Store) PurgeOldData() {

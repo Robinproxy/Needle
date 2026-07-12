@@ -304,9 +304,19 @@ cmd_install() {
   read -rp "Server URL [http://127.0.0.1:8008]: " SERVER_URL
   SERVER_URL="${SERVER_URL:-http://127.0.0.1:8008}"
 
-  read -rp "Server token: " TOKEN
+  # Per-agent unique token (not a shared server secret)
+  DEFAULT_TOKEN=""
+  if command -v openssl >/dev/null 2>&1; then
+    DEFAULT_TOKEN=$(openssl rand -hex 16)
+  elif command -v xxd >/dev/null 2>&1; then
+    DEFAULT_TOKEN=$(head -c 16 /dev/urandom | xxd -p -c 256)
+  else
+    DEFAULT_TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  fi
+  read -rp "Agent token (enter for auto-generated) [${DEFAULT_TOKEN}]: " TOKEN
+  TOKEN="${TOKEN:-$DEFAULT_TOKEN}"
   while [ -z "$TOKEN" ]; do
-    read -rp "Server token is required: " TOKEN
+    read -rp "Agent token is required: " TOKEN
   done
 
   read -rp "Report interval (seconds) [30]: " INTERVAL
@@ -411,6 +421,19 @@ YAML
   echo " Region:   $REGION"
   echo " Server:   $SERVER_URL"
   echo " Config:   $AGENT_YAML"
+  echo "========================================="
+  echo
+  echo ">>> IMPORTANT: allow this agent on the Server (whitelist) <<<"
+  echo "  Agent token: $TOKEN"
+  echo
+  echo "  Binary Server:"
+  echo "    sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token $TOKEN"
+  echo
+  echo "  Docker Server (in compose directory):"
+  echo "    docker compose exec needle-server \\"
+  echo "      needle-server -db /data/needle.db allow-token $TOKEN"
+  echo
+  echo "  Hostname binds automatically on first successful report."
   echo "========================================="
   echo "To view logs: journalctl -u $SERVICE_NAME -f"
 }

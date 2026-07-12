@@ -1,9 +1,9 @@
 package server
 
 import (
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"mime"
@@ -31,12 +31,11 @@ func SecurityHeaders(next http.Handler) http.Handler {
 }
 
 type Handler struct {
-	store       *Store
-	serverToken string
+	store *Store
 }
 
-func NewHandler(store *Store, serverToken string) *Handler {
-	return &Handler{store: store, serverToken: serverToken}
+func NewHandler(store *Store) *Handler {
+	return &Handler{store: store}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -56,8 +55,39 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/", fileServer)
 }
 
-func (h *Handler) validateToken(token string) bool {
-	return subtle.ConstantTimeCompare([]byte(token), []byte(h.serverToken)) == 1
+func bearerToken(r *http.Request) string {
+	return strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+}
+
+// authorizeAgent checks whitelist token and hostname binding rules.
+// On first report with unbound token, binds hostname.
+func (h *Handler) authorizeAgent(token, hostname string) error {
+	if token == "" {
+		return errors.New("missing token")
+	}
+	if hostname == "" {
+		return errors.New("hostname required")
+	}
+	row, err := h.store.LookupToken(token)
+	if err != nil {
+		if errors.Is(err, ErrTokenNotFound) {
+			return errors.New("unauthorized")
+		}
+		return err
+	}
+	if row.Hostname == "" {
+		if err := h.store.BindToken(token, hostname); err != nil {
+			if errors.Is(err, ErrHostnameTaken) || errors.Is(err, ErrTokenAlreadyBound) {
+				return err
+			}
+			return err
+		}
+		return nil
+	}
+	if row.Hostname != hostname {
+		return errors.New("token bound to another hostname")
+	}
+	return nil
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -95,23 +125,25 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var req struct {
-		Token    string `json:"token"`
 		Hostname string `json:"hostname"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	token := req.Token
+	token := bearerToken(r)
 	if token == "" {
-		token = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	}
-	if !h.validateToken(token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if req.Hostname == "" {
 		http.Error(w, "hostname required", http.StatusBadRequest)
+		return
+	}
+
+	row, err := h.store.LookupToken(token)
+	if err != nil || row.Hostname == "" || row.Hostname != req.Hostname {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -127,11 +159,15 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			reportThrottle.Delete(a.ID)
+			// DeleteAgent already removes agent_tokens by hostname; ensure token gone
+			_ = h.store.DeleteTokenByHostname(req.Hostname)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 			return
 		}
 	}
+	// agent row gone but token still bound
+	_ = h.store.RevokeToken(token)
 	http.Error(w, "agent not found", http.StatusNotFound)
 }
 
@@ -185,13 +221,16 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !h.validateToken(token) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if req.Hostname == "" {
-		http.Error(w, "hostname required", http.StatusBadRequest)
+	token := bearerToken(r)
+	if err := h.authorizeAgent(token, req.Hostname); err != nil {
+		switch {
+		case errors.Is(err, ErrHostnameTaken), errors.Is(err, ErrTokenAlreadyBound):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case err.Error() == "hostname required":
+			http.Error(w, "hostname required", http.StatusBadRequest)
+		default:
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}
 		return
 	}
 

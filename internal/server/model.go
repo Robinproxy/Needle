@@ -38,3 +38,13 @@ type TCPingRow struct {
 	Success   bool    `json:"success"`
 	CreatedAt int64   `json:"created_at"`
 }
+
+// TokenRow is an allowed agent credential (whitelist).
+// Hostname empty means allowed but not yet bound on first report.
+type TokenRow struct {
+	ID        int64
+	Token     string
+	Hostname  string // empty if unbound
+	CreatedAt int64
+	BoundAt   *int64
+}

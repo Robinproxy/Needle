@@ -33,7 +33,9 @@ Options:
   -y, --yes            Skip uninstall confirmation
   --purge              With uninstall: delete data and config too
 
-Node list/delete (not part of this script):
+Token / agent CLI (not part of this script):
+  sudo $SERVER_BIN -db $DB_PATH allow-token <token>
+  sudo $SERVER_BIN -db $DB_PATH list-tokens
   sudo $SERVER_BIN -db $DB_PATH list-agents
   sudo $SERVER_BIN -db $DB_PATH delete-agent <hostname|id>
 
@@ -123,16 +125,6 @@ file_sha256() {
   else
     echo "ERROR: need sha256sum or shasum" >&2
     exit 1
-  fi
-}
-
-rand_token() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 16
-  elif command -v xxd >/dev/null 2>&1; then
-    head -c 16 /dev/urandom | xxd -p -c 256
-  else
-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
   fi
 }
 
@@ -246,13 +238,8 @@ cmd_install() {
   read -rp "Listen address [${DEFAULT_LISTEN}]: " LISTEN
   LISTEN="${LISTEN:-$DEFAULT_LISTEN}"
 
-  DEFAULT_TOKEN=$(rand_token)
-  read -rp "Server token (enter for random) [${DEFAULT_TOKEN}]: " TOKEN
-  TOKEN="${TOKEN:-$DEFAULT_TOKEN}"
-
   cat > "$ENV_FILE" <<EOF
 NEEDLE_LISTEN=${LISTEN}
-NEEDLE_TOKEN=${TOKEN}
 EOF
   chmod 600 "$ENV_FILE"
 
@@ -270,9 +257,11 @@ EOF
   echo " Data:      $DATA_DIR"
   echo "========================================="
   echo "To view logs: journalctl -u $SERVICE_NAME -f"
-  echo "Token saved to: $ENV_FILE (cat $ENV_FILE to view)"
   echo
-  echo "List/delete agents:"
+  echo "Per-agent tokens (no global NEEDLE_TOKEN):"
+  echo "  After installing an Agent, copy its token and run:"
+  echo "  $SERVER_BIN -db $DB_PATH allow-token <token>"
+  echo "  $SERVER_BIN -db $DB_PATH list-tokens"
   echo "  $SERVER_BIN -db $DB_PATH list-agents"
   echo "  $SERVER_BIN -db $DB_PATH delete-agent <hostname|id>"
 }
@@ -383,14 +372,8 @@ cmd_status() {
   fi
   if [ -f "$ENV_FILE" ]; then
     echo "Config:      $ENV_FILE (present)"
-    # show listen only, never print token value
     if grep -q '^NEEDLE_LISTEN=' "$ENV_FILE" 2>/dev/null; then
       echo "  listen:    $(sed -n 's/^NEEDLE_LISTEN=//p' "$ENV_FILE" | head -1)"
-    fi
-    if grep -q '^NEEDLE_TOKEN=' "$ENV_FILE" 2>/dev/null; then
-      echo "  token:     (set)"
-    else
-      echo "  token:     (missing)"
     fi
   else
     echo "Config:      missing"
@@ -410,7 +393,9 @@ cmd_status() {
     fi
   fi
   echo
-  echo "Agent ops (if installed):"
+  echo "Token / agent ops:"
+  echo "  $SERVER_BIN -db $DB_PATH allow-token <token>"
+  echo "  $SERVER_BIN -db $DB_PATH list-tokens"
   echo "  $SERVER_BIN -db $DB_PATH list-agents"
   echo "  $SERVER_BIN -db $DB_PATH delete-agent <hostname|id>"
 }

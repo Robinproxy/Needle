@@ -25,10 +25,9 @@ func main() {
 		return ":8008"
 	}(), "listen address")
 	dbPath := flag.String("db", "./data/needle.db", "database path")
-	token := flag.String("token", "", "server token for agent authentication")
 	certFile := flag.String("cert", "", "TLS certificate file")
 	keyFile := flag.String("key", "", "TLS key file")
-	yes := flag.Bool("y", false, "skip confirmation for delete-agent")
+	yes := flag.Bool("y", false, "skip confirmation for delete-agent / revoke-token")
 	flag.Parse()
 
 	args := flag.Args()
@@ -47,16 +46,30 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "allow-token":
+			if len(args) < 2 {
+				log.Fatal("usage: needle-server -db <path> allow-token <token>")
+			}
+			if err := runAllowToken(*dbPath, args[1]); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "list-tokens":
+			if err := runListTokens(*dbPath); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "revoke-token":
+			if len(args) < 2 {
+				log.Fatal("usage: needle-server -db <path> [-y] revoke-token <token>")
+			}
+			if err := runRevokeToken(*dbPath, args[1], *yes); err != nil {
+				log.Fatal(err)
+			}
+			return
 		default:
-			log.Fatalf("unknown command %q (supported: list-agents, delete-agent)", args[0])
+			log.Fatalf("unknown command %q (supported: list-agents, delete-agent, allow-token, list-tokens, revoke-token)", args[0])
 		}
-	}
-
-	if *token == "" {
-		*token = os.Getenv("NEEDLE_TOKEN")
-	}
-	if *token == "" {
-		log.Fatal("token is required, set via -token flag or NEEDLE_TOKEN env")
 	}
 
 	if err := os.MkdirAll("./data", 0755); err != nil {
@@ -70,7 +83,7 @@ func main() {
 	defer store.Close()
 
 	mux := http.NewServeMux()
-	handler := server.NewHandler(store, *token)
+	handler := server.NewHandler(store)
 	handler.Register(mux)
 
 	srv := &http.Server{
@@ -182,5 +195,97 @@ func runDeleteAgent(dbPath, target string, yes bool) error {
 		return err
 	}
 	fmt.Printf("deleted agent %q (id=%d)\n", match.Hostname, match.ID)
+	return nil
+}
+
+func runAllowToken(dbPath, token string) error {
+	store, err := openStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer store.Close()
+
+	if err := store.AllowToken(token); err != nil {
+		return err
+	}
+	fmt.Println("token allowed (hostname will bind on first report)")
+	return nil
+}
+
+func maskToken(t string) string {
+	if len(t) <= 12 {
+		return t[:min(4, len(t))] + "..."
+	}
+	return t[:8] + "..." + t[len(t)-4:]
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func runListTokens(dbPath string) error {
+	store, err := openStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer store.Close()
+
+	tokens, err := store.ListTokens()
+	if err != nil {
+		return err
+	}
+	if len(tokens) == 0 {
+		fmt.Println("no tokens")
+		return nil
+	}
+
+	fmt.Printf("%-6s %-20s %-24s %s\n", "ID", "TOKEN", "HOSTNAME", "BOUND_AT")
+	for _, t := range tokens {
+		host := t.Hostname
+		if host == "" {
+			host = "-"
+		}
+		bound := "-"
+		if t.BoundAt != nil {
+			bound = time.Unix(*t.BoundAt, 0).UTC().Format(time.RFC3339)
+		}
+		fmt.Printf("%-6d %-20s %-24s %s\n", t.ID, maskToken(t.Token), host, bound)
+	}
+	return nil
+}
+
+func runRevokeToken(dbPath, token string, yes bool) error {
+	store, err := openStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer store.Close()
+
+	row, err := store.LookupToken(token)
+	if err != nil {
+		return err
+	}
+
+	if !yes {
+		host := row.Hostname
+		if host == "" {
+			host = "(unbound)"
+		}
+		fmt.Printf("Revoke token %s bound to %s? [y/N] ", maskToken(token), host)
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		line = strings.TrimSpace(strings.ToLower(line))
+		if line != "y" && line != "yes" {
+			fmt.Println("aborted")
+			return nil
+		}
+	}
+
+	if err := store.RevokeToken(token); err != nil {
+		return err
+	}
+	fmt.Println("token revoked")
 	return nil
 }

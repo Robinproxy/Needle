@@ -10,6 +10,8 @@ RUN apk add --no-cache ca-certificates tzdata && \
     adduser -D -h /data -s /sbin/nologin needle
 COPY --from=builder /needle-server /usr/local/bin/
 USER needle
+WORKDIR /data
 EXPOSE 8008
 VOLUME /data
 ENTRYPOINT ["needle-server"]
+CMD ["-l", ":8008", "-db", "/data/needle.db"]

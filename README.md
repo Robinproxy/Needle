@@ -31,9 +31,10 @@ Needle 把监控拆成两个**互不指挥**的角色：
 
 要点：
 
-1. **互不干扰** — 两边进程生命周期独立；停 Server 不影响 Agent，停 Agent 只是面板上线状态变化。  
-2. **运维全在终端** — 安装、升级、卸载、列节点、清库记录都在 SSH 里完成，不依赖面板写操作。  
-3. **运维脚本** — 提供 `needle-server.sh` / `needle-agent.sh` 统一装升卸；节点数据用二进制 CLI `list-agents` / `delete-agent`。
+1. **互不干扰** — 两边进程生命周期独立。  
+2. **运维全在终端** — 安装、升级、卸载、登记 token、列/删节点都在 SSH 里完成。  
+3. **每台 Agent 独立 Token** — 安装时自动生成；在 Server 上用 CLI 写入数据库白名单；**首次上报时绑定 hostname**。没有全局共享密钥。  
+4. **运维脚本** — `needle-server.sh` / `needle-agent.sh` + 二进制 CLI（`allow-token` / `list-agents` / `delete-agent` 等）。
 
 ---
 
@@ -41,21 +42,20 @@ Needle 把监控拆成两个**互不指挥**的角色：
 
 ```
                         ┌─ Agent (VPS 1) ─┐
-                        │  CMv4/CUv6/CTv4 │
+                        │  unique token   │
                         └───────┬─────────┘
-                                │ POST /api/report
-                        ┌─ Agent (VPS 2) ─┐      Bearer Token
-                        │  CMv4/CUv6/CTv4 │──────────┐
+                                │ POST /api/report + Bearer
+                        ┌─ Agent (VPS 2) ─┐
+                        │  unique token   │──────────┐
                         └───────┬─────────┘          │
-                                │ POST /api/report   │
                                                  ┌───┴──────────┐
                         ┌─ Agent (VPS N) ─┐      │ Needle Server│
-                        │  CMv4/CUv6/CTv4 │─────→│  (Dashboard) │
+                        │  unique token   │─────→│  Dashboard   │
                         └─────────────────┘      │  SQLite DB   │
                                                  └──────────────┘
 ```
 
-数据流只有 **Agent → Server**，没有反向控制通道。
+数据流只有 **Agent → Server**。鉴权：token 须先在 Server 白名单（`allow-token`）。
 
 ---
 
@@ -64,10 +64,11 @@ Needle 把监控拆成两个**互不指挥**的角色：
 | 措施 | 说明 |
 |------|------|
 | 零信任上报 | Server 永不主动连 Agent |
-| 面板只读 | 无 `DELETE /api/agents` 等远程删除 API |
-| Token | `Authorization: Bearer`；`agent.yaml` / Server `.env` 权限 600 |
-| 二进制校验 | Release 附带 `.sha256`，脚本下载后校验 |
-| Agent 沙箱 | systemd 加固（NoNewPrivileges、ProtectSystem 等） |
+| 面板只读 | 无远程删除 API |
+| 独立 Token | 每台 Agent 唯一；Server SQLite 白名单；首次上报绑定 hostname |
+| Token 传输 | `Authorization: Bearer`；配置文件权限 600 |
+| 二进制校验 | Release 附带 `.sha256` |
+| Agent 沙箱 | systemd 加固 |
 
 ---
 
@@ -76,19 +77,30 @@ Needle 把监控拆成两个**互不指挥**的角色：
 | 功能 | 说明 |
 |------|------|
 | 系统指标 | CPU / 内存 / 磁盘 / 网速 / 负载 / 运行时间 |
-| 流量周期 | 按计费周期展示用量，到期可自动对齐清零逻辑 |
-| TCPing | 多线路延迟（如 CMv4/CUv6），卡片可切换显示 |
-| Region | 国家/地区标识，仪表盘展示节点分布 |
+| 流量周期 | 按计费周期展示用量 |
+| TCPing | 多线路延迟，卡片可切换 |
+| Region | 国家/地区标识 |
+
+---
+
+## 新装流程（摘要）
+
+```text
+1. 部署 Server（Docker 或二进制）
+2. 每台 VPS：needle-agent.sh install  → 自动生成 token 并打印
+3. Server：allow-token <打印的 token>   → 写入白名单
+4. Agent 上报成功 → hostname 自动绑定 → 面板出现节点
+```
 
 ---
 
 ## 部署方式
 
-脚本支持 **curl 或 wget**。无 curl 时可：`apt-get update && apt-get install -y curl`（或 wget）。
+脚本支持 **curl 或 wget**。无 curl 时可：`apt-get update && apt-get install -y curl`。
 
 ### Server · Docker（推荐）
 
-#### 一键部署
+#### 部署
 
 ```bash
 mkdir -p ~/needle && cd ~/needle
@@ -100,17 +112,17 @@ services:
     ports:
       - "${NEEDLE_PORT:-8008}:8008"
     environment:
-      NEEDLE_TOKEN: "${NEEDLE_TOKEN:?error: set NEEDLE_TOKEN in .env}"
+      NEEDLE_LISTEN: ":8008"
     volumes:
       - ./data:/data
     restart: unless-stopped
 EOF
 
-echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
+# 可选端口：echo "NEEDLE_PORT=8080" >> .env
 docker compose up -d
 ```
 
-自定义端口：`echo "NEEDLE_PORT=8080" >> .env && docker compose up -d`
+> **不再需要 `NEEDLE_TOKEN`。** Agent 用独立 token，在下方用 `allow-token` 登记。
 
 #### 运维
 
@@ -123,9 +135,21 @@ docker compose pull && docker compose up -d
 # 日志
 docker compose logs -f needle-server
 
-# 列节点 / 删节点（exec 不走 ENTRYPOINT，服务名后须再写 needle-server）
+# 登记 Agent token（把安装 Agent 时打印的 token 贴到这里）
+docker compose exec needle-server \
+  needle-server -db /data/needle.db allow-token <token>
+
+# 查看 token 白名单 / 节点
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-tokens
 docker compose exec needle-server \
   needle-server -db /data/needle.db list-agents
+
+# 吊销 token（已绑定的节点数据会一并清理）
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y revoke-token <token>
+
+# 删节点数据
 docker compose exec needle-server \
   needle-server -db /data/needle.db delete-agent <hostname|id>
 docker compose exec needle-server \
@@ -141,23 +165,17 @@ docker compose down
 docker compose down -v && rm -rf data
 ```
 
+> `docker compose exec` **不会**走镜像 ENTRYPOINT，服务名后须再写一次 `needle-server`。
+
 #### 目录
 
 | 路径 | 说明 |
 |------|------|
-| `~/needle/docker-compose.yml` | 编排（路径按你创建的目录） |
-| `~/needle/.env` | `NEEDLE_TOKEN`，可选 `NEEDLE_PORT` |
-| `~/needle/data/needle.db` | SQLite 数据库 |
-| 容器内 `/data` | 数据卷挂载点 |
+| `~/needle/docker-compose.yml` | 编排 |
+| `~/needle/.env` | 可选 `NEEDLE_PORT` |
+| `~/needle/data/needle.db` | SQLite（含 token 白名单） |
+| 容器内 `/data` | 数据卷 |
 | 镜像 | `ghcr.io/robinproxy/needle:latest` |
-
-本地构建：
-
-```bash
-git clone https://github.com/Robinproxy/Needle.git && cd Needle
-echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
-docker compose up -d --build
-```
 
 ---
 
@@ -166,39 +184,28 @@ docker compose up -d --build
 #### 一键部署脚本
 
 ```bash
-# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
   -o /tmp/needle-server.sh
-# 或 wget
-wget -qO /tmp/needle-server.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh
+# 或: wget -qO /tmp/needle-server.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh
 
 sudo bash /tmp/needle-server.sh install
 ```
 
-管道：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
-```
-
-无参时：未安装 → `install`，已安装 → `upgrade`。
+管道：`curl -fsSL .../needle-server.sh | sudo bash`  
+无参：未安装 → install，已安装 → upgrade。
 
 #### 运维
 
-两种方式任选：**本地脚本**（先下载到 `/tmp`）或 **管道**（每次从 GitHub 拉脚本执行，不落盘）。
-
-**方式 A — 本地脚本**（适合反复运维）：
+**方式 A — 本地脚本：**
 
 ```bash
-sudo bash /tmp/needle-server.sh              # 智能 install / upgrade
-sudo bash /tmp/needle-server.sh upgrade      # 只换二进制，保留 .env 与 data/
+sudo bash /tmp/needle-server.sh upgrade
 sudo bash /tmp/needle-server.sh status
-sudo bash /tmp/needle-server.sh uninstall    # 停服务 + 删二进制，默认保留 data/ 与 .env
-sudo bash /tmp/needle-server.sh uninstall --purge   # 连 data/ 与 .env 一起删除
+sudo bash /tmp/needle-server.sh uninstall          # 保留 data/ 与 .env
+sudo bash /tmp/needle-server.sh uninstall --purge
 ```
 
-**方式 B — 管道**（无需先保存脚本）：
+**方式 B — 管道：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
@@ -207,144 +214,112 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
   | sudo bash -s -- status
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
   | sudo bash -s -- uninstall
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  | sudo bash -s -- uninstall --purge
 ```
 
-**共用（已安装后的二进制 / 日志）：**
+**Token / 节点 CLI：**
 
 ```bash
-# 日志
-journalctl -u needle-server -f
-
-# 列节点 / 删节点（二进制 CLI，不需要 NEEDLE_TOKEN，也不走上面脚本）
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>
+
+journalctl -u needle-server -f
 ```
 
-> `delete-agent` **只删 Server 库里的数据**，不会停远端 Agent。若 Agent 仍在上报，节点会重新出现。
-
-运维结束后，若曾下载过本地脚本，可删除：
-
-```bash
-rm -f /tmp/needle-server.sh
-```
+用完可删临时脚本：`rm -f /tmp/needle-server.sh`
 
 #### 目录
 
 | 路径 | 说明 |
 |------|------|
-| `/opt/needle/bin/needle-server` | Server 二进制 |
-| `/opt/needle/.env` | `NEEDLE_LISTEN`、`NEEDLE_TOKEN`（权限 600） |
+| `/opt/needle/bin/needle-server` | 二进制 |
+| `/opt/needle/.env` | `NEEDLE_LISTEN`（权限 600） |
 | `/opt/needle/data/needle.db` | SQLite |
-| `/etc/systemd/system/needle-server.service` | systemd unit |
-
-也可从 [Releases](https://github.com/Robinproxy/Needle/releases) 解压后前台运行（无 systemd）：
-
-```bash
-TOKEN=$(openssl rand -hex 16)
-tar xzf needle-linux-amd64.tar.gz needle-server
-./needle-server -l :8008 -token "$TOKEN"
-```
+| `/etc/systemd/system/needle-server.service` | unit |
 
 ---
 
 ### Agent · 二进制（systemd）
 
-在每台 VPS 上执行。
-
 #### 一键部署脚本
 
 ```bash
-# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
   -o /tmp/needle-agent.sh
-# 或 wget
-wget -qO /tmp/needle-agent.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh
+# 或: wget -qO /tmp/needle-agent.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh
 
 sudo bash /tmp/needle-agent.sh install
 ```
 
-管道：
+安装结束会**自动生成 token** 并打印，例如：
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh | sudo bash
+```text
+Agent token: a1b2c3d4...
+  sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token a1b2c3d4...
+  docker compose exec needle-server needle-server -db /data/needle.db allow-token a1b2c3d4...
 ```
 
-无参时：未安装 → `install`，已安装 → `upgrade`。
+**请到 Server 上执行 `allow-token`，否则上报会被拒绝（401）。**
 
 #### 运维
 
-两种方式任选：**本地脚本** 或 **管道**。
-
-**方式 A — 本地脚本**：
+**方式 A — 本地脚本：**
 
 ```bash
-sudo bash /tmp/needle-agent.sh              # 智能 install / upgrade
-sudo bash /tmp/needle-agent.sh upgrade      # 零交互升级，保留 agent.yaml
+sudo bash /tmp/needle-agent.sh upgrade
 sudo bash /tmp/needle-agent.sh status
-sudo bash /tmp/needle-agent.sh uninstall    # 仅卸本机（默认，不碰 Server 库）
-sudo bash /tmp/needle-agent.sh uninstall --unregister   # 先通知 Server 删节点，再卸本机
+sudo bash /tmp/needle-agent.sh uninstall
+sudo bash /tmp/needle-agent.sh uninstall --unregister
 ```
 
-**方式 B — 管道**：
+**方式 B — 管道：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
   | sudo bash -s -- upgrade
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  | sudo bash -s -- status
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  | sudo bash -s -- uninstall
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
   | sudo bash -s -- uninstall --unregister
 ```
 
-**日志：**
-
 ```bash
 journalctl -u needle-agent -f
-```
-
-运维结束后，若曾下载过本地脚本，可删除：
-
-```bash
-rm -f /tmp/needle-agent.sh
+rm -f /tmp/needle-agent.sh   # 用完可删本地脚本
 ```
 
 #### 目录
 
 | 路径 | 说明 |
 |------|------|
-| `/opt/needle-agent/bin/needle-agent` | Agent 二进制 |
-| `/opt/needle-agent/agent.yaml` | 配置（权限 600） |
-| `/etc/systemd/system/needle-agent.service` | systemd unit |
+| `/opt/needle-agent/bin/needle-agent` | 二进制 |
+| `/opt/needle-agent/agent.yaml` | 配置（含独立 token，600） |
+| `/etc/systemd/system/needle-agent.service` | unit |
 
 ---
 
 ## 配置
 
-### Server 环境变量
+### Server
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
-| `NEEDLE_TOKEN` | Agent 上报认证 Token | **必填** |
-| `NEEDLE_LISTEN` | 二进制监听地址（如 `:9000`） | `:8008` |
-| `NEEDLE_PORT` | Docker 宿主机端口映射（仅数字） | `8008` |
+| `NEEDLE_LISTEN` | 监听地址 | `:8008` |
+| `NEEDLE_PORT` | Docker 宿主机端口 | `8008` |
+
+> 已无全局 `NEEDLE_TOKEN`。鉴权仅靠数据库白名单。
 
 ### agent.yaml
 
 ```yaml
 hostname: ""                                     # 可选，默认系统主机名
 server: http://1.2.3.4:8008                      # 必填，Server 地址
-token: your-token                                # 必填，和 Server 一致
-region: SG                                       # ISO 国家码，如 CN/SG/US
+token: replace-with-unique-agent-token           # 每台唯一；须在 Server allow-token
+region: SG
 billing_period: "1m"                             # 1m/3m/6m/12m，可选
 expires_at: "2026-08-15"                         # YYYY-MM-DD，可选
-interval: 30                                     # 上报间隔（秒）
-insecure: false                                  # true = 跳过 TLS 证书验证
+interval: 30
+insecure: false
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
@@ -366,10 +341,11 @@ tcpping:
 
 | 场景 | 做法 |
 |------|------|
-| 面板上彻底去掉某台 VPS | 在该 VPS：`needle-agent.sh uninstall --unregister`；或先 stop Agent，再在 Server 上 `delete-agent` |
-| Agent 已挂、只清面板残留 | Server：`delete-agent <hostname\|id>` |
-| 删了节点又出现 | Agent 仍在上报 → 先停/卸 Agent，再 `delete-agent` |
-| 只卸本机、Server 先留着 | `needle-agent.sh uninstall`（不加 `--unregister`） |
+| 新装 Agent 后不上线 | 是否在 Server 执行了 `allow-token`？ |
+| 面板去掉某 VPS | Agent：`uninstall --unregister`；或 Server：`delete-agent` / `revoke-token` |
+| 删了节点又出现 | Agent 仍在上报 → 先停/卸 Agent，再 delete |
+| 换 hostname（token 已绑定） | 会 401；需 `revoke-token` 再 `allow-token`，或换新 token |
+| 从旧版共享 token 升级 | **不兼容**：每台重新生成 token 并 `allow-token` |
 
 ---
 

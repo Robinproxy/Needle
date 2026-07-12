@@ -4,7 +4,7 @@ services:
     ports:
       - "${NEEDLE_PORT:-8008}:8008"
     environment:
-      NEEDLE_TOKEN: "${NEEDLE_TOKEN:?error: set NEEDLE_TOKEN in .env or environment}"
+      NEEDLE_LISTEN: ":8008"
     volumes:
       - ./data:/data
     restart: unless-stopped
