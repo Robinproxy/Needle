@@ -294,11 +294,9 @@ function renderCard(a, idx, isActive) {
     expiryHtml = '<span class="expiry-days' + ec + '" title="Due ' + expiryDate + '">' + expiryDays + '</span>';
   }
 
-  const delClick = isOnline ? '' : ' onclick="event.stopPropagation();deleteAgent(' + a.agent.id + ',\'' + escapeHtml(a.agent.hostname) + '\')"';
-
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<div class="card-top">'
-      + '<span class="status-dot ' + (isOnline ? 'online' : 'offline clickable') + '"' + delClick + '></span>'
+      + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
       + '<span class="card-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
       + '<span class="card-session">' + flagEmoji(a.agent.region) + '</span>'
     + '</div>'
@@ -327,8 +325,6 @@ function renderListRow(a, idx, isActive) {
   const regionLabel = region && region.length === 2 ? flagEmoji(region) : escapeHtml(region || '');
   const sess = String(idx + 1).padStart(2, '0');
 
-  const delClick = isOnline ? '' : ' onclick="event.stopPropagation();deleteAgent(' + a.agent.id + ',\'' + escapeHtml(a.agent.hostname) + '\')"';
-
   let pingHtml = '';
   if (a.latest_tcpping && a.latest_tcpping.length > 0) {
     const saved = getCardTcpping(a.agent.id);
@@ -347,7 +343,7 @@ function renderListRow(a, idx, isActive) {
   }
 
   return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
-    + '<span class="status-dot ' + (isOnline ? 'online' : 'offline clickable') + '"' + delClick + '></span>'
+    + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
     + '<span class="list-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
     + '<span class="list-region">' + regionLabel + '</span>'
     + '<span class="list-session">#' + sess + '</span>'
@@ -764,8 +760,8 @@ function softRefresh() {
       card.classList.toggle('offline', !isOnline);
       const dot = card.querySelector('.status-dot');
       if (dot) {
-        dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline clickable');
-        dot.onclick = isOnline ? null : function(e) { e.stopPropagation(); deleteAgent(a.agent.id, a.agent.hostname); };
+        dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
+        dot.onclick = null;
       }
 
       if (!m) return;
@@ -853,18 +849,6 @@ function softRefresh() {
     refreshTraffic();
     if (expandedId) updateDetailCharts(expandedId);
   }).catch(err => console.error('softRefresh:', err));
-}
-
-function deleteAgent(id, hostname) {
-  if (!confirm('\u5220\u9664 ' + hostname + '\uff1f')) return;
-  fetch('/api/agents/' + id, { method: 'DELETE' })
-    .then(r => {
-      if (r.status === 409) { alert('\u8be5\u8282\u70b9\u5728\u7ebf\uff0c\u4e0d\u80fd\u5220\u9664'); return; }
-      if (!r.ok) { alert('\u5220\u9664\u5931\u8d25'); return; }
-      if (expandedId === id) { destroyDetailCharts(); expandedId = null; }
-      fullRefresh();
-    })
-    .catch(() => alert('\u7f51\u7edc\u9519\u8bef'));
 }
 
 function updateDetailCharts(id) {

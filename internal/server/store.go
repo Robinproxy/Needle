@@ -14,15 +14,27 @@ type Store struct {
 }
 
 func NewStore(path string) (*Store, error) {
+	return newStore(path, true)
+}
+
+// NewStoreCLI opens the DB for one-shot CLI ops without starting the purge loop.
+func NewStoreCLI(path string) (*Store, error) {
+	return newStore(path, false)
+}
+
+func newStore(path string, purge bool) (*Store, error) {
 	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, err
 	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
-	s.startPurgeLoop()
+	if purge {
+		s.startPurgeLoop()
+	}
 	return s, nil
 }
 

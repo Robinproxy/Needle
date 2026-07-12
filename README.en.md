@@ -47,7 +47,7 @@
 |---------|-------------|
 | ⏱ **Traffic Auto-Reset** | Traffic counters reset automatically per billing cycle, with per-cycle tracking |
 | 🎯 **TCPing Target Switching** | Click CMv4/CUv6 labels on cards to cycle through probe lines |
-| 🔴 **One-Click Offline Cleanup** | Click the red status dot on an offline node to delete it and all its data |
+| 🛠 **Local CLI Node Cleanup** | Dashboard is display-only; delete agents on the server host via CLI |
 | 🏁 **Custom Flags** | Set your own Region flags for a clear global view on the dashboard |
 
 ## Architecture
@@ -181,6 +181,32 @@ tcpping:
 | `NEEDLE_TOKEN` | Auth token, required for Agent connections | **Required** |
 | `NEEDLE_LISTEN` | Listen address (binary mode, e.g. `:9000`) | `:8008` |
 | `NEEDLE_PORT` | Docker host port mapping (digits only) | `8008` |
+
+---
+
+## Ops: Delete Agents
+
+The dashboard is display-only and has **no** remote delete API. Clean up nodes on the **server host**:
+
+```bash
+# systemd install paths
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
+# skip confirmation
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
+
+# Docker
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-agents
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y delete-agent <hostname|id>
+```
+
+When reinstalling/renaming an agent (requires token):
+
+```bash
+needle-agent -unregister /opt/needle-agent/agent.yaml
+```
 
 ---
 

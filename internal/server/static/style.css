@@ -224,7 +224,6 @@ header {
 }
 .status-dot.online { background: hsl(var(--success)); box-shadow: 0 0 4px hsl(var(--success) / 0.35); }
 .status-dot.offline { background: hsl(var(--destructive)); }
-.status-dot.offline.clickable { cursor: pointer; }
 .card-hostname { font-size: 15px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.01em; }
 .card-session { display: flex; align-items: center; font-size: 13px; flex: 0 0 auto; }
 .expiry-days {

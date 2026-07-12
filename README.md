@@ -47,7 +47,7 @@
 |------|------|
 | ⏱ **Traffic 到期自动清零** | 按计费周期自动重置流量统计，展示各周期用量 |
 | 🎯 **TCPing 目标切换** | 点击卡片上的 CMv4/CUv6 标签循环切换显示线路 |
-| 🔴 **一键删除离线节点** | 点击离线的红色状态点即删除节点及其所有数据 |
+| 🛠 **本机 CLI 清理节点** | 面板只展示、不提供删除；在 Server 主机用 CLI 删除节点 |
 | 🏁 **国旗自定义** | 自定义 Region 标识，仪表盘直观展示全球节点分布 |
 
 ## 架构
@@ -180,6 +180,32 @@ tcpping:
 | `NEEDLE_TOKEN` | 认证 Token，Agent 连接必须携带 | **必填** |
 | `NEEDLE_LISTEN` | 监听地址（二进制运行用，如 `:9000`） | `:8008` |
 | `NEEDLE_PORT` | Docker 宿主机端口映射（仅数字） | `8008` |
+
+---
+
+## 运维：删除节点
+
+面板为纯展示，**不提供**远程删除接口。需要清理节点时，在 **Server 本机** 执行：
+
+```bash
+# systemd 安装路径
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
+# 跳过确认
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
+
+# Docker
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-agents
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y delete-agent <hostname|id>
+```
+
+Agent 重装/改名时，仍可用（需 Token）：
+
+```bash
+needle-agent -unregister /opt/needle-agent/agent.yaml
+```
 
 ---
 

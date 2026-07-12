@@ -329,22 +329,6 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == http.MethodDelete {
-		m, err := h.store.GetLatestMetric(agentID)
-		if err == nil && m != nil && time.Now().Unix()-m.CreatedAt < 120 {
-			http.Error(w, "agent is online", http.StatusConflict)
-			return
-		}
-		if err := h.store.DeleteAgent(agentID); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		reportThrottle.Delete(agentID)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-		return
-	}
-
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
