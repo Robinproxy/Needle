@@ -141,40 +141,33 @@ wget -qO /tmp/needle-install-server.sh \
 sudo bash /tmp/needle-install-server.sh
 ```
 
-Agent（在每台 VPS 上运行）：
+Agent（在每台 VPS 上运行）——统一入口 `needle-agent.sh`：
 
 ```bash
 # curl
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh \
-  -o /tmp/needle-install-agent.sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  -o /tmp/needle-agent.sh
 # 或 wget
-wget -qO /tmp/needle-install-agent.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh
+wget -qO /tmp/needle-agent.sh \
+  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh
 
-sudo bash /tmp/needle-install-agent.sh
+sudo bash /tmp/needle-agent.sh              # 未安装 → install；已安装 → upgrade
+sudo bash /tmp/needle-agent.sh install      # 交互安装
+sudo bash /tmp/needle-agent.sh upgrade      # 零交互升级（保留 agent.yaml）
+sudo bash /tmp/needle-agent.sh status
+sudo bash /tmp/needle-agent.sh uninstall    # 仅卸本机（默认）
+sudo bash /tmp/needle-agent.sh uninstall --unregister   # 先通知 Server 删节点，再卸本机
 ```
 
 也可用管道（需本机已有 curl 或先 `apt-get install -y curl`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh | sudo bash
 ```
 
-### Agent 一键升级
-
-零交互升级：自动读取 `/opt/needle-agent/agent.yaml`，下载最新版、校验 SHA256、替换二进制、更新 systemd 安全配置并重启。
-
-```bash
-# curl
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh \
-  -o /tmp/needle-upgrade-agent.sh
-# 或 wget
-wget -qO /tmp/needle-upgrade-agent.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh
-
-sudo bash /tmp/needle-upgrade-agent.sh
-```
+> **说明：** `uninstall` 默认只停服务并删除 `/opt/needle-agent`，**不会**清 Server 数据库。  
+> 需要同时从面板去掉节点时，使用 `uninstall --unregister`；若 Agent 已无法连 Server，再到 Server 上执行 `delete-agent`。
 
 ### Docker 本地构建
 
@@ -300,10 +293,16 @@ deleted agent "dedi-us" (id=46)
 
 ### Agent 侧注销（可选）
 
-Agent 重装或改 hostname 时，可在 **Agent 机器**上注销（需 Token，与 Server CLI 互补）：
+Agent 卸载时若要同时通知 Server 删节点：
 
 ```bash
-needle-agent -unregister /opt/needle-agent/agent.yaml
+sudo bash /tmp/needle-agent.sh uninstall --unregister
+```
+
+或调用二进制（需 Token，配置文件路径按实际填写）：
+
+```bash
+/opt/needle-agent/bin/needle-agent -unregister /opt/needle-agent/agent.yaml
 ```
 
 ---

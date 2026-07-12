@@ -42,11 +42,11 @@ jobs:
         run: |
           cd release
           cp ../scripts/install-server.sh .
-          cp ../scripts/install-agent.sh .
+          cp ../scripts/needle-agent.sh .
           cp ../agent.yaml.example .
           tar czf ../needle-linux-${{ matrix.goarch }}.tar.gz \
             needle-server needle-agent \
-            install-server.sh install-agent.sh agent.yaml.example
+            install-server.sh needle-agent.sh agent.yaml.example
           cd ..
 
       - name: Generate checksums
