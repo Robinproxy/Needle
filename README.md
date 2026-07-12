@@ -272,12 +272,15 @@ sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agen
 ./needle-server -db ./data/needle.db -y delete-agent <hostname|id>
 ```
 
-**Docker**（镜像 `ENTRYPOINT` 为 `needle-server`，参数直接跟在服务名后；数据卷为 `/data`）：
+**Docker**（`docker compose exec` **不会**走镜像 ENTRYPOINT，服务名后须再写一次二进制名；数据卷为 `/data`）：
 
 ```bash
-docker compose exec needle-server -db /data/needle.db list-agents
-docker compose exec needle-server -db /data/needle.db delete-agent dedi-us
-docker compose exec needle-server -db /data/needle.db -y delete-agent 46
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-agents
+docker compose exec needle-server \
+  needle-server -db /data/needle.db delete-agent dedi-us
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y delete-agent 46
 ```
 
 ### 输出示例
