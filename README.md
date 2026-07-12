@@ -22,10 +22,9 @@
 
 ## 设计理念
 
-- **纯出站** — Agent 只上报 `POST /api/report`，Server 永远不主动连 Agent
-- **面板只读** — 安装 / 升级 / 删节点 / 吊销 token 全部在终端完成，面板不做写操作
-- **每台 Agent 独立 Token** — 安装自动生成，写入 `agent.yaml`；你在 Server 上执行 `allow-token` 登记白名单，首次上报绑定 hostname。一台被入侵不会传染其它节点
-- **零共享密钥** — 没有全局 `NEEDLE_TOKEN`，一机一密钥
+- **纯出站** — Agent 只上报 ，Server 永远不主动连 Agent
+- **面板只读** — 运维全部在终端完成，面板不做写操作
+- **零共享密钥** — 各vps相互隔离，一机一密钥
 
 ---
 
@@ -33,13 +32,9 @@
 
 | 特色 | 说明 |
 |------|------|
-| 🔑 **每 Agent 独立 Token** | 安装自动生成；Server `allow-token` 登记白名单；首次上报绑定 hostname |
-| 🔒 **面板只读 / 终端运维** | 无远程删除 API；删节点 / 吊销 token 都在 Server CLI |
-| 📡 **纯出站零信任** | Agent 只上报，Server 永不主动连 Agent |
 | ⏱ **Traffic 周期** | 按计费周期展示用量 |
 | 🎯 **TCPing 多线路** | CMv4 / CUv6 等线路可切换 |
 | 🏁 **Region 国旗** | 自定义地区标识 |
-| 📊 **系统指标** | CPU / 内存 / 磁盘 / 网速 / 负载 / 运行时间 |
 
 ---
 
