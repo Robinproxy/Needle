@@ -55,28 +55,6 @@
                               └──────────────────┘
 ```
 
-**数据流：单向，Agent → Server。**
-
-**鉴权流程：**
-1. Agent 安装时生成独立 token，写入本机 `agent.yaml`
-2. 在 Server 执行 `allow-token <token>`，写入 `agent_tokens` 白名单表
-3. Agent 首次上报时 token + hostname 自动绑定
-
----
-
-## 安全要点
-
-| 措施 | 说明 |
-|------|------|
-| 零信任上报 | Server 永不主动连 Agent |
-| 面板只读 | 无远程删除 API |
-| 独立 Token | 每台唯一；Server `agent_tokens` 表；首次上报绑定 hostname |
-| Token 存放 | Agent：`agent.yaml`（600）；Server：`needle.db`（勿公开备份） |
-| Token 传输 | `Authorization: Bearer`；生产建议 HTTPS |
-| 二进制校验 | Release 附带 `.sha256` |
-| Agent 沙箱 | systemd 加固（NoNewPrivileges、ProtectSystem 等） |
-
----
 
 ## 命令速查
 
@@ -248,17 +226,10 @@ docker compose up -d --build
 #### 部署
 
 ```bash
-# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
   -o /tmp/needle-server.sh
-# 或 wget
-wget -qO /tmp/needle-server.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh
-
 sudo bash /tmp/needle-server.sh install
 ```
-
-管道（无参 = 未装 install / 已装 upgrade）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
@@ -335,13 +306,8 @@ tar xzf needle-linux-amd64.tar.gz needle-server
 #### 部署
 
 ```bash
-# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
   -o /tmp/needle-agent.sh
-# 或 wget
-wget -qO /tmp/needle-agent.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh
-
 sudo bash /tmp/needle-agent.sh install
 ```
 
