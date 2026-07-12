@@ -331,26 +331,6 @@ cmd_install() {
   read_prompt INTERVAL "Report interval (seconds) [30]: "
   INTERVAL="${INTERVAL:-30}"
 
-  TCPING_DEFAULTS="CMv4 sh-cm-v4.ip.zstaticcdn.com:80 CMv6 sh-cm-v6.ip.zstaticcdn.com:80 CUv4 sh-cu-v4.ip.zstaticcdn.com:80 CUv6 sh-cu-v6.ip.zstaticcdn.com:80 CTv4 sh-ct-v4.ip.zstaticcdn.com:80 CTv6 sh-ct-v6.ip.zstaticcdn.com:80"
-
-  echo
-  echo "TCPing targets (edit the defaults or press enter to keep):"
-  # shellcheck disable=SC2086
-  set -- $TCPING_DEFAULTS
-  N1="$1"; T1="$2"; N3="$3"; T3="$4"; N5="$5"; T5="$6"; N7="$7"; T7="$8"; N9="$9"; T9="${10}"; N11="${11}"; T11="${12}"
-  read_prompt V "  Target 1 name [${N1}]: "; N1="${V:-$N1}"
-  read_prompt V "  Target 1 address [${T1}]: "; T1="${V:-$T1}"
-  read_prompt V "  Target 2 name [${N3}]: "; N3="${V:-$N3}"
-  read_prompt V "  Target 2 address [${T3}]: "; T3="${V:-$T3}"
-  read_prompt V "  Target 3 name [${N5}]: "; N5="${V:-$N5}"
-  read_prompt V "  Target 3 address [${T5}]: "; T5="${V:-$T5}"
-  read_prompt V "  Target 4 name [${N7}]: "; N7="${V:-$N7}"
-  read_prompt V "  Target 4 address [${T7}]: "; T7="${V:-$T7}"
-  read_prompt V "  Target 5 name [${N9}]: "; N9="${V:-$N9}"
-  read_prompt V "  Target 5 address [${T9}]: "; T9="${V:-$T9}"
-  read_prompt V "  Target 6 name [${N11}]: "; N11="${V:-$N11}"
-  read_prompt V "  Target 6 address [${T11}]: "; T11="${V:-$T11}"
-
   echo
   echo "VPS billing setup (for dashboard expiry countdown and traffic reset):"
   echo "  1) Monthly (1m)"
@@ -374,6 +354,26 @@ cmd_install() {
     read_prompt EXPIRES_AT "Next renewal date [${DEFAULT_EXPIRY}]: "
     EXPIRES_AT="${EXPIRES_AT:-$DEFAULT_EXPIRY}"
   fi
+
+  TCPING_DEFAULTS="CMv4 sh-cm-v4.ip.zstaticcdn.com:80 CMv6 sh-cm-v6.ip.zstaticcdn.com:80 CUv4 sh-cu-v4.ip.zstaticcdn.com:80 CUv6 sh-cu-v6.ip.zstaticcdn.com:80 CTv4 sh-ct-v4.ip.zstaticcdn.com:80 CTv6 sh-ct-v6.ip.zstaticcdn.com:80"
+
+  echo
+  echo "TCPing targets (edit the defaults or press enter to keep):"
+  # shellcheck disable=SC2086
+  set -- $TCPING_DEFAULTS
+  N1="$1"; T1="$2"; N3="$3"; T3="$4"; N5="$5"; T5="$6"; N7="$7"; T7="$8"; N9="$9"; T9="${10}"; N11="${11}"; T11="${12}"
+  read_prompt V "  Target 1 name [${N1}]: "; N1="${V:-$N1}"
+  read_prompt V "  Target 1 address [${T1}]: "; T1="${V:-$T1}"
+  read_prompt V "  Target 2 name [${N3}]: "; N3="${V:-$N3}"
+  read_prompt V "  Target 2 address [${T3}]: "; T3="${V:-$T3}"
+  read_prompt V "  Target 3 name [${N5}]: "; N5="${V:-$N5}"
+  read_prompt V "  Target 3 address [${T5}]: "; T5="${V:-$T5}"
+  read_prompt V "  Target 4 name [${N7}]: "; N7="${V:-$N7}"
+  read_prompt V "  Target 4 address [${T7}]: "; T7="${V:-$T7}"
+  read_prompt V "  Target 5 name [${N9}]: "; N9="${V:-$N9}"
+  read_prompt V "  Target 5 address [${T9}]: "; T9="${V:-$T9}"
+  read_prompt V "  Target 6 name [${N11}]: "; N11="${V:-$N11}"
+  read_prompt V "  Target 6 address [${T11}]: "; T11="${V:-$T11}"
 
   cat > "$AGENT_YAML" <<YAML
 hostname: "${HOSTNAME}"
