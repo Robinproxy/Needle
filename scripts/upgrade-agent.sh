@@ -19,16 +19,44 @@ fi
 # Detect arch
 ARCH=$(uname -m)
 case "$ARCH" in
-  x86_64)  GOARCH="amd64" ;;
-  aarch64) GOARCH="arm64" ;;
-  *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
+  x86_64|amd64)   GOARCH="amd64" ;;
+  aarch64|arm64)  GOARCH="arm64" ;;
+  *)              echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-# Get latest release version
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "ERROR: need sha256sum or shasum" >&2
+    exit 1
+  fi
+}
+
+fetch_latest_version() {
+  local ver
+  ver=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$REPO/releases/latest" 2>/dev/null | sed 's#.*/##')
+  if [ -n "$ver" ] && [ "$ver" != "latest" ]; then
+    echo "$ver"
+    return 0
+  fi
+  ver=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  if [ -n "$ver" ]; then
+    echo "$ver"
+    return 0
+  fi
+  return 1
+}
+
 echo "Fetching latest release..."
-VERSION=$(curl -sL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+VERSION=$(fetch_latest_version || true)
 if [ -z "$VERSION" ]; then
   echo "Failed to fetch latest release version."
+  echo "Check network access to GitHub, or install manually from Releases."
   exit 1
 fi
 echo "Latest version: $VERSION"
@@ -37,15 +65,23 @@ DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/needle-linux-$
 CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
+TGZ="$TMP_DIR/needle-linux-$GOARCH.tar.gz"
 
 echo "Downloading needle-agent $VERSION ($ARCH)..."
-curl -sL "$DOWNLOAD_URL" -o "$TMP_DIR/needle-linux-$GOARCH.tar.gz"
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$TGZ"; then
+  echo "ERROR: failed to download $DOWNLOAD_URL"
+  echo "Check network access to GitHub Releases."
+  exit 1
+fi
+if [ ! -s "$TGZ" ]; then
+  echo "ERROR: downloaded file is empty"
+  exit 1
+fi
 
-# SHA256 checksum verification
 echo "Verifying checksum..."
-EXPECTED_CHECKSUM=$(curl -sL "$CHECKSUM_URL" | awk '{print $1}')
+EXPECTED_CHECKSUM=$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
 if [ -n "$EXPECTED_CHECKSUM" ]; then
-  ACTUAL_CHECKSUM=$(sha256sum "$TMP_DIR/needle-linux-$GOARCH.tar.gz" | awk '{print $1}')
+  ACTUAL_CHECKSUM=$(file_sha256 "$TGZ")
   if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then
     echo "ERROR: Checksum verification failed!"
     echo "  Expected: $EXPECTED_CHECKSUM"
@@ -58,19 +94,20 @@ else
   echo "WARNING: Could not fetch checksum. Skipping verification."
 fi
 
-tar xzf "$TMP_DIR/needle-linux-$GOARCH.tar.gz" -C "$TMP_DIR"
+tar xzf "$TGZ" -C "$TMP_DIR"
+if [ ! -f "$TMP_DIR/needle-agent" ]; then
+  echo "ERROR: needle-agent binary not found in archive"
+  exit 1
+fi
 
-# Stop service
 echo "Stopping $SERVICE_NAME..."
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 
-# Install new binary
 echo "Installing new binary..."
 mkdir -p "$BIN_DIR"
 cp "$TMP_DIR/needle-agent" "$BIN_DIR/"
 chmod +x "$BIN_DIR/needle-agent"
 
-# Update systemd service unit with security hardening
 echo "Updating systemd service..."
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
 [Unit]

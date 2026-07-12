@@ -115,23 +115,41 @@ nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
 
 ### 一键脚本安装（systemd）
 
+需要 root，且本机可访问 GitHub Releases。推荐**先下载再执行**（交互配置更稳）：
+
 Server：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh \
+  -o /tmp/needle-install-server.sh
+sudo bash /tmp/needle-install-server.sh
 ```
 
 Agent（在每台 VPS 上运行）：
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh \
+  -o /tmp/needle-install-agent.sh
+sudo bash /tmp/needle-install-agent.sh
+```
+
+也可用管道（脚本会从 `/dev/tty` 读交互输入）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
 ```
 
 ### Agent 一键升级
 
+零交互升级：自动读取 `/opt/needle-agent/agent.yaml`，下载最新版、校验 SHA256、替换二进制、更新 systemd 安全配置并重启。
+
 ```bash
-# 零交互升级，自动读取现有配置（/opt/needle-agent/agent.yaml）
-# 自动下载最新版、校验 SHA256、替换二进制、更新 systemd 安全配置、重启服务
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh \
+  -o /tmp/needle-upgrade-agent.sh
+sudo bash /tmp/needle-upgrade-agent.sh
+
+# 或管道
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh | sudo bash
 ```
 
