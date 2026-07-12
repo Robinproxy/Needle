@@ -17,7 +17,10 @@ if [ -c /dev/tty ]; then
 elif [ ! -t 0 ]; then
   echo "No interactive TTY available."
   echo "Download then run:"
+  echo "  # with curl:"
   echo "  curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install-agent.sh -o /tmp/needle-install-agent.sh"
+  echo "  # or with wget:"
+  echo "  wget -qO /tmp/needle-install-agent.sh https://raw.githubusercontent.com/$REPO/main/scripts/install-agent.sh"
   echo "  sudo bash /tmp/needle-install-agent.sh"
   exit 1
 fi
@@ -29,6 +32,36 @@ case "$ARCH" in
   aarch64|arm64)  GOARCH="arm64" ;;
   *)              echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
+
+http_get() {
+  local url="$1" out="${2:-}"
+  if command -v curl >/dev/null 2>&1; then
+    if [ -n "$out" ]; then
+      curl -fsSL "$url" -o "$out"
+    else
+      curl -fsSL "$url"
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if [ -n "$out" ]; then
+      wget -qO "$out" "$url"
+    else
+      wget -qO- "$url"
+    fi
+  else
+    echo "ERROR: need curl or wget. On Debian/Ubuntu: apt-get update && apt-get install -y curl" >&2
+    exit 1
+  fi
+}
+
+http_final_url() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSLI -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget --max-redirect=0 --server-response -O /dev/null "$url" 2>&1 \
+      | sed -n 's/^[Ll]ocation:[[:space:]]*//p' | tail -1 | tr -d '\r' || true
+  fi
+}
 
 file_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -42,20 +75,19 @@ file_sha256() {
 }
 
 yaml_value() {
-  # Read first non-comment key: value from yaml (no grep -P)
   local key="$1" file="$2"
   sed -n "s/^${key}:[[:space:]]*//p" "$file" 2>/dev/null | head -1 | sed 's/^["'\'']//;s/["'\'']$//' | tr -d '\r'
 }
 
 fetch_latest_version() {
-  local ver
-  ver=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-    "https://github.com/$REPO/releases/latest" 2>/dev/null | sed 's#.*/##')
-  if [ -n "$ver" ] && [ "$ver" != "latest" ]; then
+  local ver loc
+  loc=$(http_final_url "https://github.com/$REPO/releases/latest")
+  ver=$(echo "$loc" | sed 's#.*/##')
+  if [ -n "$ver" ] && [ "$ver" != "latest" ] && [ "$ver" != "" ]; then
     echo "$ver"
     return 0
   fi
-  ver=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+  ver=$(http_get "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
     | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
   if [ -n "$ver" ]; then
     echo "$ver"
@@ -83,7 +115,7 @@ trap "rm -rf $TMP_DIR" EXIT
 TGZ="$TMP_DIR/needle-linux-$GOARCH.tar.gz"
 
 echo "Downloading needle-agent $VERSION ($ARCH)..."
-if ! curl -fsSL "$DOWNLOAD_URL" -o "$TGZ"; then
+if ! http_get "$DOWNLOAD_URL" "$TGZ"; then
   echo "ERROR: failed to download $DOWNLOAD_URL"
   echo "Check network access to GitHub Releases."
   exit 1
@@ -94,7 +126,7 @@ if [ ! -s "$TGZ" ]; then
 fi
 
 echo "Verifying checksum..."
-EXPECTED_CHECKSUM=$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
+EXPECTED_CHECKSUM=$(http_get "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
 if [ -n "$EXPECTED_CHECKSUM" ]; then
   ACTUAL_CHECKSUM=$(file_sha256 "$TGZ")
   if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then
@@ -115,7 +147,6 @@ if [ ! -f "$TMP_DIR/needle-agent" ]; then
   exit 1
 fi
 
-# Read old config before stopping anything
 OLD_HOSTNAME=""
 OLD_TOKEN=""
 OLD_SERVER=""
@@ -132,7 +163,6 @@ rm -f "$BIN_DIR/needle-agent"
 cp "$TMP_DIR/needle-agent" "$BIN_DIR/"
 chmod +x "$BIN_DIR/needle-agent"
 
-# Interactive config
 read -rp "Hostname (leave empty for auto-detection) []: " HOSTNAME
 HOSTNAME="${HOSTNAME:-}"
 
@@ -169,7 +199,6 @@ read -rp "  Target 5 address [${T9}]: " V; T9="${V:-$T9}"
 read -rp "  Target 6 name [${N11}]: " V; N11="${V:-$N11}"
 read -rp "  Target 6 address [${T11}]: " V; T11="${V:-$T11}"
 
-# VPS billing setup
 echo
 echo "VPS billing setup (for dashboard expiry countdown and traffic reset):"
 echo "  1) Monthly (1m)"
@@ -221,14 +250,21 @@ YAML
 
 chmod 600 "$AGENT_YAML"
 
-# Auto-unregister old hostname if it changed
 if [ -n "$OLD_HOSTNAME" ] && [ "$OLD_HOSTNAME" != "$HOSTNAME" ] && [ -n "$OLD_TOKEN" ] && [ -n "$OLD_SERVER" ]; then
   echo "Hostname changed: '$OLD_HOSTNAME' → '$HOSTNAME'"
   echo "Unregistering old agent from server..."
-  curl -fsS -X POST "$OLD_SERVER/api/unregister" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $OLD_TOKEN" \
-    --data-binary "{\"hostname\":\"$OLD_HOSTNAME\"}" >/dev/null 2>&1 || true
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -X POST "$OLD_SERVER/api/unregister" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $OLD_TOKEN" \
+      --data-binary "{\"hostname\":\"$OLD_HOSTNAME\"}" >/dev/null 2>&1 || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- --method=POST \
+      --header="Content-Type: application/json" \
+      --header="Authorization: Bearer $OLD_TOKEN" \
+      --body-data="{\"hostname\":\"$OLD_HOSTNAME\"}" \
+      "$OLD_SERVER/api/unregister" >/dev/null 2>&1 || true
+  fi
 fi
 
 echo "Installing systemd service..."

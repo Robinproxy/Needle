@@ -24,6 +24,36 @@ case "$ARCH" in
   *)              echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
+http_get() {
+  local url="$1" out="${2:-}"
+  if command -v curl >/dev/null 2>&1; then
+    if [ -n "$out" ]; then
+      curl -fsSL "$url" -o "$out"
+    else
+      curl -fsSL "$url"
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if [ -n "$out" ]; then
+      wget -qO "$out" "$url"
+    else
+      wget -qO- "$url"
+    fi
+  else
+    echo "ERROR: need curl or wget. On Debian/Ubuntu: apt-get update && apt-get install -y curl" >&2
+    exit 1
+  fi
+}
+
+http_final_url() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSLI -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget --max-redirect=0 --server-response -O /dev/null "$url" 2>&1 \
+      | sed -n 's/^[Ll]ocation:[[:space:]]*//p' | tail -1 | tr -d '\r' || true
+  fi
+}
+
 file_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -36,14 +66,14 @@ file_sha256() {
 }
 
 fetch_latest_version() {
-  local ver
-  ver=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-    "https://github.com/$REPO/releases/latest" 2>/dev/null | sed 's#.*/##')
-  if [ -n "$ver" ] && [ "$ver" != "latest" ]; then
+  local ver loc
+  loc=$(http_final_url "https://github.com/$REPO/releases/latest")
+  ver=$(echo "$loc" | sed 's#.*/##')
+  if [ -n "$ver" ] && [ "$ver" != "latest" ] && [ "$ver" != "" ]; then
     echo "$ver"
     return 0
   fi
-  ver=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+  ver=$(http_get "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
     | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
   if [ -n "$ver" ]; then
     echo "$ver"
@@ -68,7 +98,7 @@ trap "rm -rf $TMP_DIR" EXIT
 TGZ="$TMP_DIR/needle-linux-$GOARCH.tar.gz"
 
 echo "Downloading needle-agent $VERSION ($ARCH)..."
-if ! curl -fsSL "$DOWNLOAD_URL" -o "$TGZ"; then
+if ! http_get "$DOWNLOAD_URL" "$TGZ"; then
   echo "ERROR: failed to download $DOWNLOAD_URL"
   echo "Check network access to GitHub Releases."
   exit 1
@@ -79,7 +109,7 @@ if [ ! -s "$TGZ" ]; then
 fi
 
 echo "Verifying checksum..."
-EXPECTED_CHECKSUM=$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
+EXPECTED_CHECKSUM=$(http_get "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
 if [ -n "$EXPECTED_CHECKSUM" ]; then
   ACTUAL_CHECKSUM=$(file_sha256 "$TGZ")
   if [ "$EXPECTED_CHECKSUM" != "$ACTUAL_CHECKSUM" ]; then

@@ -115,25 +115,46 @@ nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
 
 ### 一键脚本安装（systemd）
 
-需要 root，且本机可访问 GitHub Releases。推荐**先下载再执行**（交互配置更稳）：
+需要 root，且本机可访问 GitHub Releases。脚本内部支持 **curl 或 wget**。
+
+若机器没有 curl（Debian 最小安装常见），先装一个下载工具：
+
+```bash
+# Debian / Ubuntu
+apt-get update && apt-get install -y curl
+# 或
+apt-get update && apt-get install -y wget
+```
+
+推荐**先下载再执行**（交互配置更稳）：
 
 Server：
 
 ```bash
+# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh \
   -o /tmp/needle-install-server.sh
+# 或 wget
+wget -qO /tmp/needle-install-server.sh \
+  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh
+
 sudo bash /tmp/needle-install-server.sh
 ```
 
 Agent（在每台 VPS 上运行）：
 
 ```bash
+# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh \
   -o /tmp/needle-install-agent.sh
+# 或 wget
+wget -qO /tmp/needle-install-agent.sh \
+  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh
+
 sudo bash /tmp/needle-install-agent.sh
 ```
 
-也可用管道（脚本会从 `/dev/tty` 读交互输入）：
+也可用管道（需本机已有 curl 或先 `apt-get install -y curl`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
@@ -145,12 +166,14 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/inst
 零交互升级：自动读取 `/opt/needle-agent/agent.yaml`，下载最新版、校验 SHA256、替换二进制、更新 systemd 安全配置并重启。
 
 ```bash
+# curl
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh \
   -o /tmp/needle-upgrade-agent.sh
-sudo bash /tmp/needle-upgrade-agent.sh
+# 或 wget
+wget -qO /tmp/needle-upgrade-agent.sh \
+  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh
 
-# 或管道
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh | sudo bash
+sudo bash /tmp/needle-upgrade-agent.sh
 ```
 
 ### Docker 本地构建
