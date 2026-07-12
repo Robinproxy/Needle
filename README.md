@@ -44,12 +44,12 @@
 ┌──────────────┐              ┌──────────────────┐
 │  Agent VPS   │── POST ──→   │                  │
 │  (唯一 token)│  Bearer      │  Needle Server   │
-└──────────────┘  + 指标      │  ┌────────────┐  │
+└──────────────┘  + 指标       │  ┌────────────┐  │
                               │  │ Dashboard  │  │
                               │  └────────────┘  │
                               │  ┌────────────┐  │
                               │  │ SQLite     │  │
-                              │  │ 节点数据   │  │
+                              │  │ 节点数据    │  │
                               │  │ agent_tokens│ │
                               │  └────────────┘  │
                               └──────────────────┘
@@ -84,7 +84,6 @@
 | 操作 | 本地脚本 | 管道 |
 |------|----------|------|
 | 下载脚本 | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
-| 下载（wget） | `wget -qO /tmp/needle-server.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh` | — |
 | 安装 | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
 | 智能装/升 | `sudo bash /tmp/needle-server.sh` | 同上（无参） |
 | 升级 | `sudo bash /tmp/needle-server.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- upgrade` |
@@ -105,7 +104,6 @@
 | 操作 | 本地脚本 | 管道 |
 |------|----------|------|
 | 下载脚本 | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
-| 下载（wget） | `wget -qO /tmp/needle-agent.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh` | — |
 | 安装 | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
 | 智能装/升 | `sudo bash /tmp/needle-agent.sh` | 同上（无参） |
 | 升级 | `sudo bash /tmp/needle-agent.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- upgrade` |
