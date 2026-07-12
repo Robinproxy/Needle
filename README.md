@@ -186,23 +186,50 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 
 #### 运维
 
+两种方式任选：**本地脚本**（先下载到 `/tmp`）或 **管道**（每次从 GitHub 拉脚本执行，不落盘）。
+
+**方式 A — 本地脚本**（适合反复运维）：
+
 ```bash
 sudo bash /tmp/needle-server.sh              # 智能 install / upgrade
 sudo bash /tmp/needle-server.sh upgrade      # 只换二进制，保留 .env 与 data/
 sudo bash /tmp/needle-server.sh status
 sudo bash /tmp/needle-server.sh uninstall    # 停服务 + 删二进制，默认保留 data/ 与 .env
 sudo bash /tmp/needle-server.sh uninstall --purge   # 连 data/ 与 .env 一起删除
+```
 
+**方式 B — 管道**（无需先保存脚本）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- upgrade
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- status
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- uninstall --purge
+```
+
+**共用（已安装后的二进制 / 日志）：**
+
+```bash
 # 日志
 journalctl -u needle-server -f
 
-# 列节点 / 删节点（二进制 CLI，不需要 NEEDLE_TOKEN）
+# 列节点 / 删节点（二进制 CLI，不需要 NEEDLE_TOKEN，也不走上面脚本）
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
 ```
 
 > `delete-agent` **只删 Server 库里的数据**，不会停远端 Agent。若 Agent 仍在上报，节点会重新出现。
+
+运维结束后，若曾下载过本地脚本，可删除：
+
+```bash
+rm -f /tmp/needle-server.sh
+```
 
 #### 目录
 
@@ -250,15 +277,41 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 
 #### 运维
 
+两种方式任选：**本地脚本** 或 **管道**。
+
+**方式 A — 本地脚本**：
+
 ```bash
 sudo bash /tmp/needle-agent.sh              # 智能 install / upgrade
 sudo bash /tmp/needle-agent.sh upgrade      # 零交互升级，保留 agent.yaml
 sudo bash /tmp/needle-agent.sh status
 sudo bash /tmp/needle-agent.sh uninstall    # 仅卸本机（默认，不碰 Server 库）
 sudo bash /tmp/needle-agent.sh uninstall --unregister   # 先通知 Server 删节点，再卸本机
+```
 
-# 日志
+**方式 B — 管道**：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- upgrade
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- status
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- uninstall --unregister
+```
+
+**日志：**
+
+```bash
 journalctl -u needle-agent -f
+```
+
+运维结束后，若曾下载过本地脚本，可删除：
+
+```bash
+rm -f /tmp/needle-agent.sh
 ```
 
 #### 目录
