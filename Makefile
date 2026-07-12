@@ -18,7 +18,7 @@ release:
 	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc go build $(LDFLAGS) -o release/needle-server-linux-arm64 ./cmd/server
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o release/needle-agent-linux-amd64 ./cmd/agent
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o release/needle-agent-linux-arm64 ./cmd/agent
-	cp scripts/install-server.sh release/
+	cp scripts/needle-server.sh release/
 	cp scripts/needle-agent.sh release/
 	cp agent.yaml.example release/
 	cd release && \
@@ -26,13 +26,13 @@ release:
 	  ln -f needle-agent-linux-amd64 needle-agent && \
 	  tar czf needle-linux-amd64.tar.gz \
 	    needle-server needle-agent \
-	    install-server.sh needle-agent.sh agent.yaml.example && \
+	    needle-server.sh needle-agent.sh agent.yaml.example && \
 	  rm needle-server needle-agent && \
 	  ln -f needle-server-linux-arm64 needle-server && \
 	  ln -f needle-agent-linux-arm64 needle-agent && \
 	  tar czf needle-linux-arm64.tar.gz \
 	    needle-server needle-agent \
-	    install-server.sh needle-agent.sh agent.yaml.example && \
+	    needle-server.sh needle-agent.sh agent.yaml.example && \
 	  rm needle-server needle-agent && \
 	  sha256sum needle-*.tar.gz > checksums.txt && \
 	  for f in needle-*.tar.gz; do \

@@ -73,7 +73,21 @@
 
 ## 快速开始
 
-### Docker 部署（推荐）
+需要 root（脚本安装时），且本机可访问 GitHub Releases / ghcr。脚本支持 **curl 或 wget**。
+
+若机器没有 curl（Debian 最小安装常见）：
+
+```bash
+apt-get update && apt-get install -y curl
+# 或
+apt-get update && apt-get install -y wget
+```
+
+---
+
+### Server：Docker（推荐）
+
+#### 安装
 
 ```bash
 mkdir -p ~/needle && cd ~/needle
@@ -95,53 +109,104 @@ echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
 docker compose up -d
 ```
 
-自定义端口：
+自定义端口：`echo "NEEDLE_PORT=8080" >> .env && docker compose up -d`
+
+#### 升级
 
 ```bash
-echo "NEEDLE_PORT=8080" >> .env
+cd ~/needle
+docker compose pull
 docker compose up -d
 ```
 
-### 二进制部署
+#### 运维
 
 ```bash
-# 从 Releases 下载对应架构的 tar.gz
-TOKEN=$(openssl rand -hex 16)
-tar xzf needle-linux-amd64.tar.gz needle-server
-./needle-server -l :8008 -token "$TOKEN"
-# 或后台运行
-nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
+# 日志
+docker compose logs -f needle-server
+
+# 列节点 / 删节点（exec 不会走 ENTRYPOINT，须再写 needle-server）
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-agents
+docker compose exec needle-server \
+  needle-server -db /data/needle.db delete-agent <hostname|id>
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y delete-agent <hostname|id>
+
+# 备份数据库
+cp -a data/needle.db data/needle.db.bak
 ```
 
-### 一键脚本安装（systemd）
-
-需要 root，且本机可访问 GitHub Releases。脚本内部支持 **curl 或 wget**。
-
-若机器没有 curl（Debian 最小安装常见），先装一个下载工具：
+#### 卸载
 
 ```bash
-# Debian / Ubuntu
-apt-get update && apt-get install -y curl
-# 或
-apt-get update && apt-get install -y wget
+# 停容器，保留 ./data
+docker compose down
+
+# 停容器并删除数据
+docker compose down -v && rm -rf data
 ```
 
-推荐**先下载再执行**（交互配置更稳）：
+#### 本地构建镜像
 
-Server：
+```bash
+git clone https://github.com/Robinproxy/Needle.git
+cd Needle
+echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
+docker compose up -d --build
+```
+
+---
+
+### Server：二进制（systemd）
+
+统一入口 `needle-server.sh`：
 
 ```bash
 # curl
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh \
-  -o /tmp/needle-install-server.sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  -o /tmp/needle-server.sh
 # 或 wget
-wget -qO /tmp/needle-install-server.sh \
-  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh
+wget -qO /tmp/needle-server.sh \
+  https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh
 
-sudo bash /tmp/needle-install-server.sh
+sudo bash /tmp/needle-server.sh              # 未安装 → install；已安装 → upgrade
+sudo bash /tmp/needle-server.sh install      # 交互安装
+sudo bash /tmp/needle-server.sh upgrade      # 升级二进制，保留 .env 与 data/
+sudo bash /tmp/needle-server.sh status
+sudo bash /tmp/needle-server.sh uninstall    # 停服务+删二进制，默认保留 data/ 与 .env
+sudo bash /tmp/needle-server.sh uninstall --purge   # 连 data/ 与 .env 一起删除
 ```
 
-Agent（在每台 VPS 上运行）——统一入口 `needle-agent.sh`：
+管道（需 curl）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
+```
+
+安装路径：二进制 `/opt/needle/bin/needle-server`，配置 `/opt/needle/.env`，数据库 `/opt/needle/data/needle.db`。
+
+列节点 / 删节点（**不用** shell 子命令，直接调二进制）：
+
+```bash
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
+```
+
+也可从 Releases 解压后前台运行（无 systemd）：
+
+```bash
+TOKEN=$(openssl rand -hex 16)
+tar xzf needle-linux-amd64.tar.gz needle-server
+./needle-server -l :8008 -token "$TOKEN"
+```
+
+---
+
+### Agent：二进制（systemd）
+
+统一入口 `needle-agent.sh`（每台 VPS）：
 
 ```bash
 # curl
@@ -159,24 +224,14 @@ sudo bash /tmp/needle-agent.sh uninstall    # 仅卸本机（默认）
 sudo bash /tmp/needle-agent.sh uninstall --unregister   # 先通知 Server 删节点，再卸本机
 ```
 
-也可用管道（需本机已有 curl 或先 `apt-get install -y curl`）：
+管道：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh | sudo bash
 ```
 
-> **说明：** `uninstall` 默认只停服务并删除 `/opt/needle-agent`，**不会**清 Server 数据库。  
+> **说明：** Agent `uninstall` 默认只停服务并删除 `/opt/needle-agent`，**不会**清 Server 数据库。  
 > 需要同时从面板去掉节点时，使用 `uninstall --unregister`；若 Agent 已无法连 Server，再到 Server 上执行 `delete-agent`。
-
-### Docker 本地构建
-
-```bash
-git clone https://github.com/Robinproxy/Needle.git
-cd Needle
-echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
-docker compose up -d --build
-```
 
 ---
 
