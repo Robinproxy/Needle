@@ -22,19 +22,10 @@
 
 ## 设计理念
 
-Needle 把监控拆成两个**互不指挥**的角色：
-
-| 角色 | 做什么 | 不做什么 |
-|------|--------|----------|
-| **Server** | 接收上报、写入 SQLite、**只做展示**（仪表盘） | 不主动连接 Agent、无 WebSSH、无远程命令、**面板上不能删节点** |
-| **Agent** | 本机采集指标，**纯出站** `POST /api/report` | 无入站控制面；Server 被攻破也**不能**操控 Agent 主机 |
-
-**核心原则：**
-
-1. **互不干扰** — 两边进程生命周期独立；停一边不影响另一边主机控制权。  
-2. **运维全在终端** — 安装、升级、卸载、登记 token、列/删节点都在 SSH 里完成，不依赖面板写操作。  
-3. **每台 Agent 独立 Token** — 安装时自动生成，写入 `/opt/needle-agent/agent.yaml`（权限 600）；你在 Server 上用 CLI `allow-token` 写入 SQLite 白名单；**首次上报时绑定 hostname**。没有全局共享 `NEEDLE_TOKEN`，一台被拿下不能轻易冒充其它节点。  
-4. **运维脚本** — `needle-server.sh` / `needle-agent.sh` 负责装升卸；节点与 token 用二进制 CLI（`allow-token` / `list-tokens` / `list-agents` / `delete-agent` / `revoke-token`）。
+- **纯出站** — Agent 只上报 `POST /api/report`，Server 永远不主动连 Agent
+- **面板只读** — 安装 / 升级 / 删节点 / 吊销 token 全部在终端完成，面板不做写操作
+- **每台 Agent 独立 Token** — 安装自动生成，写入 `agent.yaml`；你在 Server 上执行 `allow-token` 登记白名单，首次上报绑定 hostname。一台被入侵不会传染其它节点
+- **零共享密钥** — 没有全局 `NEEDLE_TOKEN`，一机一密钥
 
 ---
 
@@ -42,12 +33,12 @@ Needle 把监控拆成两个**互不指挥**的角色：
 
 | 特色 | 说明 |
 |------|------|
-| 🔑 **每 Agent 独立 Token** | 安装自动生成；Server 白名单登记；一 token 一台机，首次上报绑定 hostname |
-| 🔒 **面板只读 / 终端运维** | 无远程删除 API；清节点、吊销密钥都在 Server CLI 完成 |
+| 🔑 **每 Agent 独立 Token** | 安装自动生成；Server `allow-token` 登记白名单；首次上报绑定 hostname |
+| 🔒 **面板只读 / 终端运维** | 无远程删除 API；删节点 / 吊销 token 都在 Server CLI |
 | 📡 **纯出站零信任** | Agent 只上报，Server 永不主动连 Agent |
 | ⏱ **Traffic 周期** | 按计费周期展示用量 |
-| 🎯 **TCPing 多线路** | 如 CMv4/CUv6，卡片可切换显示 |
-| 🏁 **Region 国旗** | 自定义地区标识，全球节点一览 |
+| 🎯 **TCPing 多线路** | CMv4 / CUv6 等线路可切换 |
+| 🏁 **Region 国旗** | 自定义地区标识 |
 | 📊 **系统指标** | CPU / 内存 / 磁盘 / 网速 / 负载 / 运行时间 |
 
 ---
@@ -55,21 +46,26 @@ Needle 把监控拆成两个**互不指挥**的角色：
 ## 架构
 
 ```
-                        ┌─ Agent (VPS 1) ─┐
-                        │  unique token   │
-                        └───────┬─────────┘
-                                │ POST /api/report + Bearer
-                        ┌─ Agent (VPS 2) ─┐
-                        │  unique token   │──────────┐
-                        └───────┬─────────┘          │
-                                                 ┌───┴──────────┐
-                        ┌─ Agent (VPS N) ─┐      │ Needle Server│
-                        │  unique token   │─────→│  Dashboard   │
-                        └─────────────────┘      │  SQLite DB   │
-                                                 └──────────────┘
+┌──────────────┐              ┌──────────────────┐
+│  Agent VPS   │── POST ──→   │                  │
+│  (唯一 token)│  Bearer      │  Needle Server   │
+└──────────────┘  + 指标      │  ┌────────────┐  │
+                              │  │ Dashboard  │  │
+                              │  └────────────┘  │
+                              │  ┌────────────┐  │
+                              │  │ SQLite     │  │
+                              │  │ 节点数据   │  │
+                              │  │ agent_tokens│ │
+                              │  └────────────┘  │
+                              └──────────────────┘
 ```
 
-数据流只有 **Agent → Server**。鉴权：token 须先在 Server 执行 `allow-token` 写入白名单。
+**数据流：单向，Agent → Server。**
+
+**鉴权流程：**
+1. Agent 安装时生成独立 token，写入本机 `agent.yaml`
+2. 在 Server 执行 `allow-token <token>`，写入 `agent_tokens` 白名单表
+3. Agent 首次上报时 token + hostname 自动绑定
 
 ---
 
@@ -84,19 +80,6 @@ Needle 把监控拆成两个**互不指挥**的角色：
 | Token 传输 | `Authorization: Bearer`；生产建议 HTTPS |
 | 二进制校验 | Release 附带 `.sha256` |
 | Agent 沙箱 | systemd 加固（NoNewPrivileges、ProtectSystem 等） |
-
----
-
-## 新装四步
-
-```text
-1. 部署 Server（Docker 或二进制）
-2. 每台 VPS：needle-agent.sh install  → 自动生成 token 并打印
-3. Server：allow-token <打印的 token>  → 写入白名单
-4. Agent 上报成功 → hostname 自动绑定 → 面板出现节点
-```
-
-未执行第 3 步时，上报返回 **401**。
 
 ---
 
