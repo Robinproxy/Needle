@@ -39,6 +39,7 @@
 | 🔑 **Token 保护** | 配置文件权限 | `agent.yaml` 权限设置为 `600`，仅 root 可读 |
 | 🛡️ **Agent 沙箱** | systemd 安全加固 | 进程运行时启用 `NoNewPrivileges`、`ProtectSystem=strict`、`ProtectHome=true`、`PrivateTmp=true`、`RestrictNamespaces=true`、`LockPersonality=true`、`RestrictRealtime=true`、`RestrictSUIDSGID=true`、`RemoveIPC=true`、清空 Capability |
 | 📡 **传输安全** | HTTP 明文警告 | Agent 使用 HTTP 连接时自动打印警告，提醒生产环境应使用 HTTPS |
+| 🛡 **面板只读** | 无远程删除 API | 不提供 `DELETE /api/agents`；清理节点仅在 Server 本机 CLI 执行 |
 | 🔄 **向后兼容** | 旧版 Agent 无需升级 | 旧 Agent 同时携带 Header + Body token，新 Server 只读 Header，完全兼容 |
 
 ## 特色功能
@@ -183,25 +184,79 @@ tcpping:
 
 ---
 
-## 运维：删除节点
+## 运维：Server CLI（list / delete）
 
-面板为纯展示，**不提供**远程删除接口。需要清理节点时，在 **Server 本机** 执行：
+面板为**纯展示**：无删除按钮，也**没有**远程删除接口（无 `DELETE /api/agents`）。  
+清理节点须在 **Server 本机** 操作本地 SQLite。CLI 模式**不启动 HTTP**，也**不需要** `NEEDLE_TOKEN`。
+
+### 命令
+
+| 命令 | 说明 |
+|------|------|
+| `list-agents` | 列出节点：`id` / `hostname` / `region` / `last_seen` |
+| `delete-agent <id\|hostname>` | 按数字 id 或 hostname 删除节点及其全部历史数据 |
+
+### 全局参数
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `-db <path>` | SQLite 数据库路径 | `./data/needle.db` |
+| `-y` | `delete-agent` 时跳过交互确认 | 关闭 |
+
+### 删除范围
+
+执行 `delete-agent` 会删除：
+
+- `agents` 表中该节点
+- 该节点全部 `metrics`
+- 该节点全部 `tcpping_results`
+
+**不会**停止远端 Agent 进程。若 Agent 仍在上报，节点会重新出现在面板上；需先停 Agent 或改配置后再删。
+
+### 用法示例
+
+**systemd 安装：**
 
 ```bash
-# systemd 安装路径
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
-# 跳过确认
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
-
-# Docker
-docker compose exec needle-server \
-  needle-server -db /data/needle.db list-agents
-docker compose exec needle-server \
-  needle-server -db /data/needle.db -y delete-agent <hostname|id>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent dedi-us
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent 46
 ```
 
-Agent 重装/改名时，仍可用（需 Token）：
+**二进制（当前目录 data）：**
+
+```bash
+./needle-server -db ./data/needle.db list-agents
+./needle-server -db ./data/needle.db delete-agent <hostname|id>
+./needle-server -db ./data/needle.db -y delete-agent <hostname|id>
+```
+
+**Docker**（镜像 `ENTRYPOINT` 为 `needle-server`，参数直接跟在服务名后；数据卷为 `/data`）：
+
+```bash
+docker compose exec needle-server -db /data/needle.db list-agents
+docker compose exec needle-server -db /data/needle.db delete-agent dedi-us
+docker compose exec needle-server -db /data/needle.db -y delete-agent 46
+```
+
+### 输出示例
+
+```text
+ID     HOSTNAME                 REGION   LAST_SEEN
+1      Lam-JP                   JP       2026-07-12T07:00:00Z
+46     dedi-us                  US       2026-07-12T07:01:00Z
+```
+
+删除时默认交互确认：
+
+```text
+Delete agent "dedi-us" (id=46) and all its metrics/tcpping data? [y/N]
+deleted agent "dedi-us" (id=46)
+```
+
+### Agent 侧注销（可选）
+
+Agent 重装或改 hostname 时，可在 **Agent 机器**上注销（需 Token，与 Server CLI 互补）：
 
 ```bash
 needle-agent -unregister /opt/needle-agent/agent.yaml
