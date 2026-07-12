@@ -69,7 +69,7 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 20px; width: 100%; }
-main { flex: 1; padding-top: 16px; padding-bottom: 32px; }
+main.container { flex: 1; padding-top: 16px; padding-bottom: 32px; }
 
 /* BUTTONS */
 .btn {
@@ -363,7 +363,7 @@ header {
 /* INLINE DETAIL */
 .inline-detail {
   grid-column: 1 / -1;
-  padding: 4px 0 8px;
+  padding: 4px 0 16px;
 }
 
 .detail-header {

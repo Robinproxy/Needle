@@ -5,11 +5,11 @@
 <h1 align="center">Needle</h1>
 
 <p align="center">
-  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
+  Lightweight, pure-outbound VPS monitoring dashboard
 </p>
 
 <p align="center">
-  Lightweight, pure-outbound VPS monitoring dashboard
+  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
@@ -22,57 +22,120 @@
 
 ## Design Principles
 
-| Principle | Description |
-|-----------|-------------|
-| 🔒 **Zero-Trust Reporting** | Built on zero-trust architecture. Agent reports only, Server never initiates connections. No WebSSH, no command execution |
-| 🔄 **Graceful Upgrade** | No forced Agent upgrades. New features via optional fields, backward compatible |
-| 📦 **Minimal Deployment** | Two standalone binaries for Server + Agent. SQLite zero configuration, no external dependencies |
+- **Pure outbound** — Agent reports only; Server never initiates connections to Agent
+- **Read-only dashboard** — All ops happen in the terminal; the panel never writes
+- **No shared secrets** — VPS nodes are isolated; one unique token per machine
 
-## Security Design
+---
 
-| Category | Measure | Description |
-|----------|---------|-------------|
-| 🔐 **Integrity** | Binary SHA256 checksum | Each Release auto-generates `.sha256`, install/upgrade scripts verify immediately after download to prevent supply chain tampering |
-| 🔑 **Token Protection** | Header-only transport | Token is transmitted exclusively via `Authorization: Bearer` header, never in JSON body — reduces log/audit exposure |
-| 🔑 **Token Protection** | Constant-time comparison | Server uses `crypto/subtle.ConstantTimeCompare` for token verification to prevent timing attacks |
-| 🔑 **Token Protection** | Hidden from process list | Install/upgrade scripts use `--data-binary @-` to read token from stdin, never visible in `ps` output |
-| 🔑 **Token Protection** | Config file permissions | `agent.yaml` permissions set to `600`, readable by root only |
-| 🛡️ **Agent Sandbox** | systemd security hardening | Process runs with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `RestrictNamespaces=true`, `LockPersonality=true`, `RestrictRealtime=true`, `RestrictSUIDSGID=true`, `RemoveIPC=true`, empty Capability set |
-| 📡 **Transport Security** | HTTP plaintext warning | Agent prints a warning when connecting over HTTP, reminding production should use HTTPS |
-| 🔄 **Backward Compatible** | Old Agents need no upgrade | Old Agents send token in both Header and Body, new Server reads Header only — fully compatible |
-
-## Features
+## Highlights
 
 | Feature | Description |
 |---------|-------------|
-| ⏱ **Traffic Auto-Reset** | Traffic counters reset automatically per billing cycle, with per-cycle tracking |
-| 🎯 **TCPing Target Switching** | Click CMv4/CUv6 labels on cards to cycle through probe lines |
-| 🛠 **Local CLI Node Cleanup** | Dashboard is display-only; delete agents on the server host via CLI |
-| 🏁 **Custom Flags** | Set your own Region flags for a clear global view on the dashboard |
+| ⏱ **Traffic cycle** | Usage shown per billing period |
+| 🎯 **TCPing multi-line** | Switch CMv4 / CUv6 and other probe lines |
+| 🏁 **Region flags** | Custom region labels |
+
+---
 
 ## Architecture
 
 ```
-                        ┌─ Agent (VPS 1) ─┐
-                        │  CMv4/CUv6/CTv4 │
-                        └───────┬─────────┘
-                                │ POST /api/report
-                        ┌─ Agent (VPS 2) ─┐      Bearer Token
-                        │  CMv4/CUv6/CTv4 │──────────┐
-                        └───────┬─────────┘          │
-                                │ POST /api/report   │
-                                                 ┌───┴──────────┐
-                        ┌─ Agent (VPS N) ─┐      │ Needle Server│
-                        │  CMv4/CUv6/CTv4 │─────→│  (Dashboard) │
-                        └─────────────────┘      │  SQLite DB   │
-                                                 └──────────────┘
+┌──────────────┐              ┌──────────────────┐
+│  Agent VPS   │── POST ──→   │                  │
+│  (unique     │  Bearer      │  Needle Server   │
+│   token)     │  + metrics   │  ┌────────────┐  │
+└──────────────┘              │  │ Dashboard  │  │
+                              │  └────────────┘  │
+                              │  ┌────────────┐  │
+                              │  │ SQLite     │  │
+                              │  │ node data  │  │
+                              │  │ agent_tokens│ │
+                              │  └────────────┘  │
+                              └──────────────────┘
 ```
+
+
+## Command Cheatsheet
+
+Scripts support **curl or wget**. No curl: `apt-get update && apt-get install -y curl`.
+
+### Server · Docker
+
+| Action | Command |
+|--------|---------|
+| Deploy | See full compose block under [Deploy · Docker](#server--dockerrecommended) |
+| Upgrade | `cd ~/needle && docker compose pull && docker compose up -d` |
+| Logs | `docker compose logs -f needle-server` |
+| Allow token | `docker compose exec needle-server needle-server -db /data/needle.db allow-token <token>` |
+| List tokens | `docker compose exec needle-server needle-server -db /data/needle.db list-tokens` |
+| List agents | `docker compose exec needle-server needle-server -db /data/needle.db list-agents` |
+| Revoke token | `docker compose exec needle-server needle-server -db /data/needle.db -y revoke-token <token>` |
+| Delete agent | `docker compose exec needle-server needle-server -db /data/needle.db delete-agent <hostname\|id>` |
+| Delete agent (-y) | `docker compose exec needle-server needle-server -db /data/needle.db -y delete-agent <hostname\|id>` |
+| Backup | `cp -a data/needle.db data/needle.db.bak` |
+| Uninstall (keep data) | `docker compose down` |
+| Uninstall (purge) | `docker compose down -v && rm -rf data` |
+
+> `exec` skips ENTRYPOINT: after service name `needle-server`, write the binary name `needle-server` again.
+
+### Server · Binary
+
+| Action | Local script | Pipe |
+|--------|--------------|------|
+| Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
+| Install | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
+| Smart install/upgrade | `sudo bash /tmp/needle-server.sh` | same (no args) |
+| Upgrade | `sudo bash /tmp/needle-server.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- upgrade` |
+| Status | `sudo bash /tmp/needle-server.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- status` |
+| Uninstall (keep data) | `sudo bash /tmp/needle-server.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall` |
+| Uninstall (purge) | `sudo bash /tmp/needle-server.sh uninstall --purge` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall --purge` |
+| Allow token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>` | — |
+| List tokens | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens` | — |
+| List agents | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents` | — |
+| Delete agent | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname\|id>` | — |
+| Delete agent (-y) | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname\|id>` | — |
+| Revoke token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>` | — |
+| Logs | `journalctl -u needle-server -f` | — |
+| Cleanup temp script | `rm -f /tmp/needle-server.sh` | not needed for pipe |
+
+### Agent · Binary
+
+| Action | Local script | Pipe |
+|--------|--------------|------|
+| Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
+| Install | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
+| Smart install/upgrade | `sudo bash /tmp/needle-agent.sh` | same (no args) |
+| Upgrade | `sudo bash /tmp/needle-agent.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- upgrade` |
+| Status | `sudo bash /tmp/needle-agent.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- status` |
+| Uninstall local | `sudo bash /tmp/needle-agent.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall` |
+| Uninstall + notify Server | `sudo bash /tmp/needle-agent.sh uninstall --unregister` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall --unregister` |
+| Logs | `journalctl -u needle-agent -f` | — |
+| Cleanup temp script | `rm -f /tmp/needle-agent.sh` | not needed for pipe |
+
+### Path Cheatsheet
+
+| Role | Path | Notes |
+|------|------|-------|
+| Docker | `~/needle/docker-compose.yml` | Compose file |
+| Docker | `~/needle/.env` | Optional `NEEDLE_PORT` |
+| Docker | `~/needle/data/needle.db` | SQLite (token allow-list) |
+| Docker | `/data` in container | Data volume |
+| Server binary | `/opt/needle/bin/needle-server` | Binary |
+| Server binary | `/opt/needle/.env` | `NEEDLE_LISTEN` (mode 600) |
+| Server binary | `/opt/needle/data/needle.db` | SQLite |
+| Server binary | `/etc/systemd/system/needle-server.service` | unit |
+| Agent | `/opt/needle-agent/bin/needle-agent` | Binary |
+| Agent | `/opt/needle-agent/agent.yaml` | Config + **per-agent token** (mode 600) |
+| Agent | `/etc/systemd/system/needle-agent.service` | unit |
 
 ---
 
-## Quick Start
+## Deploy Details
 
-### Docker (Recommended)
+### Server · Docker (Recommended)
+
+#### Deploy
 
 ```bash
 mkdir -p ~/needle && cd ~/needle
@@ -84,81 +147,249 @@ services:
     ports:
       - "${NEEDLE_PORT:-8008}:8008"
     environment:
-      NEEDLE_TOKEN: "${NEEDLE_TOKEN:?error: set NEEDLE_TOKEN in .env}"
+      NEEDLE_LISTEN: ":8008"
     volumes:
       - ./data:/data
     restart: unless-stopped
 EOF
 
-echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
+# Optional port: echo "NEEDLE_PORT=8080" >> .env
 docker compose up -d
 ```
 
-Custom port:
+> **No global `NEEDLE_TOKEN`.** Each Agent has its own token; register with `allow-token`.
+
+#### Ops
 
 ```bash
-echo "NEEDLE_PORT=8080" >> .env
-docker compose up -d
+cd ~/needle
+
+# Upgrade
+docker compose pull && docker compose up -d
+
+# Logs
+docker compose logs -f needle-server
+
+# Allow Agent token (full token printed at Agent install)
+docker compose exec needle-server \
+  needle-server -db /data/needle.db allow-token <token>
+
+# List token allow-list / agents
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-tokens
+docker compose exec needle-server \
+  needle-server -db /data/needle.db list-agents
+
+# Revoke token (bound node data is cleaned up too)
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y revoke-token <token>
+
+# Delete agent data
+docker compose exec needle-server \
+  needle-server -db /data/needle.db delete-agent <hostname|id>
+docker compose exec needle-server \
+  needle-server -db /data/needle.db -y delete-agent <hostname|id>
+
+# Backup
+cp -a data/needle.db data/needle.db.bak
+
+# Uninstall (keep data)
+docker compose down
+
+# Uninstall (purge data)
+docker compose down -v && rm -rf data
 ```
 
-### Binary
+#### Paths
+
+| Path | Notes |
+|------|-------|
+| `~/needle/docker-compose.yml` | Compose (path = your install dir) |
+| `~/needle/.env` | Optional `NEEDLE_PORT` |
+| `~/needle/data/needle.db` | SQLite (token allow-list) |
+| `/data` in container | Volume mount |
+| Image | `ghcr.io/robinproxy/needle:latest` |
+
+Build locally:
 
 ```bash
-# Download the tarball for your architecture from Releases
-TOKEN=$(openssl rand -hex 16)
-tar xzf needle-linux-amd64.tar.gz needle-server
-./needle-server -l :8008 -token "$TOKEN"
-# Or run in background
-nohup ./needle-server -l :8008 -token "$TOKEN" > needle.log 2>&1 &
-```
-
-### One-Line Install (systemd)
-
-Server:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-server.sh | sudo bash
-```
-
-Agent (run on each VPS):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/install-agent.sh | sudo bash
-```
-
-### Agent One-Click Upgrade
-
-```bash
-# Zero-interaction upgrade — reuses existing config (/opt/needle-agent/agent.yaml)
-# Automatically fetches latest release, verifies SHA256, replaces binary,
-# updates systemd security config, and restarts the service
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/upgrade-agent.sh | sudo bash
-```
-
-### Docker Build Locally
-
-```bash
-git clone https://github.com/Robinproxy/Needle.git
-cd Needle
-echo "NEEDLE_TOKEN=$(openssl rand -hex 16)" > .env
+git clone https://github.com/Robinproxy/Needle.git && cd Needle
 docker compose up -d --build
 ```
 
 ---
 
+### Server · Binary (systemd)
+
+#### Deploy
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  -o /tmp/needle-server.sh
+sudo bash /tmp/needle-server.sh install
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
+```
+
+#### Ops · Script (pick one)
+
+Local script:
+
+```bash
+sudo bash /tmp/needle-server.sh              # smart install / upgrade
+sudo bash /tmp/needle-server.sh upgrade      # binary only; keeps .env and data/
+sudo bash /tmp/needle-server.sh status
+sudo bash /tmp/needle-server.sh uninstall    # stop + remove binary; keeps data/ and .env by default
+sudo bash /tmp/needle-server.sh uninstall --purge   # also remove data/ and .env
+```
+
+Pipe:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- upgrade
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- status
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- uninstall --purge
+```
+
+#### Ops · Token / Agent CLI
+
+```bash
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>
+
+journalctl -u needle-server -f
+```
+
+> `delete-agent` only removes Server DB rows; it does not stop the remote Agent. If the Agent still reports, the node will reappear.
+
+Remove temp script when done:
+
+```bash
+rm -f /tmp/needle-server.sh
+```
+
+#### Paths
+
+| Path | Notes |
+|------|-------|
+| `/opt/needle/bin/needle-server` | Server binary |
+| `/opt/needle/.env` | `NEEDLE_LISTEN` (mode 600) |
+| `/opt/needle/data/needle.db` | SQLite |
+| `/etc/systemd/system/needle-server.service` | systemd unit |
+
+Or run from [Releases](https://github.com/Robinproxy/Needle/releases) in foreground (no systemd):
+
+```bash
+tar xzf needle-linux-amd64.tar.gz needle-server
+./needle-server -l :8008 -db ./data/needle.db
+```
+
+---
+
+### Agent · Binary (systemd)
+
+Run on each VPS.
+
+#### Deploy
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  -o /tmp/needle-agent.sh
+sudo bash /tmp/needle-agent.sh install
+```
+
+Pipe:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh | sudo bash
+```
+
+Install **auto-generates a unique token** and prints it, for example:
+
+```text
+Agent token: a1b2c3d4...
+  sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token a1b2c3d4...
+  docker compose exec needle-server \
+    needle-server -db /data/needle.db allow-token a1b2c3d4...
+```
+
+**Run `allow-token` on the Server, or reports get 401.** Token is stored in local `agent.yaml`.
+
+#### Ops · Script (pick one)
+
+Local script:
+
+```bash
+sudo bash /tmp/needle-agent.sh              # smart install / upgrade
+sudo bash /tmp/needle-agent.sh upgrade      # zero-interaction upgrade; keeps agent.yaml (incl. token)
+sudo bash /tmp/needle-agent.sh status
+sudo bash /tmp/needle-agent.sh uninstall    # local only (default; Server DB untouched)
+sudo bash /tmp/needle-agent.sh uninstall --unregister   # notify Server to drop node, then uninstall local
+```
+
+Pipe:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- upgrade
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- status
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
+  | sudo bash -s -- uninstall --unregister
+```
+
+Logs and cleanup:
+
+```bash
+journalctl -u needle-agent -f
+rm -f /tmp/needle-agent.sh
+```
+
+#### Paths
+
+| Path | Notes |
+|------|-------|
+| `/opt/needle-agent/bin/needle-agent` | Agent binary |
+| `/opt/needle-agent/agent.yaml` | Config (**unique token**, mode 600) |
+| `/etc/systemd/system/needle-agent.service` | systemd unit |
+
+---
+
 ## Configuration
+
+### Server
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NEEDLE_LISTEN` | Listen address | `:8008` |
+| `NEEDLE_PORT` | Docker host port | `8008` |
+
+> No global `NEEDLE_TOKEN`. Auth is DB allow-list only (`allow-token`).
 
 ### agent.yaml
 
 ```yaml
-hostname: ""                                     # Optional, defaults to OS hostname
-server: http://1.2.3.4:8008                      # Required, Server address
-token: your-token                                # Required, must match Server token
-region: SG                                       # ISO country code, e.g. CN/SG/US
-billing_period: "1m"                             # 1m/3m/6m/12m, optional, billing cycle
-expires_at: "2026-08-15"                         # YYYY-MM-DD, optional, expiry date
-interval: 30                                     # Report interval (seconds)
-insecure: false                                  # true = skip TLS certificate verification
+hostname: ""                                     # optional; defaults to OS hostname
+server: http://1.2.3.4:8008                      # required; Server URL
+token: replace-with-unique-agent-token           # unique per host; must allow-token on Server
+region: SG                                       # ISO country code
+billing_period: "1m"                             # 1m/3m/6m/12m, optional
+expires_at: "2026-08-15"                         # YYYY-MM-DD, optional
+interval: 30                                     # report interval (seconds)
+insecure: false                                  # true = skip TLS cert verify
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
@@ -174,94 +405,23 @@ tcpping:
     target: "sh-ct-v6.ip.zstaticcdn.com:80"
 ```
 
-### Server Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NEEDLE_TOKEN` | Auth token, required for Agent connections | **Required** |
-| `NEEDLE_LISTEN` | Listen address (binary mode, e.g. `:9000`) | `:8008` |
-| `NEEDLE_PORT` | Docker host port mapping (digits only) | `8008` |
-
 ---
 
-## Ops: Delete Agents
+## Common Scenarios
 
-The dashboard is display-only and has **no** remote delete API. Clean up nodes on the **server host**:
-
-```bash
-# systemd install paths
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
-# skip confirmation
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
-
-# Docker
-docker compose exec needle-server \
-  needle-server -db /data/needle.db list-agents
-docker compose exec needle-server \
-  needle-server -db /data/needle.db -y delete-agent <hostname|id>
-```
-
-When reinstalling/renaming an agent (requires token):
-
-```bash
-needle-agent -unregister /opt/needle-agent/agent.yaml
-```
-
----
-
-## Install Paths
-
-### Server (systemd)
-
-| Item | Path |
-|------|------|
-| Binary | `/opt/needle/bin/needle-server` |
-| Environment file | `/opt/needle/.env` |
-| Database | `/opt/needle/data/needle.db` |
-| Logs | `journalctl -u needle-server -f` |
-
-### Docker
-
-| Item | Path |
-|------|------|
-| Data directory | `./data/` |
-| Database | `./data/needle.db` |
-
-### Agent (systemd)
-
-| Item | Path |
-|------|------|
-| Binary | `/opt/needle-agent/bin/needle-agent` |
-| Config file | `/opt/needle-agent/agent.yaml` |
-| Logs | `journalctl -u needle-agent -f` |
-
----
-
-## Uninstall
-
-```bash
-# Server (binary + systemd)
-sudo systemctl stop needle-server
-sudo systemctl disable needle-server
-sudo rm /etc/systemd/system/needle-server.service
-sudo rm -rf /opt/needle
-
-# Server (Docker)
-docker compose down -v
-rm -rf ./data
-
-# Agent
-sudo systemctl stop needle-agent
-sudo systemctl disable needle-agent
-sudo rm /etc/systemd/system/needle-agent.service
-sudo rm -rf /opt/needle-agent
-```
+| Scenario | What to do |
+|----------|------------|
+| New Agent never online | Did you run `allow-token` on Server? |
+| Where is the token | Agent: `/opt/needle-agent/agent.yaml`; Server: `agent_tokens` in `needle.db` |
+| Remove a VPS from panel | Agent: `uninstall --unregister`; or Server: `delete-agent` / `revoke-token` |
+| Deleted node reappears | Agent still reporting → stop/uninstall Agent, then delete |
+| Change hostname (token already bound) | Gets 401; `revoke-token` then `allow-token`, or issue a new token |
+| Upgrade from old shared token | **Incompatible**: regenerate token per host and `allow-token` |
 
 ---
 
 ## Credits
 
-- **Development Tools** — [opencode](https://opencode.ai) + [DeepSeek V4 Flash](https://deepseek.com/) for AI-assisted coding
-- **TCPing Nodes** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) provides global probe endpoints
-- **UI Inspiration** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) dashboard design
+- **Development tools** — [opencode](https://opencode.ai) + [DeepSeek V4 Flash](https://deepseek.com/) + [Grok](https://x.ai/) + [GLM](https://zhipuai.cn/) for AI-assisted coding
+- **TCPing nodes** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) global probe endpoints
+- **UI inspiration** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) dashboard design
