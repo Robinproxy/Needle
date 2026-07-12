@@ -55,23 +55,32 @@ require_root() {
   fi
 }
 
-prefer_tty() {
+# Prompt from /dev/tty without rebinding bash stdin (curl|bash -s safe).
+read_prompt() {
+  local __var="$1"
+  local __prompt="$2"
+  local __val=""
   if [ -c /dev/tty ]; then
-    exec </dev/tty
+    IFS= read -r -p "$__prompt" __val </dev/tty || true
+  elif [ -t 0 ]; then
+    IFS= read -r -p "$__prompt" __val || true
+  else
+    echo "No interactive TTY available." >&2
+    exit 1
   fi
+  printf -v "$__var" '%s' "$__val"
 }
 
 require_tty_for_install() {
-  if [ -c /dev/tty ]; then
-    exec </dev/tty
-  elif [ ! -t 0 ]; then
-    echo "No interactive TTY available for install."
-    echo "Download then run:"
-    echo "  curl -fsSL $SCRIPT_URL -o /tmp/needle-server.sh"
-    echo "  # or: wget -qO /tmp/needle-server.sh $SCRIPT_URL"
-    echo "  sudo bash /tmp/needle-server.sh install"
-    exit 1
+  if [ -c /dev/tty ] || [ -t 0 ]; then
+    return 0
   fi
+  echo "No interactive TTY available for install."
+  echo "Download then run:"
+  echo "  curl -fsSL $SCRIPT_URL -o /tmp/needle-server.sh"
+  echo "  # or: wget -qO /tmp/needle-server.sh $SCRIPT_URL"
+  echo "  sudo bash /tmp/needle-server.sh install"
+  exit 1
 }
 
 is_installed() {
@@ -153,7 +162,7 @@ download_release_server() {
   if [ -z "$VERSION" ]; then
     if [ "$mode" = "interactive" ]; then
       echo "Failed to fetch latest release automatically."
-      read -rp "Version (e.g. v0.4.0): " VERSION
+      read_prompt VERSION "Version (e.g. v0.4.0): "
     else
       echo "Failed to fetch latest release version."
       echo "Check network access to GitHub, or install manually from Releases."
@@ -235,7 +244,7 @@ cmd_install() {
   chmod +x "$SERVER_BIN"
 
   DEFAULT_LISTEN=":8008"
-  read -rp "Listen address [${DEFAULT_LISTEN}]: " LISTEN
+  read_prompt LISTEN "Listen address [${DEFAULT_LISTEN}]: "
   LISTEN="${LISTEN:-$DEFAULT_LISTEN}"
 
   cat > "$ENV_FILE" <<EOF
@@ -310,7 +319,6 @@ cmd_upgrade() {
 
 cmd_uninstall() {
   require_root
-  prefer_tty
 
   local purge=false yes=false
   while [ $# -gt 0 ]; do
@@ -329,7 +337,7 @@ cmd_uninstall() {
     else
       echo "Data kept: $DATA_DIR and $ENV_FILE (use --purge to remove all)."
     fi
-    read -rp "Continue? [y/N] " ans
+    read_prompt ans "Continue? [y/N] "
     case "$ans" in
       y|Y|yes|YES) ;;
       *) echo "aborted"; exit 0 ;;
@@ -422,9 +430,9 @@ case "${1:-}" in
 esac
 
 case "$CMD" in
-  install)   cmd_install ;;
-  upgrade)   cmd_upgrade ;;
-  uninstall) cmd_uninstall "$@" ;;
-  status)    cmd_status ;;
-  help|-h|--help) usage ;;
+  install)   cmd_install; exit 0 ;;
+  upgrade)   cmd_upgrade; exit 0 ;;
+  uninstall) cmd_uninstall "$@"; exit 0 ;;
+  status)    cmd_status; exit 0 ;;
+  help|-h|--help) usage; exit 0 ;;
 esac

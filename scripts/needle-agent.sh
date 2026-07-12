@@ -47,23 +47,32 @@ require_root() {
   fi
 }
 
-prefer_tty() {
+# Prompt from /dev/tty without rebinding bash stdin (curl|bash -s safe).
+read_prompt() {
+  local __var="$1"
+  local __prompt="$2"
+  local __val=""
   if [ -c /dev/tty ]; then
-    exec </dev/tty
+    IFS= read -r -p "$__prompt" __val </dev/tty || true
+  elif [ -t 0 ]; then
+    IFS= read -r -p "$__prompt" __val || true
+  else
+    echo "No interactive TTY available." >&2
+    exit 1
   fi
+  printf -v "$__var" '%s' "$__val"
 }
 
 require_tty_for_install() {
-  if [ -c /dev/tty ]; then
-    exec </dev/tty
-  elif [ ! -t 0 ]; then
-    echo "No interactive TTY available for install."
-    echo "Download then run:"
-    echo "  curl -fsSL $SCRIPT_URL -o /tmp/needle-agent.sh"
-    echo "  # or: wget -qO /tmp/needle-agent.sh $SCRIPT_URL"
-    echo "  sudo bash /tmp/needle-agent.sh install"
-    exit 1
+  if [ -c /dev/tty ] || [ -t 0 ]; then
+    return 0
   fi
+  echo "No interactive TTY available for install."
+  echo "Download then run:"
+  echo "  curl -fsSL $SCRIPT_URL -o /tmp/needle-agent.sh"
+  echo "  # or: wget -qO /tmp/needle-agent.sh $SCRIPT_URL"
+  echo "  sudo bash /tmp/needle-agent.sh install"
+  exit 1
 }
 
 detect_arch() {
@@ -146,7 +155,7 @@ download_release_agent() {
   if [ -z "$VERSION" ]; then
     if [ "$1" = "interactive" ]; then
       echo "Failed to fetch latest release automatically."
-      read -rp "Version (e.g. v0.4.0): " VERSION
+      read_prompt VERSION "Version (e.g. v0.4.0): "
     else
       echo "Failed to fetch latest release version."
       echo "Check network access to GitHub, or install manually from Releases."
@@ -295,13 +304,13 @@ cmd_install() {
   cp "$TMP_DIR/needle-agent" "$BIN_DIR/"
   chmod +x "$BIN_DIR/needle-agent"
 
-  read -rp "Hostname (leave empty for auto-detection) []: " HOSTNAME
+  read_prompt HOSTNAME "Hostname (leave empty for auto-detection) []: "
   HOSTNAME="${HOSTNAME:-}"
 
-  read -rp "Region (ISO country code, e.g. CN/SG/US) [SG]: " REGION
+  read_prompt REGION "Region (ISO country code, e.g. CN/SG/US) [SG]: "
   REGION="${REGION:-SG}"
 
-  read -rp "Server URL [http://127.0.0.1:8008]: " SERVER_URL
+  read_prompt SERVER_URL "Server URL [http://127.0.0.1:8008]: "
   SERVER_URL="${SERVER_URL:-http://127.0.0.1:8008}"
 
   # Per-agent unique token (not a shared server secret)
@@ -313,13 +322,13 @@ cmd_install() {
   else
     DEFAULT_TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
   fi
-  read -rp "Agent token (enter for auto-generated) [${DEFAULT_TOKEN}]: " TOKEN
+  read_prompt TOKEN "Agent token (enter for auto-generated) [${DEFAULT_TOKEN}]: "
   TOKEN="${TOKEN:-$DEFAULT_TOKEN}"
   while [ -z "$TOKEN" ]; do
-    read -rp "Agent token is required: " TOKEN
+    read_prompt TOKEN "Agent token is required: "
   done
 
-  read -rp "Report interval (seconds) [30]: " INTERVAL
+  read_prompt INTERVAL "Report interval (seconds) [30]: "
   INTERVAL="${INTERVAL:-30}"
 
   TCPING_DEFAULTS="CMv4 sh-cm-v4.ip.zstaticcdn.com:80 CMv6 sh-cm-v6.ip.zstaticcdn.com:80 CUv4 sh-cu-v4.ip.zstaticcdn.com:80 CUv6 sh-cu-v6.ip.zstaticcdn.com:80 CTv4 sh-ct-v4.ip.zstaticcdn.com:80 CTv6 sh-ct-v6.ip.zstaticcdn.com:80"
@@ -329,18 +338,18 @@ cmd_install() {
   # shellcheck disable=SC2086
   set -- $TCPING_DEFAULTS
   N1="$1"; T1="$2"; N3="$3"; T3="$4"; N5="$5"; T5="$6"; N7="$7"; T7="$8"; N9="$9"; T9="${10}"; N11="${11}"; T11="${12}"
-  read -rp "  Target 1 name [${N1}]: " V; N1="${V:-$N1}"
-  read -rp "  Target 1 address [${T1}]: " V; T1="${V:-$T1}"
-  read -rp "  Target 2 name [${N3}]: " V; N3="${V:-$N3}"
-  read -rp "  Target 2 address [${T3}]: " V; T3="${V:-$T3}"
-  read -rp "  Target 3 name [${N5}]: " V; N5="${V:-$N5}"
-  read -rp "  Target 3 address [${T5}]: " V; T5="${V:-$T5}"
-  read -rp "  Target 4 name [${N7}]: " V; N7="${V:-$N7}"
-  read -rp "  Target 4 address [${T7}]: " V; T7="${V:-$T7}"
-  read -rp "  Target 5 name [${N9}]: " V; N9="${V:-$N9}"
-  read -rp "  Target 5 address [${T9}]: " V; T9="${V:-$T9}"
-  read -rp "  Target 6 name [${N11}]: " V; N11="${V:-$N11}"
-  read -rp "  Target 6 address [${T11}]: " V; T11="${V:-$T11}"
+  read_prompt V "  Target 1 name [${N1}]: "; N1="${V:-$N1}"
+  read_prompt V "  Target 1 address [${T1}]: "; T1="${V:-$T1}"
+  read_prompt V "  Target 2 name [${N3}]: "; N3="${V:-$N3}"
+  read_prompt V "  Target 2 address [${T3}]: "; T3="${V:-$T3}"
+  read_prompt V "  Target 3 name [${N5}]: "; N5="${V:-$N5}"
+  read_prompt V "  Target 3 address [${T5}]: "; T5="${V:-$T5}"
+  read_prompt V "  Target 4 name [${N7}]: "; N7="${V:-$N7}"
+  read_prompt V "  Target 4 address [${T7}]: "; T7="${V:-$T7}"
+  read_prompt V "  Target 5 name [${N9}]: "; N9="${V:-$N9}"
+  read_prompt V "  Target 5 address [${T9}]: "; T9="${V:-$T9}"
+  read_prompt V "  Target 6 name [${N11}]: "; N11="${V:-$N11}"
+  read_prompt V "  Target 6 address [${T11}]: "; T11="${V:-$T11}"
 
   echo
   echo "VPS billing setup (for dashboard expiry countdown and traffic reset):"
@@ -349,7 +358,7 @@ cmd_install() {
   echo "  3) Semi-annual (6m)"
   echo "  4) Annual (12m)"
   echo "  0) Skip"
-  read -rp "Select billing period [0]: " PERIOD_CHOICE
+  read_prompt PERIOD_CHOICE "Select billing period [0]: "
 
   EXPIRES_AT=""
   BILLING_PERIOD=""
@@ -362,7 +371,7 @@ cmd_install() {
   esac
 
   if [ -n "$BILLING_PERIOD" ]; then
-    read -rp "Next renewal date [${DEFAULT_EXPIRY}]: " EXPIRES_AT
+    read_prompt EXPIRES_AT "Next renewal date [${DEFAULT_EXPIRY}]: "
     EXPIRES_AT="${EXPIRES_AT:-$DEFAULT_EXPIRY}"
   fi
 
@@ -471,7 +480,6 @@ cmd_upgrade() {
 
 cmd_uninstall() {
   require_root
-  prefer_tty
 
   local do_unregister=false yes=false
   while [ $# -gt 0 ]; do
@@ -490,7 +498,7 @@ cmd_uninstall() {
     else
       echo "(local only; Server DB entry is kept unless you pass --unregister)"
     fi
-    read -rp "Continue? [y/N] " ans
+    read_prompt ans "Continue? [y/N] "
     case "$ans" in
       y|Y|yes|YES) ;;
       *) echo "aborted"; exit 0 ;;
@@ -570,9 +578,9 @@ case "${1:-}" in
 esac
 
 case "$CMD" in
-  install)   cmd_install ;;
-  upgrade)   cmd_upgrade ;;
-  uninstall) cmd_uninstall "$@" ;;
-  status)    cmd_status ;;
-  help|-h|--help) usage ;;
+  install)   cmd_install; exit 0 ;;
+  upgrade)   cmd_upgrade; exit 0 ;;
+  uninstall) cmd_uninstall "$@"; exit 0 ;;
+  status)    cmd_status; exit 0 ;;
+  help|-h|--help) usage; exit 0 ;;
 esac
