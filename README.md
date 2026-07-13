@@ -68,11 +68,11 @@
 | 升级 | `cd ~/needle && docker compose pull && docker compose up -d` |
 | 日志 | `docker compose logs -f needle-server` |
 | 登记 token | `docker compose exec needle-server needle-server -db /data/needle.db allow-token <token>` |
-| 列 token | `docker compose exec needle-server needle-server -db /data/needle.db list-tokens` |
-| 列节点 | `docker compose exec needle-server needle-server -db /data/needle.db list-agents` |
+| 显示 token | `docker compose exec needle-server needle-server -db /data/needle.db list-tokens` |
+| 显示节点 | `docker compose exec needle-server needle-server -db /data/needle.db list-agents` |
 | 吊销 token | `docker compose exec needle-server needle-server -db /data/needle.db -y revoke-token <token>` |
-| 删节点 | `docker compose exec needle-server needle-server -db /data/needle.db delete-agent <hostname\|id>` |
-| 删节点（跳过确认） | `docker compose exec needle-server needle-server -db /data/needle.db -y delete-agent <hostname\|id>` |
+| 删除节点 | `docker compose exec needle-server needle-server -db /data/needle.db delete-agent <hostname\|id>` |
+| 删除节点（跳过确认） | `docker compose exec needle-server needle-server -db /data/needle.db -y delete-agent <hostname\|id>` |
 | 备份 | `cp -a data/needle.db data/needle.db.bak` |
 | 卸载保留数据 | `docker compose down` |
 | 卸载含数据 | `docker compose down -v && rm -rf data` |
@@ -91,10 +91,10 @@
 | 卸载（保留 data） | `sudo bash /tmp/needle-server.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall` |
 | 卸载（全删） | `sudo bash /tmp/needle-server.sh uninstall --purge` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall --purge` |
 | 登记 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>` | — |
-| 列 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens` | — |
-| 列节点 | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents` | — |
-| 删节点 | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname\|id>` | — |
-| 删节点（-y） | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname\|id>` | — |
+| 显示 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens` | — |
+| 显示节点 | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents` | — |
+| 删除节点 | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname\|id>` | — |
+| 删除节点（-y） | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname\|id>` | — |
 | 吊销 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>` | — |
 | 日志 | `journalctl -u needle-server -f` | — |
 | 清理临时脚本 | `rm -f /tmp/needle-server.sh` | 管道无需 |
