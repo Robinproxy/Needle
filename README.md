@@ -438,7 +438,7 @@ tcpping:
 | token 在哪 | Agent：`/opt/needle-agent/agent.yaml`；Server：`needle.db` 的 `agent_tokens` |
 | 面板去掉某 VPS | Agent：`uninstall --unregister`；或 Server：`delete-agent` / `revoke-token` |
 | 删了节点又出现 | Agent 仍在上报 → 先停/卸 Agent，再 delete |
-| 换 hostname（token 已绑定） | 需 `revoke-token` 再 `allow-token`，或换新 token |
+| 更换 hostname | 需 `revoke-token` 再 `allow-token`，或换新 token |
 
 ---
 
