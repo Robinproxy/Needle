@@ -65,18 +65,18 @@
 
 | Operation | Command |
 |------|------|
-| 部署 | 见下方 [部署详解 · Docker](#server--docker推荐) 完整 compose 块 |
-| 升级 | `cd ~/needle && docker compose pull && docker compose up -d` |
-| 日志 | `docker compose logs -f needle-server` |
-| 登记 token | `docker compose exec needle-server needle-server -db /data/needle.db allow-token <token>` |
-| 显示 token | `docker compose exec needle-server needle-server -db /data/needle.db list-tokens` |
-| 显示节点 | `docker compose exec needle-server needle-server -db /data/needle.db list-agents` |
-| 吊销 token | `docker compose exec needle-server needle-server -db /data/needle.db -y revoke-token <token>` |
-| 删除节点 | `docker compose exec needle-server needle-server -db /data/needle.db delete-agent <hostname\|id>` |
-| 删除节点（-y） | `docker compose exec needle-server needle-server -db /data/needle.db -y delete-agent <hostname\|id>` |
-| 备份 | `cp -a data/needle.db data/needle.db.bak` |
-| 卸载保留数据 | `docker compose down` |
-| 卸载含数据 | `docker compose down -v && rm -rf data` |
+| Deploy | See full compose block under [Deploy · Docker](#server--docker推荐) |
+| Upgrade | `cd ~/needle && docker compose pull && docker compose up -d` |
+| Logs | `docker compose logs -f needle-server` |
+| Allow token | `docker compose exec needle-server needle-server -db /data/needle.db allow-token <token>` |
+| List tokens | `docker compose exec needle-server needle-server -db /data/needle.db list-tokens` |
+| List agents | `docker compose exec needle-server needle-server -db /data/needle.db list-agents` |
+| Revoke token | `docker compose exec needle-server needle-server -db /data/needle.db -y revoke-token <token>` |
+| Delete agent | `docker compose exec needle-server needle-server -db /data/needle.db delete-agent <hostname\|id>` |
+| Delete agent (-y) | `docker compose exec needle-server needle-server -db /data/needle.db -y delete-agent <hostname\|id>` |
+| Backup | `cp -a data/needle.db data/needle.db.bak` |
+| Uninstall (keep data) | `docker compose down` |
+| Uninstall (purge) | `docker compose down -v && rm -rf data` |
 
 > `exec` 不走 ENTRYPOINT：服务名 `needle-server` 后须再写一次二进制名 `needle-server`。
 
@@ -87,21 +87,21 @@
 
 | Operation | Local Script | Pipe |
 |------|----------|------|
-| 下载脚本 | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
-| 安装 | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
-| 智能装/升 | `sudo bash /tmp/needle-server.sh` | 同上（无参） |
-| 升级 | `sudo bash /tmp/needle-server.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- upgrade` |
-| 状态 | `sudo bash /tmp/needle-server.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- status` |
-| 卸载（保留 data） | `sudo bash /tmp/needle-server.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall` |
-| 卸载（全删） | `sudo bash /tmp/needle-server.sh uninstall --purge` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall --purge` |
-| 登记 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>` | — |
-| 显示 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens` | — |
-| 显示 节点 | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents` | — |
-| 删除 节点 | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname\|id>` | — |
-| 删除 节点（-y） | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname\|id>` | — |
-| 吊销 token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>` | — |
-| 日志 | `journalctl -u needle-server -f` | — |
-| 清理临时脚本 | `rm -f /tmp/needle-server.sh` | 管道无需 |
+| Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
+| Install | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
+| Smart install/upgrade | `sudo bash /tmp/needle-server.sh` | same (no args) |
+| Upgrade | `sudo bash /tmp/needle-server.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- upgrade` |
+| Status | `sudo bash /tmp/needle-server.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- status` |
+| Uninstall (keep data) | `sudo bash /tmp/needle-server.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall` |
+| Uninstall (purge) | `sudo bash /tmp/needle-server.sh uninstall --purge` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall --purge` |
+| Allow token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>` | — |
+| List tokens | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens` | — |
+| List agents | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents` | — |
+| Delete agent | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname\|id>` | — |
+| Delete agent (-y) | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname\|id>` | — |
+| Revoke token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>` | — |
+| Logs | `journalctl -u needle-server -f` | — |
+| Cleanup temp script | `rm -f /tmp/needle-server.sh` | not needed for pipe |
 
 </details>
 
@@ -110,15 +110,15 @@
 
 | Operation | Local Script | Pipe |
 |------|----------|------|
-| 下载脚本 | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
-| 安装 | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
-| 智能装/升 | `sudo bash /tmp/needle-agent.sh` | 同上（无参） |
-| 升级 | `sudo bash /tmp/needle-agent.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- upgrade` |
-| 状态 | `sudo bash /tmp/needle-agent.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- status` |
-| 卸本机 | `sudo bash /tmp/needle-agent.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall` |
-| 卸本机 + 通知 Server | `sudo bash /tmp/needle-agent.sh uninstall --unregister` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall --unregister` |
-| 日志 | `journalctl -u needle-agent -f` | — |
-| 清理临时脚本 | `rm -f /tmp/needle-agent.sh` | 管道无需 |
+| Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
+| Install | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
+| Smart install/upgrade | `sudo bash /tmp/needle-agent.sh` | same (no args) |
+| Upgrade | `sudo bash /tmp/needle-agent.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- upgrade` |
+| Status | `sudo bash /tmp/needle-agent.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- status` |
+| Uninstall local | `sudo bash /tmp/needle-agent.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall` |
+| Uninstall + notify Server | `sudo bash /tmp/needle-agent.sh uninstall --unregister` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall --unregister` |
+| Logs | `journalctl -u needle-agent -f` | — |
+| Cleanup temp script | `rm -f /tmp/needle-agent.sh` | not needed for pipe |
 
 </details>
 
@@ -127,16 +127,16 @@
 
 | Role | Path | Description |
 |------|------|------|
-| Docker | `~/needle/docker-compose.yml` | 编排 |
-| Docker | `~/needle/.env` | 可选 `NEEDLE_PORT` |
-| Docker | `~/needle/data/needle.db` | SQLite（含 token 白名单） |
-| Docker | 容器内 `/data` | 数据卷 |
-| Server 二进制 | `/opt/needle/bin/needle-server` | 二进制 |
-| Server 二进制 | `/opt/needle/.env` | `NEEDLE_LISTEN`（600） |
-| Server 二进制 | `/opt/needle/data/needle.db` | SQLite |
-| Server 二进制 | `/etc/systemd/system/needle-server.service` | unit |
-| Agent | `/opt/needle-agent/bin/needle-agent` | 二进制 |
-| Agent | `/opt/needle-agent/agent.yaml` | 配置 + **独立 token**（600） |
+| Docker | `~/needle/docker-compose.yml` | Compose file |
+| Docker | `~/needle/.env` | Optional `NEEDLE_PORT` |
+| Docker | `~/needle/data/needle.db` | SQLite (token allow-list) |
+| Docker | `/data` in container | Data volume |
+| Server binary | `/opt/needle/bin/needle-server` | Binary |
+| Server binary | `/opt/needle/.env` | `NEEDLE_LISTEN` (mode 600) |
+| Server binary | `/opt/needle/data/needle.db` | SQLite |
+| Server binary | `/etc/systemd/system/needle-server.service` | unit |
+| Agent | `/opt/needle-agent/bin/needle-agent` | Binary |
+| Agent | `/opt/needle-agent/agent.yaml` | Config + **per-agent token** (mode 600) |
 | Agent | `/etc/systemd/system/needle-agent.service` | unit |
 
 </details>
