@@ -435,8 +435,8 @@ tcpping:
 
 | Scenario | What to do |
 |----------|------------|
-| Remove a VPS from panel | Agent: `uninstall --unregister`; or Server: `delete-agent` / `revoke-token` |
-| Change hostname (token already bound) | Gets 401; `revoke-token` then `allow-token`, or issue a new token |
+| Remove a VPS from panel | Agent: `uninstall --unregister`; or Server: `delete-agent` |
+| Change hostname (token already bound) | Gets 401; `revoke-token` then `allow-token` |
 
 ---
 
