@@ -434,7 +434,7 @@ tcpping:
 
 | 场景 | 做法 |
 |------|------|
-| 删除 VPS | Agent：`uninstall --unregister`； Server：`delete-agent` / `revoke-token` |
+| 删除 VPS | Agent：`uninstall --unregister`； Server：`delete-agent` |
 | 更换 hostname | 需 `revoke-token` 再 `allow-token` |
 
 ---
