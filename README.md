@@ -60,9 +60,10 @@
 
 脚本支持 **curl 或 wget**。无 curl：`apt-get update && apt-get install -y curl`。
 
-### Server · Docker
+<details>
+<summary>Server · Docker</summary>
 
-| 操作 | 命令 |
+| Operation | Command |
 |------|------|
 | 部署 | 见下方 [部署详解 · Docker](#server--docker推荐) 完整 compose 块 |
 | 升级 | `cd ~/needle && docker compose pull && docker compose up -d` |
@@ -79,9 +80,12 @@
 
 > `exec` 不走 ENTRYPOINT：服务名 `needle-server` 后须再写一次二进制名 `needle-server`。
 
-### Server · 二进制
+</details>
 
-| 操作 | 本地脚本 | 管道 |
+<details>
+<summary>Server · 二进制</summary>
+
+| Operation | Local Script | Pipe |
 |------|----------|------|
 | 下载脚本 | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
 | 安装 | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
@@ -99,9 +103,12 @@
 | 日志 | `journalctl -u needle-server -f` | — |
 | 清理临时脚本 | `rm -f /tmp/needle-server.sh` | 管道无需 |
 
-### Agent · 二进制
+</details>
 
-| 操作 | 本地脚本 | 管道 |
+<details>
+<summary>Agent · 二进制</summary>
+
+| Operation | Local Script | Pipe |
 |------|----------|------|
 | 下载脚本 | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
 | 安装 | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
@@ -113,9 +120,12 @@
 | 日志 | `journalctl -u needle-agent -f` | — |
 | 清理临时脚本 | `rm -f /tmp/needle-agent.sh` | 管道无需 |
 
-### 目录速查
+</details>
 
-| 角色 | 路径 | 说明 |
+<details>
+<summary>目录速查</summary>
+
+| Role | Path | Description |
 |------|------|------|
 | Docker | `~/needle/docker-compose.yml` | 编排 |
 | Docker | `~/needle/.env` | 可选 `NEEDLE_PORT` |
@@ -128,6 +138,8 @@
 | Agent | `/opt/needle-agent/bin/needle-agent` | 二进制 |
 | Agent | `/opt/needle-agent/agent.yaml` | 配置 + **独立 token**（600） |
 | Agent | `/etc/systemd/system/needle-agent.service` | unit |
+
+</details>
 
 ---
 

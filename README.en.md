@@ -60,7 +60,8 @@
 
 Scripts support **curl or wget**. No curl: `apt-get update && apt-get install -y curl`.
 
-### Server · Docker
+<details>
+<summary>Server · Docker</summary>
 
 | Action | Command |
 |--------|---------|
@@ -79,7 +80,10 @@ Scripts support **curl or wget**. No curl: `apt-get update && apt-get install -y
 
 > `exec` skips ENTRYPOINT: after service name `needle-server`, write the binary name `needle-server` again.
 
-### Server · Binary
+</details>
+
+<details>
+<summary>Server · Binary</summary>
 
 | Action | Local script | Pipe |
 |--------|--------------|------|
@@ -99,7 +103,10 @@ Scripts support **curl or wget**. No curl: `apt-get update && apt-get install -y
 | Logs | `journalctl -u needle-server -f` | — |
 | Cleanup temp script | `rm -f /tmp/needle-server.sh` | not needed for pipe |
 
-### Agent · Binary
+</details>
+
+<details>
+<summary>Agent · Binary</summary>
 
 | Action | Local script | Pipe |
 |--------|--------------|------|
@@ -113,7 +120,10 @@ Scripts support **curl or wget**. No curl: `apt-get update && apt-get install -y
 | Logs | `journalctl -u needle-agent -f` | — |
 | Cleanup temp script | `rm -f /tmp/needle-agent.sh` | not needed for pipe |
 
-### Path Cheatsheet
+</details>
+
+<details>
+<summary>Path Cheatsheet</summary>
 
 | Role | Path | Notes |
 |------|------|-------|
@@ -128,6 +138,8 @@ Scripts support **curl or wget**. No curl: `apt-get update && apt-get install -y
 | Agent | `/opt/needle-agent/bin/needle-agent` | Binary |
 | Agent | `/opt/needle-agent/agent.yaml` | Config + **per-agent token** (mode 600) |
 | Agent | `/etc/systemd/system/needle-agent.service` | unit |
+
+</details>
 
 ---
 
