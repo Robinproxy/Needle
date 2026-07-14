@@ -65,7 +65,6 @@
 
 | Operation | Command |
 |------|------|
-| Deploy | See full compose block under [Deploy · Docker](#server--docker推荐) |
 | Upgrade | `cd ~/needle && docker compose pull && docker compose up -d` |
 | Logs | `docker compose logs -f needle-server` |
 | Allow token | `docker compose exec needle-server needle-server -db /data/needle.db allow-token <token>` |
@@ -89,7 +88,7 @@
 |------|----------|------|
 | Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
 | Install | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
-| Smart install/upgrade | `sudo bash /tmp/needle-server.sh` | same (no args) |
+| install/upgrade | `sudo bash /tmp/needle-server.sh` | same (no args) |
 | Upgrade | `sudo bash /tmp/needle-server.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- upgrade` |
 | Status | `sudo bash /tmp/needle-server.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- status` |
 | Uninstall (keep data) | `sudo bash /tmp/needle-server.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall` |
@@ -112,7 +111,7 @@
 |------|----------|------|
 | Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
 | Install | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
-| Smart install/upgrade | `sudo bash /tmp/needle-agent.sh` | same (no args) |
+| install/upgrade | `sudo bash /tmp/needle-agent.sh` | same (no args) |
 | Upgrade | `sudo bash /tmp/needle-agent.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- upgrade` |
 | Status | `sudo bash /tmp/needle-agent.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- status` |
 | Uninstall local | `sudo bash /tmp/needle-agent.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall` |
@@ -427,8 +426,7 @@ tcpping:
 | token 在哪 | Agent：`/opt/needle-agent/agent.yaml`；Server：`needle.db` 的 `agent_tokens` |
 | 面板去掉某 VPS | Agent：`uninstall --unregister`；或 Server：`delete-agent` / `revoke-token` |
 | 删了节点又出现 | Agent 仍在上报 → 先停/卸 Agent，再 delete |
-| 换 hostname（token 已绑定） | 会 401；需 `revoke-token` 再 `allow-token`，或换新 token |
-| 从旧版共享 token 升级 | **不兼容**：每台重新生成 token 并 `allow-token` |
+| 换 hostname（token 已绑定） | 需 `revoke-token` 再 `allow-token`，或换新 token |
 
 ---
 
