@@ -435,12 +435,8 @@ tcpping:
 
 | Scenario | What to do |
 |----------|------------|
-| New Agent never online | Did you run `allow-token` on Server? |
-| Where is the token | Agent: `/opt/needle-agent/agent.yaml`; Server: `agent_tokens` in `needle.db` |
 | Remove a VPS from panel | Agent: `uninstall --unregister`; or Server: `delete-agent` / `revoke-token` |
-| Deleted node reappears | Agent still reporting → stop/uninstall Agent, then delete |
 | Change hostname (token already bound) | Gets 401; `revoke-token` then `allow-token`, or issue a new token |
-| Upgrade from old shared token | **Incompatible**: regenerate token per host and `allow-token` |
 
 ---
 
