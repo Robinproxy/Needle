@@ -58,7 +58,7 @@
 
 ## 命令速查
 
-脚本支持 **curl 或 wget**。无 curl：`apt-get update && apt-get install -y curl`。
+curl：`apt-get update && apt-get install -y curl`。
 
 <details>
 <summary>Server · Docker</summary>
