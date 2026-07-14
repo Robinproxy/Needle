@@ -122,8 +122,10 @@ func (h *Handler) authorizeAgent(token, hostname string) error {
 	}
 	if row.Hostname == "" {
 		if err := h.store.BindToken(token, hostname); err != nil {
+			log.Printf("report: bind failed for hostname %q: %v", hostname, err)
 			return err
 		}
+		log.Printf("agent registered: hostname=%q", hostname)
 		return nil
 	}
 	if row.Hostname != hostname {
@@ -265,10 +267,12 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	if err := h.authorizeAgent(token, req.Hostname); err != nil {
 		switch {
 		case errors.Is(err, ErrHostnameTaken), errors.Is(err, ErrTokenAlreadyBound):
+			log.Printf("report: conflict for hostname %q: %v", req.Hostname, err)
 			http.Error(w, err.Error(), http.StatusConflict)
 		case err.Error() == "hostname required":
 			http.Error(w, "hostname required", http.StatusBadRequest)
 		default:
+			log.Printf("report: unauthorized for hostname %q", req.Hostname)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}
 		return
@@ -277,6 +281,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	region := sanitizeRegion(req.Region)
 	agentID, err := h.store.UpsertAgent(req.Hostname, token, region, req.ExpiresAt, req.BillingPeriod)
 	if err != nil {
+		log.Printf("report: upsert agent %q: %v", req.Hostname, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -339,6 +344,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Load15:      load15,
 			Uptime:      int64(req.Uptime),
 		}, createdAt); err != nil {
+			log.Printf("report: insert metric for agent %q: %v", req.Hostname, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -360,6 +366,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			LatencyMs: t.LatencyMs,
 			Success:   t.Success,
 		}, createdAt); err != nil {
+			log.Printf("report: insert tcpping for agent %q: %v", req.Hostname, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}

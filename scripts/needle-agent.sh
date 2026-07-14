@@ -310,8 +310,28 @@ cmd_install() {
   read_prompt REGION "Region (ISO country code, e.g. CN/SG/US) [SG]: "
   REGION="${REGION:-SG}"
 
-  read_prompt SERVER_URL "Server URL [http://127.0.0.1:8008]: "
-  SERVER_URL="${SERVER_URL:-http://127.0.0.1:8008}"
+  DEFAULT_SERVER_URL="http://127.0.0.1:8008"
+  while true; do
+    read_prompt SERVER_URL "Server URL [${DEFAULT_SERVER_URL}]: "
+    SERVER_URL="${SERVER_URL:-$DEFAULT_SERVER_URL}"
+    case "$SERVER_URL" in
+      http://*|https://*) break ;;
+      *) echo "  ERROR: URL must start with http:// or https://" ;;
+    esac
+  done
+
+  echo "Testing connectivity to $SERVER_URL/api/health ..."
+  if http_get "$SERVER_URL/api/health" 2>/dev/null | grep -q 'ok'; then
+    echo "  Server reachable."
+  else
+    echo "  WARNING: cannot reach $SERVER_URL/api/health"
+    echo "  (server might not be running yet, or URL might be wrong)"
+    read_prompt CONTINUE "Continue anyway? [y/N] "
+    case "$CONTINUE" in
+      y|Y|yes|YES) ;;
+      *) echo "aborted"; exit 0 ;;
+    esac
+  fi
 
   # Per-agent unique token (not a shared server secret)
   DEFAULT_TOKEN=""
