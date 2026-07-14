@@ -171,7 +171,7 @@ docker compose up -d
 > **不再需要全局 `NEEDLE_TOKEN`。** Agent 用独立 token，用 `allow-token` 登记。
 
 <details>
-<summary>#### 运维</summary>
+<summary>运维</summary>
 
 ```bash
 cd ~/needle
@@ -248,7 +248,7 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 ```
 
 <details>
-<summary>#### 运维 · 脚本（二选一）</summary>
+<summary>运维 · 脚本（二选一）</summary>
 
 本地脚本：
 
@@ -276,7 +276,7 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 </details>
 
 <details>
-<summary>#### 运维 · Token / 节点 CLI</summary>
+<summary>运维 · Token / 节点 CLI</summary>
 
 ```bash
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
@@ -347,7 +347,7 @@ Agent token: a1b2c3d4...
 **请到 Server 上执行 `allow-token`，否则上报 401。** Token 保存在本机 `agent.yaml`。
 
 <details>
-<summary>#### 运维 · 脚本（二选一）</summary>
+<summary>运维 · 脚本（二选一）</summary>
 
 本地脚本：
 

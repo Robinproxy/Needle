@@ -172,7 +172,7 @@ docker compose up -d
 > **No global `NEEDLE_TOKEN`.** Each Agent has its own token; register with `allow-token`.
 
 <details>
-<summary>#### Ops</summary>
+<summary>Ops</summary>
 
 ```bash
 cd ~/needle
@@ -249,7 +249,7 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 ```
 
 <details>
-<summary>#### Ops · Script (pick one)</summary>
+<summary>Ops · Script (pick one)</summary>
 
 Local script:
 
@@ -277,7 +277,7 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 </details>
 
 <details>
-<summary>#### Ops · Token / Agent CLI</summary>
+<summary>Ops · Token / Agent CLI</summary>
 
 ```bash
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
@@ -348,7 +348,7 @@ Agent token: a1b2c3d4...
 **Run `allow-token` on the Server, or reports get 401.** Token is stored in local `agent.yaml`.
 
 <details>
-<summary>#### Ops · Script (pick one)</summary>
+<summary>Ops · Script (pick one)</summary>
 
 Local script:
 
