@@ -170,7 +170,8 @@ docker compose up -d
 
 > **不再需要全局 `NEEDLE_TOKEN`。** Agent 用独立 token，用 `allow-token` 登记。
 
-#### 运维
+<details>
+<summary>#### 运维</summary>
 
 ```bash
 cd ~/needle
@@ -211,6 +212,8 @@ docker compose down
 docker compose down -v && rm -rf data
 ```
 
+</details>
+
 #### 目录
 
 | 路径 | 说明 |
@@ -244,7 +247,8 @@ sudo bash /tmp/needle-server.sh install
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
 ```
 
-#### 运维 · 脚本（二选一）
+<details>
+<summary>#### 运维 · 脚本（二选一）</summary>
 
 本地脚本：
 
@@ -269,7 +273,10 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
   | sudo bash -s -- uninstall --purge
 ```
 
-#### 运维 · Token / 节点 CLI
+</details>
+
+<details>
+<summary>#### 运维 · Token / 节点 CLI</summary>
 
 ```bash
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
@@ -289,6 +296,8 @@ journalctl -u needle-server -f
 ```bash
 rm -f /tmp/needle-server.sh
 ```
+
+</details>
 
 #### 目录
 
@@ -337,7 +346,8 @@ Agent token: a1b2c3d4...
 
 **请到 Server 上执行 `allow-token`，否则上报 401。** Token 保存在本机 `agent.yaml`。
 
-#### 运维 · 脚本（二选一）
+<details>
+<summary>#### 运维 · 脚本（二选一）</summary>
 
 本地脚本：
 
@@ -368,6 +378,8 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 journalctl -u needle-agent -f
 rm -f /tmp/needle-agent.sh
 ```
+
+</details>
 
 #### 目录
 

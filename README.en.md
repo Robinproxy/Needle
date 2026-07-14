@@ -171,7 +171,8 @@ docker compose up -d
 
 > **No global `NEEDLE_TOKEN`.** Each Agent has its own token; register with `allow-token`.
 
-#### Ops
+<details>
+<summary>#### Ops</summary>
 
 ```bash
 cd ~/needle
@@ -212,6 +213,8 @@ docker compose down
 docker compose down -v && rm -rf data
 ```
 
+</details>
+
 #### Paths
 
 | Path | Notes |
@@ -245,7 +248,8 @@ sudo bash /tmp/needle-server.sh install
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
 ```
 
-#### Ops · Script (pick one)
+<details>
+<summary>#### Ops · Script (pick one)</summary>
 
 Local script:
 
@@ -270,7 +274,10 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
   | sudo bash -s -- uninstall --purge
 ```
 
-#### Ops · Token / Agent CLI
+</details>
+
+<details>
+<summary>#### Ops · Token / Agent CLI</summary>
 
 ```bash
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
@@ -290,6 +297,8 @@ Remove temp script when done:
 ```bash
 rm -f /tmp/needle-server.sh
 ```
+
+</details>
 
 #### Paths
 
@@ -338,7 +347,8 @@ Agent token: a1b2c3d4...
 
 **Run `allow-token` on the Server, or reports get 401.** Token is stored in local `agent.yaml`.
 
-#### Ops · Script (pick one)
+<details>
+<summary>#### Ops · Script (pick one)</summary>
 
 Local script:
 
@@ -369,6 +379,8 @@ Logs and cleanup:
 journalctl -u needle-agent -f
 rm -f /tmp/needle-agent.sh
 ```
+
+</details>
 
 #### Paths
 
