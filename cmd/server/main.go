@@ -226,13 +226,6 @@ func maskToken(t string) string {
 	return t[:8] + "..." + t[len(t)-4:]
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func runListTokens(dbPath string) error {
 	store, err := openStore(dbPath)
 	if err != nil {

@@ -347,11 +347,6 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 	return out, nil
 }
 
-func (s *Store) DeleteTokenByHostname(hostname string) error {
-	_, err := s.db.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname)
-	return err
-}
-
 func (s *Store) UpsertAgent(hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
 	_, err := s.db.Exec(
 		`INSERT INTO agents(hostname, token, region, expires_at, billing_period) VALUES(?, ?, ?, ?, ?)
@@ -672,8 +667,4 @@ func (s *Store) startPurgeLoop() {
 
 func (s *Store) Close() error {
 	return s.db.Close()
-}
-
-func nowUnix() int64 {
-	return time.Now().Unix()
 }

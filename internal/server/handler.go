@@ -122,9 +122,6 @@ func (h *Handler) authorizeAgent(token, hostname string) error {
 	}
 	if row.Hostname == "" {
 		if err := h.store.BindToken(token, hostname); err != nil {
-			if errors.Is(err, ErrHostnameTaken) || errors.Is(err, ErrTokenAlreadyBound) {
-				return err
-			}
 			return err
 		}
 		return nil
@@ -204,8 +201,6 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			reportThrottle.Delete(a.ID)
-			// DeleteAgent already removes agent_tokens by hostname; ensure token gone
-			_ = h.store.DeleteTokenByHostname(req.Hostname)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 			return
