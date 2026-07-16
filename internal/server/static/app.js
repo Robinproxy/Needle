@@ -458,6 +458,7 @@ function renderDetailContent(id) {
   const agent = agents.find(a => a.agent.id === id);
   if (!agent) return;
 
+  const range = currentMetricsRange || '24h';
   detailEl.innerHTML = '<div class="detail-header">'
     + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
     + '<button class="btn btn-ghost btn-sm" onclick="toggleExpand(' + id + ')">\u2715</button>'
@@ -472,6 +473,10 @@ function renderDetailContent(id) {
       + '<div class="tcpping-header">'
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
+          + '<div class="theme-btn-group detail-range-group">'
+            + '<button type="button" class="theme-btn' + (range === '24h' ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')">1d</button>'
+            + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
+          + '</div>'
         + '</div>'
         + '<div class="tcpping-controls">'
           + '<div class="theme-btn-group">'
@@ -488,14 +493,13 @@ function renderDetailContent(id) {
     + '</div>'
     + '</div>';
 
-  // Fetch sparkline data
   currentTcppingId = id;
-  currentTcppingRange = '168h';
-  currentMetricsRange = '168h';
-  fetch('/api/agents/' + id + '/metrics?range=168h').then(r => r.json()).then(data => {
+  currentTcppingRange = range;
+  currentMetricsRange = range;
+  fetch('/api/agents/' + id + '/metrics?range=' + range).then(r => r.json()).then(data => {
     renderSparklines(id, data);
   }).catch(() => {});
-  fetchTCPingData(id, '168h');
+  fetchTCPingData(id, range);
 }
 
 function renderSparklines(id, metrics) {
@@ -569,33 +573,42 @@ function renderSparkline(elemId, data, color, isPercent) {
   sparkCharts[elemId] = chart;
 }
 
-function switchMetricsRange(id, range) {
-  if (currentMetricsRange === range) return;
+function switchDetailRange(id, range) {
+  id = +id;
+  if (currentMetricsRange === range && currentTcppingRange === range) return;
   currentMetricsRange = range;
-  const rangeBtns = document.querySelectorAll('#detail-' + id + ' .detail-range-bar .tcpping-range-btn');
+  currentTcppingRange = range;
+  const rangeBtns = document.querySelectorAll('#tcpping-section-' + id + ' .detail-range-group .theme-btn');
   rangeBtns.forEach(b => {
     b.classList.toggle('active', b.dataset.range === range);
   });
   fetch('/api/agents/' + id + '/metrics?range=' + range).then(r => r.json()).then(data => {
     renderSparklines(id, data);
   }).catch(() => {});
+  fetchTCPingData(id, range);
+}
+
+function switchMetricsRange(id, range) {
+  switchDetailRange(id, range);
 }
 
 function fetchTCPingData(id, range) {
   currentTcppingRange = range;
-  const rangeBtns = document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-range-btn');
-  rangeBtns.forEach(b => {
-    b.classList.toggle('active', b.dataset.range === range);
-  });
   fetch('/api/agents/' + id + '/tcpping?range=' + range).then(r => r.json()).then(data => {
     renderTCPingChart(id, data);
   }).catch(() => {});
 }
 
 function switchTcppingRange(id, range) {
-  id = +id;
-  if (currentTcppingId !== id || currentTcppingRange === range) return;
-  fetchTCPingData(id, range);
+  switchDetailRange(id, range);
+}
+
+function formatRangeAxisLabel(ts) {
+  const d = new Date(ts);
+  if (currentTcppingRange === '24h') {
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
 function renderTCPingChart(id, results) {
@@ -620,6 +633,7 @@ function renderTCPingChart(id, results) {
   if (!chartEl) return;
   if (tcppingChart) { try { tcppingChart.dispose(); } catch(e) {} }
 
+  const is1d = currentTcppingRange === '24h';
   const chart = echarts.init(chartEl);
   chart.setOption({
     tooltip: {
@@ -631,9 +645,12 @@ function renderTCPingChart(id, results) {
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: 'hsl(var(--border) / 0.5)' } },
+      minInterval: is1d ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
+      splitNumber: is1d ? 5 : 7,
       axisLabel: {
         color: 'hsl(var(--muted-foreground))', fontSize: 10,
-        formatter: v => { const d = new Date(v); return (d.getMonth() + 1) + '/' + d.getDate(); },
+        hideOverlap: true,
+        formatter: v => formatRangeAxisLabel(v),
       },
       splitLine: { show: false },
     },
@@ -867,7 +884,9 @@ function softRefresh() {
 }
 
 function updateDetailCharts(id) {
-  fetch('/api/agents/' + id + '/metrics?range=168h').then(r => r.json()).then(metrics => {
+  const metricsRange = currentMetricsRange || '24h';
+  const tcppingRange = currentTcppingRange || '24h';
+  fetch('/api/agents/' + id + '/metrics?range=' + metricsRange).then(r => r.json()).then(metrics => {
     if (!metrics || !metrics.length) return;
     const cpuData = metrics.map(m => [m.created_at * 1000, m.cpu_usage]);
     const memData = metrics.map(m => {
@@ -893,7 +912,7 @@ function updateDetailCharts(id) {
     });
   }).catch(() => {});
 
-  fetch('/api/agents/' + id + '/tcpping?range=168h').then(r => r.json()).then(results => {
+  fetch('/api/agents/' + id + '/tcpping?range=' + tcppingRange).then(r => r.json()).then(results => {
     if (!results || !results.length) return;
     const names = sortTcppingNames([...new Set(results.map(r => r.name))]);
     const series = names.map((name) => {
