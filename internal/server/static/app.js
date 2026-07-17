@@ -749,6 +749,14 @@ function tcppingToggleLine(id, name) {
   saveTcppingSelections(id);
 }
 
+function goHome() {
+  expandedId = null;
+  filterRegion = '';
+  destroyDetailCharts();
+  renderAll();
+  fullRefresh();
+}
+
 function fullRefresh() {
   const wasExpanded = expandedId;
   Promise.all([
