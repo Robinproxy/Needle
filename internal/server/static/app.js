@@ -9,6 +9,7 @@ let currentTcppingRange = '24h';
 let currentTcppingId = null;
 let currentMetricsRange = '24h';
 let currentHistoryDay = null;
+let detailDayAlerts = new Map();
 let gridCols = 4;
 let refreshInFlight = false;
 let lastRefreshAt = null;
@@ -516,10 +517,7 @@ function renderDetailContent(id) {
   currentTcppingId = id;
   currentTcppingRange = range;
   currentMetricsRange = range;
-  fetch(detailDataURL(id, 'metrics', range)).then(r => r.json()).then(data => {
-    renderSparklines(id, data);
-  }).catch(() => {});
-  fetchTCPingData(id, range);
+  loadDetailData(id, range);
 }
 
 function formatHistoryDay(ts) {
@@ -590,6 +588,13 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+function recordDayAlert(ts, message) {
+  const key = localDayKey(ts);
+  const alerts = detailDayAlerts.get(key) || [];
+  if (!alerts.includes(message)) alerts.push(message);
+  detailDayAlerts.set(key, alerts);
+}
+
 function renderSparklines(id, metrics) {
   if (!metrics || !metrics.length) return;
 
@@ -613,15 +618,24 @@ function renderSparklines(id, metrics) {
   document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(netOutPeak) + '</span>' : '—';
 
   const isOverview = currentMetricsRange === '168h';
+  if (isOverview) detailDayAlerts = new Map();
   const dailyAlerts = (field, averages, qualifies, severity) => {
     if (!isOverview) return [];
     const points = metrics.map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]]);
     return dailyWorst(points, qualifies, severity);
   };
-  renderSparkline(id, 'spark-cpu', cpuData, '#3b82f6', true, dailyAlerts('cpu_peak', cpuData, p => p[1] >= 85, p => p[1]));
-  renderSparkline(id, 'spark-mem', memData, '#22c55e', true, dailyAlerts('memory_peak_pct', memData, p => p[1] >= 85, p => p[1]));
-  renderSparkline(id, 'spark-netin', netInData, '#8b5cf6', false, dailyAlerts('network_down_peak', netInData, p => p[1] >= 1000000 && p[1] >= p[2] * 3, p => p[1] / Math.max(p[2], 1)));
-  renderSparkline(id, 'spark-netout', netOutData, '#f59e0b', false, dailyAlerts('network_up_peak', netOutData, p => p[1] >= 1000000 && p[1] >= p[2] * 3, p => p[1] / Math.max(p[2], 1)));
+  const cpuAlerts = dailyAlerts('cpu_peak', cpuData, p => p[1] >= 85, p => p[1]);
+  const memAlerts = dailyAlerts('memory_peak_pct', memData, p => p[1] >= 85, p => p[1]);
+  const netInAlerts = dailyAlerts('network_down_peak', netInData, p => p[1] >= 1000000 && p[1] >= p[2] * 3, p => p[1] / Math.max(p[2], 1));
+  const netOutAlerts = dailyAlerts('network_up_peak', netOutData, p => p[1] >= 1000000 && p[1] >= p[2] * 3, p => p[1] / Math.max(p[2], 1));
+  cpuAlerts.forEach(p => recordDayAlert(p[0], 'CPU peak ' + p[1].toFixed(1) + '%'));
+  memAlerts.forEach(p => recordDayAlert(p[0], 'Memory peak ' + p[1].toFixed(1) + '%'));
+  netInAlerts.forEach(p => recordDayAlert(p[0], 'Net In peak ' + formatSpeed(p[1]) + '/s'));
+  netOutAlerts.forEach(p => recordDayAlert(p[0], 'Net Out peak ' + formatSpeed(p[1]) + '/s'));
+  renderSparkline('spark-cpu', cpuData, '#3b82f6', true);
+  renderSparkline('spark-mem', memData, '#22c55e', true);
+  renderSparkline('spark-netin', netInData, '#8b5cf6', false);
+  renderSparkline('spark-netout', netOutData, '#f59e0b', false);
 }
 
 function formatSparkXAxis(ts) {
@@ -629,7 +643,7 @@ function formatSparkXAxis(ts) {
   return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
-function renderSparkline(id, elemId, data, color, isPercent, anomalies) {
+function renderSparkline(elemId, data, color, isPercent) {
   const el = document.getElementById(elemId);
   if (!el) return;
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
@@ -654,9 +668,7 @@ function renderSparkline(id, elemId, data, color, isPercent, anomalies) {
           : (p.data[1] >= 1000000 ? (p.data[1] / 1000000).toFixed(2) + 'M/s'
             : p.data[1] >= 1000 ? (p.data[1] / 1000).toFixed(1) + 'K/s'
             : p.data[1].toFixed(0) + '/s');
-        const peakPoint = params.find(item => item.seriesName === 'Alert');
-        const peakStr = peakPoint ? (isPercent ? peakPoint.data[1].toFixed(1) + '%' : formatSpeed(peakPoint.data[1]) + '/s') : '';
-        return dateStr + '<br/>' + timeStr + '<br/>Avg ' + valStr + (peakStr ? '<br/>Peak ' + peakStr + ' · click to inspect' : '');
+        return dateStr + '<br/>' + timeStr + '<br/>' + valStr;
       },
       textStyle: { fontSize: 11 },
     },
@@ -665,13 +677,7 @@ function renderSparkline(id, elemId, data, color, isPercent, anomalies) {
       type: 'line', data, smooth: true, symbol: 'none', sampling: 'lttb',
       lineStyle: { color, width: 1.5 },
       areaStyle: { color: color + '30' },
-    }, {
-      name: 'Alert', type: 'scatter', data: anomalies || [], symbol: 'emptyCircle', symbolSize: 7, z: 5,
-      itemStyle: { color: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
     }]
-  });
-  chart.on('click', params => {
-    if (params.seriesName === 'Alert' && params.data) openHistoricalDay(id, params.data[0]);
   });
   sparkCharts[elemId] = chart;
 }
@@ -689,21 +695,6 @@ function switchDetailRange(id, range) {
   const dayBtn = document.getElementById('detail-day-btn');
   if (dayBtn) { dayBtn.textContent = '1d'; dayBtn.title = 'Last 24 hours'; }
   loadDetailData(id, range);
-}
-
-function switchMetricsRange(id, range) {
-  switchDetailRange(id, range);
-}
-
-function fetchTCPingData(id, range) {
-  currentTcppingRange = range;
-  fetch(detailDataURL(id, 'tcpping', range)).then(r => r.json()).then(data => {
-    renderTCPingChart(id, data);
-  }).catch(() => {});
-}
-
-function switchTcppingRange(id, range) {
-  switchDetailRange(id, range);
 }
 
 function formatRangeAxisLabel(ts) {
@@ -738,24 +729,6 @@ function renderTCPingChart(id, results) {
 
   const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
   const chart = echarts.init(chartEl);
-  const dayNav = document.getElementById('tcpping-days-' + id);
-  if (dayNav) {
-    if (currentTcppingRange === '168h') {
-      const days = new Map();
-      results.forEach(r => {
-        const ts = r.created_at * 1000;
-        const key = localDayKey(ts);
-        if (!days.has(key)) days.set(key, ts);
-      });
-      dayNav.innerHTML = [...days.values()].sort((a, b) => a - b).slice(-7).map(ts =>
-        '<button type="button" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="View raw data for this day">' + formatHistoryDay(ts) + '</button>'
-      ).join('');
-      dayNav.hidden = false;
-    } else {
-      dayNav.innerHTML = '';
-      dayNav.hidden = true;
-    }
-  }
   let tcppingAlerts = [];
   if (currentTcppingRange === '168h') {
     const baselines = {};
@@ -775,12 +748,33 @@ function renderTCPingChart(id, results) {
       p => p[3] > 0 || p[1] >= Math.max(200, p[4] * 2),
       p => p[3] * 1000 + p[1] / p[4]
     );
+    tcppingAlerts.forEach(p => {
+      const message = p[3] > 0
+        ? mapCarrier(p[2]) + ' loss ' + (p[3] * 100).toFixed(1) + '%'
+        : mapCarrier(p[2]) + ' latency peak ' + p[1].toFixed(1) + 'ms';
+      recordDayAlert(p[0], message);
+    });
   }
-  const anomalySeries = currentTcppingRange === '168h' ? [{
-    name: 'Alert', type: 'scatter', symbol: 'emptyCircle', symbolSize: 7, z: 6,
-    data: tcppingAlerts,
-    itemStyle: { color: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
-  }] : [];
+  const dayNav = document.getElementById('tcpping-days-' + id);
+  if (dayNav) {
+    if (currentTcppingRange === '168h') {
+      const days = new Map();
+      results.forEach(r => {
+        const ts = r.created_at * 1000;
+        const key = localDayKey(ts);
+        if (!days.has(key)) days.set(key, ts);
+      });
+      dayNav.innerHTML = [...days.values()].sort((a, b) => a - b).slice(-7).map(ts => {
+        const alerts = detailDayAlerts.get(localDayKey(ts)) || [];
+        const title = [localDayKey(ts)].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
+        return '<button type="button" class="' + (alerts.length ? 'has-alert' : '') + '" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">' + formatHistoryDay(ts) + '</button>';
+      }).join('');
+      dayNav.hidden = false;
+    } else {
+      dayNav.innerHTML = '';
+      dayNav.hidden = true;
+    }
+  }
   chart.setOption({
     tooltip: {
       trigger: 'axis', valueFormatter: v => v ? v.toFixed(1) + ' ms' : 'timeout',
@@ -808,12 +802,7 @@ function renderTCPingChart(id, results) {
       splitLine: { lineStyle: { color: 'hsl(var(--border) / 0.2)', width: 1 } },
       axisLabel: { color: 'hsl(var(--muted-foreground))', fontSize: 10, margin: 0, formatter: v => v + 'ms' },
     },
-    series: series.concat(anomalySeries),
-  });
-  chart.on('click', params => {
-    if (params.seriesType === 'scatter' && params.data) {
-      openHistoricalDay(id, params.data[0]);
-    }
+    series,
   });
   tcppingChart = chart;
 

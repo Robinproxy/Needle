@@ -445,6 +445,11 @@ header {
   padding: 3px 6px; border-radius: 4px; color: hsl(var(--muted-foreground));
   font: 600 10px var(--font-mono); transition: color 0.12s, background 0.12s;
 }
+.tcpping-day-nav button.has-alert::before {
+  content: ''; display: inline-block; width: 5px; height: 5px;
+  margin-right: 4px; border-radius: 50%; background: #ef4444;
+  vertical-align: 1px;
+}
 .tcpping-day-nav button:hover, .tcpping-day-nav button:focus-visible {
   color: hsl(var(--foreground)); background: hsl(var(--accent)); outline: none;
 }
