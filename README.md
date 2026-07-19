@@ -317,6 +317,12 @@ sudo bash /tmp/needle-server.sh uninstall --purge
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
 ```
 
+安装 Agent：
+
+```bash
+sudo bash /tmp/needle-agent.sh install
+```
+
 查看安装信息、服务状态和最近日志：
 
 ```bash

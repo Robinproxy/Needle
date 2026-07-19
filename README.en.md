@@ -317,6 +317,12 @@ The installation script deploys an Agent binary managed by systemd. Download the
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
 ```
 
+Install the Agent:
+
+```bash
+sudo bash /tmp/needle-agent.sh install
+```
+
 Inspect installation details, service status, and recent logs:
 
 ```bash
