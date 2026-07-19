@@ -39,6 +39,14 @@ type TCPingRow struct {
 	CreatedAt int64   `json:"created_at"`
 }
 
+type TrafficUsage struct {
+	Sent      int64  `json:"sent"`
+	Recv      int64  `json:"recv"`
+	Available bool   `json:"available"`
+	HasData   bool   `json:"has_data"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 // TokenRow is an allowed agent credential (whitelist).
 // Hostname empty means allowed but not yet bound on first report.
 type TokenRow struct {

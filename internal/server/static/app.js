@@ -9,7 +9,8 @@ let currentTcppingRange = '24h';
 let currentTcppingId = null;
 let currentMetricsRange = '24h';
 let gridCols = 4;
-let trafficCache = {};
+let refreshInFlight = false;
+let lastRefreshAt = null;
 const TCPPING_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 const TCPPING_ORDER = ['CMv4', 'CMv6', 'CUv4', 'CUv6', 'CTv4', 'CTv6'];
 
@@ -150,13 +151,44 @@ function renderInfoBar() {
     + regionHtml;
 }
 
-function loadServerInfo() {
-  fetch('/api/info').then(r => r.json()).then(info => {
-    infoData = info;
-    renderInfoBar();
-    const el = document.getElementById('version-label');
-    if (el) el.textContent = 'NEEDLE ' + info.version;
-  }).catch(() => {});
+async function fetchJSON(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.json();
+}
+
+function setDashboardState(state, message) {
+  const alert = document.getElementById('dashboard-alert');
+  const alertText = document.getElementById('dashboard-alert-text');
+  const footer = document.getElementById('footer-status');
+  const empty = document.getElementById('empty-state');
+  const title = document.getElementById('empty-title');
+  const desc = document.getElementById('empty-desc');
+
+  alert.hidden = state !== 'stale' && state !== 'error';
+  alert.classList.toggle('error', state === 'error');
+  if (alertText) alertText.textContent = message || '';
+  footer.className = 'footer-status ' + state;
+
+  if (state === 'loading') {
+    footer.textContent = '● Connecting...';
+    if (!agents.length) {
+      title.textContent = 'Loading nodes...';
+      desc.textContent = 'Fetching the latest monitoring data.';
+      empty.classList.add('visible');
+    }
+  } else if (state === 'error') {
+    footer.textContent = '● Connection error';
+    if (!agents.length) {
+      title.textContent = 'Unable to load dashboard';
+      desc.textContent = 'Check the server connection, then retry.';
+      empty.classList.add('visible');
+    }
+  } else if (state === 'stale') {
+    footer.textContent = '● Data may be stale';
+  } else {
+    footer.textContent = '● Connected';
+  }
 }
 
 function filterAndSort(list) {
@@ -216,10 +248,12 @@ function renderAll(scrollToDetail) {
 
   if (!agents.length) {
     container.innerHTML = '';
-    empty.style.display = 'flex';
+    document.getElementById('empty-title').textContent = 'No nodes connected';
+    document.getElementById('empty-desc').textContent = 'Waiting for agent reports...';
+    empty.classList.add('visible');
     return;
   }
-  empty.style.display = 'none';
+  empty.classList.remove('visible');
 
   const filtered = filterAndSort(agents);
 
@@ -272,7 +306,16 @@ function renderAll(scrollToDetail) {
       }
     }
   }
-  refreshTraffic();
+}
+
+function trafficHTML(data) {
+  if (!data || !data.available) {
+    return '<span class="traffic-label">TRF</span><span class="traffic-unavailable">Not configured</span>';
+  }
+  if (!data.has_data) {
+    return '<span class="traffic-label">TRF</span><span class="traffic-unavailable">No data</span>';
+  }
+  return '<span class="traffic-label">TRF</span><span class="traffic-down">\u2193 ' + formatBytes(data.recv) + '</span><span class="traffic-divider">/</span><span class="traffic-up">\u2191 ' + formatBytes(data.sent) + '</span>';
 }
 
 function renderCard(a, idx, isActive) {
@@ -321,7 +364,7 @@ function renderCard(a, idx, isActive) {
       + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value ' + metricColor(memPct) + '">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
       + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value ' + metricColor(diskPct) + '">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
     + '</div>'
-    + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '"><span class="traffic-label">TRF</span><span class="traffic-down">\u2193 —</span><span class="traffic-divider">/</span><span class="traffic-up">\u2191 —</span></div>'
+    + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '">' + trafficHTML(a.traffic) + '</div>'
     + pingHtml
     + '<div class="card-footer-line"><div class="net"><span class="net-down">\u2193 ' + downSpeed + '</span><span class="net-up">\u2191 ' + upSpeed + '</span></div><span>' + (m ? relativeTime(m.created_at * 1000) : '') + '</span></div>'
   + '</div>';
@@ -414,35 +457,9 @@ function setCardTcpping(id, name) {
 
 
 
-function fetchTrafficForCard(id) {
-  fetch('/api/agents/' + id + '/traffic')
-    .then(r => r.json())
-    .then(data => {
-      trafficCache[id] = data;
-      updateTrafficDisplay(id, data);
-    })
-    .catch(() => {});
-}
-
 function updateTrafficDisplay(id, data) {
-  const sentStr = formatBytes(data.sent);
-  const recvStr = formatBytes(data.recv);
   const el = document.querySelector('[data-traffic-id="' + id + '"]');
-  if (el) {
-    el.innerHTML = '<span class="traffic-label">TRF</span><span class="traffic-down">\u2193 ' + recvStr + '</span><span class="traffic-divider">/</span><span class="traffic-up">\u2191 ' + sentStr + '</span>';
-  }
-}
-
-function refreshTraffic() {
-  const filtered = filterAndSort(agents);
-  filtered.forEach(a => {
-    const id = a.agent.id;
-    if (!trafficCache[id]) {
-      fetchTrafficForCard(id);
-    } else {
-      updateTrafficDisplay(id, trafficCache[id]);
-    }
-  });
+  if (el) el.innerHTML = trafficHTML(data);
 }
 
 function destroyDetailCharts() {
@@ -757,12 +774,13 @@ function goHome() {
   fullRefresh();
 }
 
-function fullRefresh() {
+async function fullRefresh() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
   const wasExpanded = expandedId;
-  Promise.all([
-    fetch('/api/agents').then(r => r.json()),
-    fetch('/api/info').then(r => r.json()),
-  ]).then(([data, info]) => {
+  if (!agents.length) setDashboardState('loading');
+  try {
+    const [data, info] = await Promise.all([fetchJSON('/api/agents'), fetchJSON('/api/info')]);
     agents = data;
     agents.forEach(a => {
       const m = a.latest_metric;
@@ -770,19 +788,31 @@ function fullRefresh() {
     });
     infoData = info;
     renderInfoBar();
+    const version = document.getElementById('version-label');
+    if (version) version.textContent = 'NEEDLE ' + info.version;
     if (wasExpanded && !agents.find(a => a.agent.id === wasExpanded)) {
       expandedId = null;
     }
     renderAll();
     if (expandedId) updateDetailCharts(expandedId);
-  }).catch(err => console.error('fullRefresh:', err));
+    lastRefreshAt = new Date();
+    setDashboardState('ready');
+  } catch (err) {
+    console.error('fullRefresh:', err);
+    const stale = agents.length > 0;
+    const suffix = lastRefreshAt ? ' Last updated ' + lastRefreshAt.toLocaleTimeString() + '.' : '';
+    setDashboardState(stale ? 'stale' : 'error', (stale ? 'Refresh failed; showing the last successful data.' : 'Dashboard data could not be loaded.') + suffix);
+  } finally {
+    refreshInFlight = false;
+  }
 }
 
-function softRefresh() {
-  Promise.all([
-    fetch('/api/agents').then(r => r.json()),
-    fetch('/api/info').then(r => r.json()),
-  ]).then(([data, info]) => {
+async function softRefresh() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    const [data, info] = await Promise.all([fetchJSON('/api/agents'), fetchJSON('/api/info')]);
+    const previousIDs = agents.map(a => a.agent.id).join(',');
     agents = data;
     agents.forEach(a => {
       const m = a.latest_metric;
@@ -790,6 +820,7 @@ function softRefresh() {
     });
     infoData = info;
     renderInfoBar();
+    if (previousIDs !== agents.map(a => a.agent.id).join(',')) renderAll();
 
     data.forEach(a => {
       const card = document.querySelector('[data-id="' + a.agent.id + '"]');
@@ -886,9 +917,17 @@ function softRefresh() {
       }
     });
 
-    refreshTraffic();
+    data.forEach(a => updateTrafficDisplay(a.agent.id, a.traffic));
     if (expandedId) updateDetailCharts(expandedId);
-  }).catch(err => console.error('softRefresh:', err));
+    lastRefreshAt = new Date();
+    setDashboardState('ready');
+  } catch (err) {
+    console.error('softRefresh:', err);
+    const suffix = lastRefreshAt ? ' Last updated ' + lastRefreshAt.toLocaleTimeString() + '.' : '';
+    setDashboardState(agents.length ? 'stale' : 'error', 'Refresh failed; showing the last successful data.' + suffix);
+  } finally {
+    refreshInFlight = false;
+  }
 }
 
 function updateDetailCharts(id) {
@@ -1004,7 +1043,6 @@ document.addEventListener('click', e => {
   tcppingToggleLine(id, name);
 });
 
-loadServerInfo();
 fullRefresh();
 setInterval(softRefresh, 30000);
 

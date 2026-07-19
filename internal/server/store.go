@@ -535,14 +535,29 @@ func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
 }
 
 func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
+	usage, err := s.GetTrafficUsage(agentID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return usage.Sent, usage.Recv, nil
+}
+
+func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 	var expiresAt sql.NullInt64
-	err = s.db.QueryRow(
+	err := s.db.QueryRow(
 		"SELECT expires_at FROM agents WHERE id = ?", agentID,
 	).Scan(&expiresAt)
-	if err != nil || !expiresAt.Valid {
-		return 0, 0, nil
+	if err == sql.ErrNoRows {
+		return &TrafficUsage{Reason: "agent_not_found"}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !expiresAt.Valid {
+		return &TrafficUsage{Reason: "billing_not_configured"}, nil
 	}
 
+	usage := &TrafficUsage{Available: true}
 	resetDay := time.Unix(expiresAt.Int64, 0).Day()
 	boundary := monthlyBoundary(resetDay)
 	boundaryUnix := boundary.Unix()
@@ -553,10 +568,11 @@ func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
 		agentID, boundaryUnix,
 	).Scan(&baseSent, &baseRecv)
 	if err == sql.ErrNoRows {
-		return 0, 0, nil
+		usage.Reason = "no_data"
+		return usage, nil
 	}
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
 	var latestSent, latestRecv sql.NullInt64
@@ -565,18 +581,19 @@ func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
 		agentID,
 	).Scan(&latestSent, &latestRecv)
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
-	sent = latestSent.Int64 - baseSent.Int64
-	recv = latestRecv.Int64 - baseRecv.Int64
-	if sent < 0 {
-		sent = latestSent.Int64
+	usage.Sent = latestSent.Int64 - baseSent.Int64
+	usage.Recv = latestRecv.Int64 - baseRecv.Int64
+	if usage.Sent < 0 {
+		usage.Sent = latestSent.Int64
 	}
-	if recv < 0 {
-		recv = latestRecv.Int64
+	if usage.Recv < 0 {
+		usage.Recv = latestRecv.Int64
 	}
-	return sent, recv, nil
+	usage.HasData = true
+	return usage, nil
 }
 
 func monthlyBoundary(day int) time.Time {

@@ -369,22 +369,28 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type agentWithMetric struct {
-		Agent        AgentRow    `json:"agent"`
-		Metric       *MetricRow  `json:"latest_metric,omitempty"`
-		LatestTCPing []TCPingRow `json:"latest_tcpping,omitempty"`
-		ExpiryDays   int         `json:"expiry_days"`
-		ExpiryDate   string      `json:"expiry_date"`
+		Agent        AgentRow      `json:"agent"`
+		Metric       *MetricRow    `json:"latest_metric,omitempty"`
+		LatestTCPing []TCPingRow   `json:"latest_tcpping,omitempty"`
+		Traffic      *TrafficUsage `json:"traffic,omitempty"`
+		ExpiryDays   int           `json:"expiry_days"`
+		ExpiryDate   string        `json:"expiry_date"`
 	}
 
 	result := make([]agentWithMetric, 0, len(agents))
 	for _, a := range agents {
 		m, _ := h.store.GetLatestMetric(a.ID)
 		t, _ := h.store.GetLatestTCPing(a.ID)
+		traffic, err := h.store.GetTrafficUsage(a.ID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		expiryDays, expiryDate := 0, ""
 		if a.ExpiresAt != nil && a.BillingPeriod != "" {
 			expiryDays, expiryDate = calcNextReset(*a.ExpiresAt, a.BillingPeriod)
 		}
-		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
+		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, Traffic: traffic, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

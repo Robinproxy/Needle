@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -8,6 +9,31 @@ import (
 	"testing"
 	"time"
 )
+
+func TestHandleAgentsIncludesTrafficAvailability(t *testing.T) {
+	h, store := newTestHandler(t)
+	if err := store.AllowToken("test-token"); err != nil {
+		t.Fatal(err)
+	}
+	if w := sendReport(t, h, "Bearer test-token", `{"hostname":"node-1","network":{"total_sent":30,"total_recv":40}}`); w.Code != http.StatusOK {
+		t.Fatalf("report status = %d, body=%s", w.Code, w.Body.String())
+	}
+
+	w := httptest.NewRecorder()
+	h.handleAgents(w, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var got []struct {
+		Traffic TrafficUsage `json:"traffic"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Traffic.Available || got[0].Traffic.HasData || got[0].Traffic.Reason != "billing_not_configured" {
+		t.Fatalf("traffic = %+v, want billing_not_configured", got)
+	}
+}
 
 func newTestHandler(t *testing.T) (*Handler, *Store) {
 	t.Helper()

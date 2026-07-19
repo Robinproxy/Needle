@@ -51,6 +51,11 @@
     </a>
   </div>
 
+  <div id="dashboard-alert" class="dashboard-alert container" hidden>
+    <span id="dashboard-alert-text"></span>
+    <button class="btn btn-ghost btn-sm" type="button" onclick="fullRefresh()">Retry</button>
+  </div>
+
   <main class="container">
     <div id="card-grid" class="card-grid"></div>
 
@@ -58,8 +63,8 @@
       <div class="empty-icon">
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       </div>
-      <div class="empty-title">No nodes connected</div>
-      <div class="empty-desc">Waiting for agent reports...</div>
+      <div id="empty-title" class="empty-title">Loading nodes...</div>
+      <div id="empty-desc" class="empty-desc">Fetching the latest monitoring data.</div>
     </div>
   </main>
 
@@ -67,10 +72,10 @@
     <div class="container footer-inner">
       <span id="version-label">NEEDLE</span>
       <span>Server Monitoring</span>
-      <span class="footer-status">● System Online</span>
+      <span id="footer-status" class="footer-status loading">● Connecting...</span>
     </div>
   </footer>
 
-<script src="/app.js?v=0.5.5"></script>
+<script src="/app.js?v=0.5.6"></script>
 </body>
 </html>
