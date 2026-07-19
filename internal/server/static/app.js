@@ -8,6 +8,7 @@ let infoData = null;
 let currentTcppingRange = '24h';
 let currentTcppingId = null;
 let currentMetricsRange = '24h';
+let currentHistoryDay = null;
 let gridCols = 4;
 let refreshInFlight = false;
 let lastRefreshAt = null;
@@ -431,6 +432,7 @@ function toggleExpand(id) {
     renderAll();
   } else {
     destroyDetailCharts();
+    currentHistoryDay = null;
     expandedId = id;
     renderAll(true);
   }
@@ -476,6 +478,7 @@ function renderDetailContent(id) {
   if (!agent) return;
 
   const range = currentMetricsRange || '24h';
+  const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
   detailEl.innerHTML = '<div class="detail-header">'
     + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
     + '<button class="btn btn-ghost btn-sm" onclick="toggleExpand(' + id + ')">\u2715</button>'
@@ -491,7 +494,7 @@ function renderDetailContent(id) {
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
           + '<div class="theme-btn-group detail-range-group">'
-            + '<button type="button" class="theme-btn' + (range === '24h' ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')">1d</button>'
+            + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
             + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
           + '</div>'
         + '</div>'
@@ -513,10 +516,55 @@ function renderDetailContent(id) {
   currentTcppingId = id;
   currentTcppingRange = range;
   currentMetricsRange = range;
-  fetch('/api/agents/' + id + '/metrics?range=' + range).then(r => r.json()).then(data => {
+  fetch(detailDataURL(id, 'metrics', range)).then(r => r.json()).then(data => {
     renderSparklines(id, data);
   }).catch(() => {});
   fetchTCPingData(id, range);
+}
+
+function formatHistoryDay(ts) {
+  const d = new Date(ts);
+  return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+}
+
+function detailDataURL(id, kind, range) {
+  if (currentHistoryDay) {
+    return '/api/agents/' + id + '/' + kind + '?since=' + currentHistoryDay.start + '&until=' + currentHistoryDay.end;
+  }
+  return '/api/agents/' + id + '/' + kind + '?range=' + range;
+}
+
+function openHistoricalDay(id, ts) {
+  if (currentMetricsRange !== '168h' && currentTcppingRange !== '168h') return;
+  const d = new Date(ts);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  const todayEnd = Date.now();
+  currentHistoryDay = {
+    start: Math.floor(start.getTime() / 1000),
+    end: Math.floor(Math.min(end.getTime(), todayEnd) / 1000),
+    fullLabel: start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0'),
+  };
+  currentMetricsRange = 'day';
+  currentTcppingRange = 'day';
+  const dayBtn = document.getElementById('detail-day-btn');
+  if (dayBtn) {
+    dayBtn.textContent = formatHistoryDay(start.getTime());
+    dayBtn.title = currentHistoryDay.fullLabel + ' · raw data';
+    dayBtn.classList.add('active');
+  }
+  document.querySelector('[data-range="168h"]')?.classList.remove('active');
+  loadDetailData(id, 'day');
+}
+
+function loadDetailData(id, range) {
+  Promise.all([
+    fetchJSON(detailDataURL(id, 'metrics', range)),
+    fetchJSON(detailDataURL(id, 'tcpping', range)),
+  ]).then(([metrics, tcpping]) => {
+    renderSparklines(id, metrics);
+    renderTCPingChart(id, tcpping);
+  }).catch(err => console.error('loadDetailData:', err));
 }
 
 function renderSparklines(id, metrics) {
@@ -531,20 +579,24 @@ function renderSparklines(id, metrics) {
   const netOutData = metrics.map(m => [m.created_at * 1000, m.network_up]);
 
   const peak = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
-  const cpuPeak = peak(cpuData);
-  const memPeak = peak(memData);
-  const netInPeak = peak(netInData);
-  const netOutPeak = peak(netOutData);
+  const cpuPeak = peak(metrics.map(m => [m.created_at * 1000, m.cpu_peak || m.cpu_usage]));
+  const memPeak = peak(metrics.map((m, i) => [m.created_at * 1000, m.memory_peak_pct || memData[i][1]]));
+  const netInPeak = peak(metrics.map(m => [m.created_at * 1000, m.network_down_peak || m.network_down]));
+  const netOutPeak = peak(metrics.map(m => [m.created_at * 1000, m.network_up_peak || m.network_up]));
 
   document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + cpuPeak.toFixed(1) + '%' : '—';
   document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + memPeak.toFixed(1) + '%' : '—';
   document.getElementById('spark-netin-val').innerHTML = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  <span style="color:#8b5cf6">peak ' + formatSpeed(netInPeak) + '</span>' : '—';
   document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(netOutPeak) + '</span>' : '—';
 
-  renderSparkline('spark-cpu', cpuData, '#3b82f6', true);
-  renderSparkline('spark-mem', memData, '#22c55e', true);
-  renderSparkline('spark-netin', netInData, '#8b5cf6', false);
-  renderSparkline('spark-netout', netOutData, '#f59e0b', false);
+  const isOverview = currentMetricsRange === '168h';
+  const anomalyData = (field, averages, test) => isOverview ? metrics
+    .map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]])
+    .filter(p => test(p[1], p[2])) : [];
+  renderSparkline(id, 'spark-cpu', cpuData, '#3b82f6', true, anomalyData('cpu_peak', cpuData, peak => peak >= 85));
+  renderSparkline(id, 'spark-mem', memData, '#22c55e', true, anomalyData('memory_peak_pct', memData, peak => peak >= 85));
+  renderSparkline(id, 'spark-netin', netInData, '#8b5cf6', false, anomalyData('network_down_peak', netInData, (peak, avg) => peak >= 1000000 && peak >= avg * 3));
+  renderSparkline(id, 'spark-netout', netOutData, '#f59e0b', false, anomalyData('network_up_peak', netOutData, (peak, avg) => peak >= 1000000 && peak >= avg * 3));
 }
 
 function formatSparkXAxis(ts) {
@@ -552,7 +604,7 @@ function formatSparkXAxis(ts) {
   return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
-function renderSparkline(elemId, data, color, isPercent) {
+function renderSparkline(id, elemId, data, color, isPercent, anomalies) {
   const el = document.getElementById(elemId);
   if (!el) return;
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
@@ -568,7 +620,7 @@ function renderSparkline(elemId, data, color, isPercent) {
     tooltip: {
       trigger: 'axis',
       formatter: params => {
-        const p = params[0];
+        const p = params.find(item => item.seriesName === 'Average') || params[0];
         if (!p) return '';
         const d = new Date(p.data[0]);
         const dateStr = (d.getMonth() + 1) + '/' + String(d.getDate()).padStart(2, '0');
@@ -577,32 +629,41 @@ function renderSparkline(elemId, data, color, isPercent) {
           : (p.data[1] >= 1000000 ? (p.data[1] / 1000000).toFixed(2) + 'M/s'
             : p.data[1] >= 1000 ? (p.data[1] / 1000).toFixed(1) + 'K/s'
             : p.data[1].toFixed(0) + '/s');
-        return dateStr + '<br/>' + timeStr + '<br/>' + valStr;
+        const peakPoint = params.find(item => item.seriesName === 'Peak');
+        const peakStr = peakPoint ? (isPercent ? peakPoint.data[1].toFixed(1) + '%' : formatSpeed(peakPoint.data[1]) + '/s') : '';
+        return dateStr + '<br/>' + timeStr + '<br/>Avg ' + valStr + (peakStr ? '<br/>Peak ' + peakStr + ' · click to inspect' : '');
       },
       textStyle: { fontSize: 11 },
     },
     series: [{
+      name: 'Average',
       type: 'line', data, smooth: true, symbol: 'none', sampling: 'lttb',
       lineStyle: { color, width: 1.5 },
       areaStyle: { color: color + '30' },
+    }, {
+      name: 'Peak', type: 'scatter', data: anomalies || [], symbolSize: 7, z: 5,
+      itemStyle: { color: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
     }]
+  });
+  chart.on('click', params => {
+    if (params.seriesName === 'Peak' && params.data) openHistoricalDay(id, params.data[0]);
   });
   sparkCharts[elemId] = chart;
 }
 
 function switchDetailRange(id, range) {
   id = +id;
-  if (currentMetricsRange === range && currentTcppingRange === range) return;
+  if (!currentHistoryDay && currentMetricsRange === range && currentTcppingRange === range) return;
+  currentHistoryDay = null;
   currentMetricsRange = range;
   currentTcppingRange = range;
   const rangeBtns = document.querySelectorAll('#tcpping-section-' + id + ' .detail-range-group .theme-btn');
   rangeBtns.forEach(b => {
     b.classList.toggle('active', b.dataset.range === range);
   });
-  fetch('/api/agents/' + id + '/metrics?range=' + range).then(r => r.json()).then(data => {
-    renderSparklines(id, data);
-  }).catch(() => {});
-  fetchTCPingData(id, range);
+  const dayBtn = document.getElementById('detail-day-btn');
+  if (dayBtn) { dayBtn.textContent = '1d'; dayBtn.title = 'Last 24 hours'; }
+  loadDetailData(id, range);
 }
 
 function switchMetricsRange(id, range) {
@@ -611,7 +672,7 @@ function switchMetricsRange(id, range) {
 
 function fetchTCPingData(id, range) {
   currentTcppingRange = range;
-  fetch('/api/agents/' + id + '/tcpping?range=' + range).then(r => r.json()).then(data => {
+  fetch(detailDataURL(id, 'tcpping', range)).then(r => r.json()).then(data => {
     renderTCPingChart(id, data);
   }).catch(() => {});
 }
@@ -622,7 +683,7 @@ function switchTcppingRange(id, range) {
 
 function formatRangeAxisLabel(ts) {
   const d = new Date(ts);
-  if (currentTcppingRange === '24h') {
+  if (currentTcppingRange === '24h' || currentTcppingRange === 'day') {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
   return (d.getMonth() + 1) + '/' + d.getDate();
@@ -650,8 +711,14 @@ function renderTCPingChart(id, results) {
   if (!chartEl) return;
   if (tcppingChart) { try { tcppingChart.dispose(); } catch(e) {} }
 
-  const is1d = currentTcppingRange === '24h';
+  const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
   const chart = echarts.init(chartEl);
+  const anomalySeries = currentTcppingRange === '168h' ? names.map(name => ({
+    name: name + ' alert', type: 'scatter', symbolSize: 7, z: 6,
+    data: results.filter(r => r.name === name && ((r.sample_count || 1) > (r.success_count != null ? r.success_count : (r.success ? 1 : 0)) || (r.latency_peak || 0) >= 200))
+      .map(r => [r.created_at * 1000, r.latency_peak || r.latency_ms]),
+    itemStyle: { color: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
+  })) : [];
   chart.setOption({
     tooltip: {
       trigger: 'axis', valueFormatter: v => v ? v.toFixed(1) + ' ms' : 'timeout',
@@ -678,7 +745,10 @@ function renderTCPingChart(id, results) {
       splitLine: { lineStyle: { color: 'hsl(var(--border) / 0.2)', width: 1 } },
       axisLabel: { color: 'hsl(var(--muted-foreground))', fontSize: 10, margin: 0, formatter: v => v + 'ms' },
     },
-    series,
+    series: series.concat(anomalySeries),
+  });
+  chart.on('click', params => {
+    if (params.seriesType === 'scatter' && params.data) openHistoricalDay(id, params.data[0]);
   });
   tcppingChart = chart;
 
@@ -932,6 +1002,7 @@ async function softRefresh() {
 }
 
 function updateDetailCharts(id) {
+  if (currentHistoryDay) return;
   const metricsRange = currentMetricsRange || '24h';
   const tcppingRange = currentTcppingRange || '24h';
   fetch('/api/agents/' + id + '/metrics?range=' + metricsRange).then(r => r.json()).then(metrics => {

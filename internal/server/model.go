@@ -11,22 +11,26 @@ type AgentRow struct {
 }
 
 type MetricRow struct {
-	ID          int64   `json:"id"`
-	AgentID     int64   `json:"agent_id"`
-	CPUUsage    float64 `json:"cpu_usage"`
-	MemoryTotal int64   `json:"memory_total"`
-	MemoryUsed  int64   `json:"memory_used"`
-	DiskTotal   int64   `json:"disk_total"`
-	DiskUsed    int64   `json:"disk_used"`
-	NetworkUp   float64 `json:"network_up"`
-	NetworkDown float64 `json:"network_down"`
-	TotalSent   int64   `json:"total_sent"`
-	TotalRecv   int64   `json:"total_recv"`
-	Load1       float64 `json:"load1"`
-	Load5       float64 `json:"load5"`
-	Load15      float64 `json:"load15"`
-	Uptime      int64   `json:"uptime"`
-	CreatedAt   int64   `json:"created_at"`
+	ID              int64   `json:"id"`
+	AgentID         int64   `json:"agent_id"`
+	CPUUsage        float64 `json:"cpu_usage"`
+	MemoryTotal     int64   `json:"memory_total"`
+	MemoryUsed      int64   `json:"memory_used"`
+	DiskTotal       int64   `json:"disk_total"`
+	DiskUsed        int64   `json:"disk_used"`
+	NetworkUp       float64 `json:"network_up"`
+	NetworkDown     float64 `json:"network_down"`
+	TotalSent       int64   `json:"total_sent"`
+	TotalRecv       int64   `json:"total_recv"`
+	Load1           float64 `json:"load1"`
+	Load5           float64 `json:"load5"`
+	Load15          float64 `json:"load15"`
+	Uptime          int64   `json:"uptime"`
+	CreatedAt       int64   `json:"created_at"`
+	CPUPeak         float64 `json:"cpu_peak,omitempty"`
+	MemoryPeakPct   float64 `json:"memory_peak_pct,omitempty"`
+	NetworkUpPeak   float64 `json:"network_up_peak,omitempty"`
+	NetworkDownPeak float64 `json:"network_down_peak,omitempty"`
 }
 
 type TCPingRow struct {
@@ -38,6 +42,7 @@ type TCPingRow struct {
 	Success      bool    `json:"success"`
 	SampleCount  int64   `json:"sample_count,omitempty"`
 	SuccessCount int64   `json:"success_count,omitempty"`
+	LatencyPeak  float64 `json:"latency_peak,omitempty"`
 	CreatedAt    int64   `json:"created_at"`
 }
 

@@ -424,26 +424,41 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	since := time.Now().Add(-1 * time.Hour).Unix()
+	now := h.now()
+	since := now.Add(-1 * time.Hour).Unix()
+	until := int64(0)
 	bucketSeconds := int64(0)
-	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
-		if s, err := strconv.ParseInt(sinceStr, 10, 64); err == nil {
-			since = s
+	sinceStr, untilStr := r.URL.Query().Get("since"), r.URL.Query().Get("until")
+	if untilStr != "" {
+		var parseErr error
+		since, parseErr = strconv.ParseInt(sinceStr, 10, 64)
+		if parseErr == nil {
+			until, parseErr = strconv.ParseInt(untilStr, 10, 64)
 		}
-	}
-	if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
+		if parseErr != nil || until <= since || until-since > int64((25*time.Hour)/time.Second) || until > now.Add(5*time.Minute).Unix() {
+			http.Error(w, "invalid time window", http.StatusBadRequest)
+			return
+		}
+	} else if sinceStr != "" {
+		var parseErr error
+		since, parseErr = strconv.ParseInt(sinceStr, 10, 64)
+		if parseErr != nil || since > now.Add(5*time.Minute).Unix() {
+			http.Error(w, "invalid since", http.StatusBadRequest)
+			return
+		}
+	} else if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
 		if d, err := time.ParseDuration(rangeStr); err == nil {
 			if d > 720*time.Hour {
 				d = 720 * time.Hour
 			}
-			since = time.Now().Add(-d).Unix()
+			since = now.Add(-d).Unix()
 			bucketSeconds = historyBucketSeconds(d)
 		}
 	}
 
 	switch parts[1] {
 	case "metrics":
-		metrics, err := h.store.GetMetricsSampled(agentID, since, bucketSeconds)
+		metrics, err := h.store.GetMetricsWindowSampled(agentID, since, until, bucketSeconds)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -460,7 +475,7 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(metrics)
 
 	case "tcpping":
-		results, err := h.store.GetTCPingResultsSampled(agentID, since, bucketSeconds)
+		results, err := h.store.GetTCPingResultsWindowSampled(agentID, since, until, bucketSeconds)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
