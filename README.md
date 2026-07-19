@@ -170,7 +170,10 @@ sudo journalctl -u needle-agent -n 100 --no-pager
 
 ## 日常运维
 
-### Docker Server
+<details>
+<summary><strong>Docker Server</strong></summary>
+
+<br>
 
 查看状态和实时日志：
 
@@ -241,7 +244,12 @@ docker compose up -d
 
 确认恢复正常后，再手动清理不需要的旧目录。
 
-### systemd Server
+</details>
+
+<details>
+<summary><strong>systemd Server</strong></summary>
+
+<br>
 
 安装：
 
@@ -281,7 +289,12 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 sudo bash /tmp/needle-server.sh uninstall --purge
 ```
 
-### Agent 二进制运维
+</details>
+
+<details>
+<summary><strong>Agent 二进制运维</strong></summary>
+
+<br>
 
 安装脚本部署的是 Agent 二进制，并由 systemd 管理。先下载运维脚本，后续可使用它查看状态、升级或卸载：
 
@@ -346,6 +359,8 @@ sudo bash /tmp/needle-agent.sh uninstall
 ```bash
 sudo bash /tmp/needle-agent.sh uninstall --unregister
 ```
+
+</details>
 
 ### 常用路径
 
