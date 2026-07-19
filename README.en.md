@@ -45,7 +45,10 @@ Agent C ─┘                   │
 
 Agents do not need inbound ports. In production, connect them to the Server through an HTTPS hostname provided by Cloudflare Tunnel or a reverse proxy.
 
-## Quick Start
+<details>
+<summary><strong>Quick Start</strong></summary>
+
+<br>
 
 ### 1. Deploy the Server (Docker Compose recommended)
 
@@ -111,7 +114,12 @@ sudo systemctl status needle-agent --no-pager
 
 Open `https://needle.example.com` to view the dashboard.
 
-## History Views
+</details>
+
+<details>
+<summary><strong>History Views</strong></summary>
+
+<br>
 
 | View | Data | Best for |
 | --- | --- | --- |
@@ -121,7 +129,12 @@ Open `https://needle.example.com` to view the dashboard.
 
 In the `7d` view, click a date below the TCP Ping chart to switch every chart to that day. A red dot marks a date with an anomaly summary. Click `7d` to return to the weekly overview.
 
-## Agent Configuration
+</details>
+
+<details>
+<summary><strong>Agent Configuration</strong></summary>
+
+<br>
 
 Configuration file: `/opt/needle-agent/agent.yaml`
 
@@ -167,6 +180,8 @@ sudo journalctl -u needle-agent -n 100 --no-pager
 ```
 
 Remote HTTP is rejected by default; loopback addresses such as `http://127.0.0.1` remain allowed. Do not enable `tls_skip_verify` or `allow_plain_http` permanently to work around certificate problems.
+
+</details>
 
 ## Operations
 
@@ -362,7 +377,10 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 
 </details>
 
-### Common Paths
+<details>
+<summary><strong>Common Paths</strong></summary>
+
+<br>
 
 | Item | Path |
 | --- | --- |
@@ -373,14 +391,24 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 | Agent configuration | `/opt/needle-agent/agent.yaml` |
 | systemd units | `/etc/systemd/system/needle-server.service`, `needle-agent.service` |
 
-## Upgrade Notes
+</details>
+
+<details>
+<summary><strong>Upgrade Notes</strong></summary>
+
+<br>
 
 - Dashboard and Server API features require only a Server upgrade.
 - Upgrade Agents only for collector, transport security, or local configuration changes.
 - The Server upgrade script preserves the database and `.env`; the Agent upgrade script preserves `agent.yaml`.
 - Back up the Server data directory and read the relevant release notes before upgrading.
 
-## Security Recommendations
+</details>
+
+<details>
+<summary><strong>Security Recommendations</strong></summary>
+
+<br>
 
 - Use HTTPS for public access and bind the Server port only to loopback or a private network.
 - Give every Agent a unique token and never reuse one across hosts.
@@ -388,7 +416,12 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 - Never commit the database, `.env`, `agent.yaml`, or tokens to source control.
 - Cloudflare Tunnel and reverse proxies do not replace the Server's token validation.
 
-## Build from Source
+</details>
+
+<details>
+<summary><strong>Build from Source</strong></summary>
+
+<br>
 
 Go 1.24 or newer is required:
 
@@ -409,6 +442,8 @@ Server flags:
 -key     TLS private key path
 -y       Skip confirmation for delete and revoke operations
 ```
+
+</details>
 
 ## Credits
 

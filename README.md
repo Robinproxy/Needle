@@ -45,7 +45,10 @@ Agent C ─┘                   │
 
 Agent 无需开放入站端口。生产环境建议让 Agent 通过 HTTPS 域名连接 Server，例如 Cloudflare Tunnel 或反向代理。
 
-## 快速部署
+<details>
+<summary><strong>快速部署</strong></summary>
+
+<br>
 
 ### 1. 部署 Server（推荐 Docker Compose）
 
@@ -111,7 +114,12 @@ sudo systemctl status needle-agent --no-pager
 
 打开 `https://needle.example.com` 即可查看面板。
 
-## 历史数据说明
+</details>
+
+<details>
+<summary><strong>历史数据说明</strong></summary>
+
+<br>
 
 | 视图 | 数据方式 | 适合用途 |
 | --- | --- | --- |
@@ -121,7 +129,12 @@ sudo systemctl status needle-agent --no-pager
 
 在 `7d` 视图中点击 TCP Ping 下方的日期，所有图表会同步切换到当天数据。日期上的红点表示当天存在异常提示；点击 `7d` 可返回一周概览。
 
-## Agent 配置
+</details>
+
+<details>
+<summary><strong>Agent 配置</strong></summary>
+
+<br>
 
 配置文件：`/opt/needle-agent/agent.yaml`
 
@@ -167,6 +180,8 @@ sudo journalctl -u needle-agent -n 100 --no-pager
 ```
 
 远程 HTTP 默认会被 Agent 拒绝；`http://127.0.0.1` 等回环地址不受影响。不要为绕过证书问题长期启用 `tls_skip_verify` 或 `allow_plain_http`。
+
+</details>
 
 ## 日常运维
 
@@ -362,7 +377,10 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 
 </details>
 
-### 常用路径
+<details>
+<summary><strong>常用路径</strong></summary>
+
+<br>
 
 | 内容 | 路径 |
 | --- | --- |
@@ -373,14 +391,24 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 | Agent 配置 | `/opt/needle-agent/agent.yaml` |
 | systemd 服务 | `/etc/systemd/system/needle-server.service`、`needle-agent.service` |
 
-## 升级说明
+</details>
+
+<details>
+<summary><strong>升级说明</strong></summary>
+
+<br>
 
 - Web 面板和 Server API 的新功能只需要升级 Server。
 - Agent 采集、安全策略或本地配置能力发生变化时，才需要升级 Agent。
 - Server 升级脚本保留数据库和 `.env`；Agent 升级脚本保留 `agent.yaml`。
 - 升级前建议先备份 Server 数据目录，并阅读对应版本的 Release Notes。
 
-## 安全建议
+</details>
+
+<details>
+<summary><strong>安全建议</strong></summary>
+
+<br>
 
 - 对外访问必须使用 HTTPS，Server 端口只绑定回环地址或内网地址。
 - 每台 Agent 使用独立 Token，不要在多台机器之间复用。
@@ -388,7 +416,12 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 - 不要将数据库、`.env`、`agent.yaml` 或 Token 提交到代码仓库。
 - Cloudflare Tunnel 或反向代理不能替代 Server 自身的 Token 校验。
 
-## 从源码构建
+</details>
+
+<details>
+<summary><strong>从源码构建</strong></summary>
+
+<br>
 
 需要 Go 1.24 或更高版本：
 
@@ -409,6 +442,8 @@ Server 参数：
 -key     TLS 私钥路径
 -y       跳过删除或撤销操作的确认
 ```
+
+</details>
 
 ## 感谢
 
