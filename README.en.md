@@ -157,7 +157,7 @@ services:
   needle-server:
     image: ghcr.io/robinproxy/needle:latest
     ports:
-      - "${NEEDLE_PORT:-8008}:8008"
+      - "127.0.0.1:${NEEDLE_PORT:-8008}:8008"
     environment:
       NEEDLE_LISTEN: ":8008"
     volumes:
@@ -169,7 +169,17 @@ EOF
 docker compose up -d
 ```
 
-> **No global `NEEDLE_TOKEN`.** Each Agent has its own token; register with `allow-token`.
+> **No global `NEEDLE_TOKEN`.** Each Agent has its own token; register with `allow-token`. The port binds to loopback by default; publish HTTPS through Cloudflare Tunnel, Caddy, or Nginx. To expose the Server directly, explicitly remove `127.0.0.1:` from the port mapping.
+
+Cloudflare Tunnel example (`cloudflared` running on the host):
+
+```yaml
+ingress:
+  - hostname: needle.example.com
+    service: http://127.0.0.1:8008
+```
+
+Configure the Agent with `server: https://needle.example.com`. Cloudflare provides TLS on the public path, while the Tunnel may use loopback HTTP to reach Needle Server.
 
 <details>
 <summary>Ops</summary>
@@ -407,13 +417,14 @@ rm -f /tmp/needle-agent.sh
 
 ```yaml
 hostname: ""                                     # optional; defaults to OS hostname
-server: http://1.2.3.4:8008                      # required; Server URL
+server: https://needle.example.com               # required; HTTPS recommended
 token: replace-with-unique-agent-token           # unique per host; must allow-token on Server
 region: SG                                       # ISO country code
 billing_period: "1m"                             # 1m/3m/6m/12m, optional
 expires_at: "2026-08-15"                         # YYYY-MM-DD, optional
 interval: 30                                     # report interval (seconds)
-insecure: false                                  # true = skip TLS cert verify
+tls_skip_verify: false                           # true = skip HTTPS certificate verification (self-signed only)
+allow_plain_http: false                          # true = explicitly send the token over remote plaintext HTTP
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
@@ -428,6 +439,8 @@ tcpping:
   - name: "CTv6"
     target: "sh-ct-v6.ip.zstaticcdn.com:80"
 ```
+
+By default, the Agent accepts HTTPS and loopback HTTP targeting `localhost`, `127.0.0.0/8`, or `::1`. Other HTTP URLs are rejected unless `allow_plain_http: true` is explicitly set. The legacy `insecure` field remains temporarily supported, but is deprecated and only maps to `tls_skip_verify`.
 
 ---
 

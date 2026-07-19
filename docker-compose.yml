@@ -2,7 +2,7 @@ services:
   needle-server:
     image: ghcr.io/robinproxy/needle:latest
     ports:
-      - "${NEEDLE_PORT:-8008}:8008"
+      - "127.0.0.1:${NEEDLE_PORT:-8008}:8008"
     environment:
       NEEDLE_LISTEN: ":8008"
     volumes:

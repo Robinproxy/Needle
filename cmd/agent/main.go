@@ -18,15 +18,21 @@ import (
 )
 
 type Config struct {
-	Hostname      string                   `yaml:"hostname"`
-	Server        string                   `yaml:"server"`
-	Token         string                   `yaml:"token"`
-	Region        string                   `yaml:"region"`
-	ExpiresAt     string                   `yaml:"expires_at"`
-	BillingPeriod string                   `yaml:"billing_period"`
-	Interval      int                      `yaml:"interval"`
-	Insecure      bool                     `yaml:"insecure"`
-	TCPing        []collector.TCPingTarget `yaml:"tcpping"`
+	Hostname       string                   `yaml:"hostname"`
+	Server         string                   `yaml:"server"`
+	Token          string                   `yaml:"token"`
+	Region         string                   `yaml:"region"`
+	ExpiresAt      string                   `yaml:"expires_at"`
+	BillingPeriod  string                   `yaml:"billing_period"`
+	Interval       int                      `yaml:"interval"`
+	TLSSkipVerify  bool                     `yaml:"tls_skip_verify"`
+	AllowPlainHTTP bool                     `yaml:"allow_plain_http"`
+	Insecure       *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
+	TCPing         []collector.TCPingTarget `yaml:"tcpping"`
+}
+
+func (c Config) effectiveTLSSkipVerify() bool {
+	return c.TLSSkipVerify || (c.Insecure != nil && *c.Insecure)
 }
 
 func main() {
@@ -51,13 +57,18 @@ func main() {
 		cfg.Interval = 30
 	}
 
-	// Warn if using plain HTTP without TLS
-	if strings.HasPrefix(cfg.Server, "http://") && !cfg.Insecure {
-		log.Println("WARNING: Using HTTP without TLS. Token will be transmitted in plaintext.")
-		log.Println("Set 'insecure: true' in config to suppress this warning, or use HTTPS.")
+	if cfg.Insecure != nil {
+		log.Println("WARNING: config field 'insecure' is deprecated; use 'tls_skip_verify' instead.")
+	}
+	serverURL, err := agentpkg.ValidateServerURL(cfg.Server, cfg.AllowPlainHTTP)
+	if err != nil {
+		log.Fatalf("invalid server configuration: %v", err)
+	}
+	if cfg.AllowPlainHTTP && strings.HasPrefix(serverURL, "http://") {
+		log.Printf("SECURITY WARNING: allow_plain_http is enabled; the Agent token may be transmitted without encryption to %s", serverURL)
 	}
 
-	reporter := agentpkg.NewReporter(cfg.Server, cfg.Token, cfg.Insecure)
+	reporter := agentpkg.NewReporter(serverURL, cfg.Token, cfg.effectiveTLSSkipVerify())
 	hostname := cfg.Hostname
 	if hostname == "" {
 		hostname, _ = os.Hostname()
@@ -73,7 +84,7 @@ func main() {
 		return
 	}
 
-	log.Printf("Needle Agent - server: %s, interval: %ds", cfg.Server, cfg.Interval)
+	log.Printf("Needle Agent - server: %s, interval: %ds", serverURL, cfg.Interval)
 
 	netCollector := collector.NewNetworkCollector()
 

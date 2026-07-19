@@ -311,6 +311,7 @@ cmd_install() {
   REGION="${REGION:-SG}"
 
   DEFAULT_SERVER_URL="http://127.0.0.1:8008"
+  ALLOW_PLAIN_HTTP=false
   while true; do
     read_prompt SERVER_URL "Server URL [${DEFAULT_SERVER_URL}]: "
     SERVER_URL="${SERVER_URL:-$DEFAULT_SERVER_URL}"
@@ -319,6 +320,21 @@ cmd_install() {
       *) echo "  ERROR: URL must start with http:// or https://" ;;
     esac
   done
+
+  case "$SERVER_URL" in
+    https://*) ;;
+    http://localhost|http://localhost:*|http://localhost/*|http://127.0.0.1|http://127.0.0.1:*|http://127.0.0.1/*|http://\[::1\]|http://\[::1\]:*|http://\[::1\]/*) ;;
+    http://*)
+      echo
+      echo "  SECURITY WARNING: this remote HTTP URL will send the Agent token without encryption."
+      echo "  Prefer HTTPS through Cloudflare Tunnel, Caddy, or Nginx."
+      read_prompt CONTINUE_PLAINTEXT "Allow plaintext HTTP anyway? [y/N] "
+      case "$CONTINUE_PLAINTEXT" in
+        y|Y|yes|YES) ALLOW_PLAIN_HTTP=true ;;
+        *) echo "aborted"; exit 0 ;;
+      esac
+      ;;
+  esac
 
   echo "Testing connectivity to $SERVER_URL/api/health ..."
   if http_get "$SERVER_URL/api/health" 2>/dev/null | grep -q 'ok'; then
@@ -403,7 +419,8 @@ region: ${REGION}
 billing_period: "${BILLING_PERIOD}"
 expires_at: "${EXPIRES_AT}"
 interval: ${INTERVAL}
-insecure: false
+tls_skip_verify: false
+allow_plain_http: ${ALLOW_PLAIN_HTTP}
 tcpping:
   - name: "${N1}"
     target: "${T1}"

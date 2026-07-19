@@ -33,9 +33,9 @@ type Reporter struct {
 	client    *http.Client
 }
 
-func NewReporter(serverURL, token string, insecure bool) *Reporter {
+func NewReporter(serverURL, token string, tlsSkipVerify bool) *Reporter {
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: tlsSkipVerify},
 	}
 	return &Reporter{
 		serverURL: serverURL,

@@ -5,7 +5,8 @@ region: SG
 billing_period: "1m"        # 1m/3m/6m/12m, optional, for dashboard countdown and traffic reset
 expires_at: "2026-08-15"    # YYYY-MM-DD, optional, next renewal date
 interval: 30
-insecure: false
+tls_skip_verify: false       # true only for HTTPS with an untrusted/self-signed certificate
+allow_plain_http: false      # required for HTTP to a non-loopback host (token is exposed in transit)
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"

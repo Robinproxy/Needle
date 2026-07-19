@@ -156,7 +156,7 @@ services:
   needle-server:
     image: ghcr.io/robinproxy/needle:latest
     ports:
-      - "${NEEDLE_PORT:-8008}:8008"
+      - "127.0.0.1:${NEEDLE_PORT:-8008}:8008"
     environment:
       NEEDLE_LISTEN: ":8008"
     volumes:
@@ -168,7 +168,17 @@ EOF
 docker compose up -d
 ```
 
-> **不再需要全局 `NEEDLE_TOKEN`。** Agent 用独立 token，用 `allow-token` 登记。
+> **不再需要全局 `NEEDLE_TOKEN`。** Agent 用独立 token，用 `allow-token` 登记。端口默认只绑定本机，请通过 Cloudflare Tunnel、Caddy 或 Nginx 提供公网 HTTPS；如需直接监听公网，可自行移除端口映射中的 `127.0.0.1:`。
+
+Cloudflare Tunnel 示例（`cloudflared` 运行在宿主机）：
+
+```yaml
+ingress:
+  - hostname: needle.example.com
+    service: http://127.0.0.1:8008
+```
+
+Agent 使用 `server: https://needle.example.com`。公网链路由 Cloudflare 提供 TLS，Tunnel 到本机 Server 可以继续使用 loopback HTTP。
 
 <details>
 <summary>运维</summary>
@@ -406,13 +416,14 @@ rm -f /tmp/needle-agent.sh
 
 ```yaml
 hostname: ""                                     # 可选，默认系统主机名
-server: http://1.2.3.4:8008                      # 必填，Server 地址
+server: https://needle.example.com               # 必填，推荐使用 HTTPS
 token: replace-with-unique-agent-token           # 每台唯一；须在 Server allow-token
 region: SG                                       # ISO 国家码
 billing_period: "1m"                             # 1m/3m/6m/12m，可选
 expires_at: "2026-08-15"                         # YYYY-MM-DD，可选
 interval: 30                                     # 上报间隔（秒）
-insecure: false                                  # true = 跳过 TLS 证书验证
+tls_skip_verify: false                           # true = HTTPS 时跳过证书验证（仅自签名证书）
+allow_plain_http: false                          # true = 明确允许向远程 HTTP 地址明文发送 token
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
@@ -427,6 +438,8 @@ tcpping:
   - name: "CTv6"
     target: "sh-ct-v6.ip.zstaticcdn.com:80"
 ```
+
+Agent 默认只允许 HTTPS，以及指向 `localhost`、`127.0.0.0/8` 或 `::1` 的本机 HTTP。其他 HTTP 地址会被拒绝，除非显式设置 `allow_plain_http: true`。旧字段 `insecure` 暂时兼容，但已弃用且仅等同于 `tls_skip_verify`。
 
 ---
 
