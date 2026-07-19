@@ -505,7 +505,7 @@ function renderDetailContent(id) {
           + '</div>'
         + '</div>'
       + '</div>'
-      + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div></div>'
+      + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div><div id="tcpping-days-' + id + '" class="tcpping-day-nav"></div></div>'
       + '<div class="tcpping-stats" id="tcpping-stats-' + id + '">'
         + '<div class="tcpping-stats-header"><span class="col-dot"></span><span class="col-name">Source</span><span class="col-stat">Avg</span><span class="col-stat">Jitter</span><span class="col-stat">Loss</span></div>'
         + '<div id="tcpping-rows-' + id + '"></div>'
@@ -567,6 +567,29 @@ function loadDetailData(id, range) {
   }).catch(err => console.error('loadDetailData:', err));
 }
 
+function localDayKey(ts) {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function dailyWorst(points, qualifies, severity) {
+  const byDay = new Map();
+  points.forEach(point => {
+    if (!qualifies(point)) return;
+    const key = localDayKey(point[0]);
+    const current = byDay.get(key);
+    if (!current || severity(point) > severity(current)) byDay.set(key, point);
+  });
+  return [...byDay.values()].sort((a, b) => a[0] - b[0]).slice(-7);
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 function renderSparklines(id, metrics) {
   if (!metrics || !metrics.length) return;
 
@@ -590,13 +613,15 @@ function renderSparklines(id, metrics) {
   document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(netOutPeak) + '</span>' : '—';
 
   const isOverview = currentMetricsRange === '168h';
-  const anomalyData = (field, averages, test) => isOverview ? metrics
-    .map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]])
-    .filter(p => test(p[1], p[2])) : [];
-  renderSparkline(id, 'spark-cpu', cpuData, '#3b82f6', true, anomalyData('cpu_peak', cpuData, peak => peak >= 85));
-  renderSparkline(id, 'spark-mem', memData, '#22c55e', true, anomalyData('memory_peak_pct', memData, peak => peak >= 85));
-  renderSparkline(id, 'spark-netin', netInData, '#8b5cf6', false, anomalyData('network_down_peak', netInData, (peak, avg) => peak >= 1000000 && peak >= avg * 3));
-  renderSparkline(id, 'spark-netout', netOutData, '#f59e0b', false, anomalyData('network_up_peak', netOutData, (peak, avg) => peak >= 1000000 && peak >= avg * 3));
+  const dailyAlerts = (field, averages, qualifies, severity) => {
+    if (!isOverview) return [];
+    const points = metrics.map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]]);
+    return dailyWorst(points, qualifies, severity);
+  };
+  renderSparkline(id, 'spark-cpu', cpuData, '#3b82f6', true, dailyAlerts('cpu_peak', cpuData, p => p[1] >= 85, p => p[1]));
+  renderSparkline(id, 'spark-mem', memData, '#22c55e', true, dailyAlerts('memory_peak_pct', memData, p => p[1] >= 85, p => p[1]));
+  renderSparkline(id, 'spark-netin', netInData, '#8b5cf6', false, dailyAlerts('network_down_peak', netInData, p => p[1] >= 1000000 && p[1] >= p[2] * 3, p => p[1] / Math.max(p[2], 1)));
+  renderSparkline(id, 'spark-netout', netOutData, '#f59e0b', false, dailyAlerts('network_up_peak', netOutData, p => p[1] >= 1000000 && p[1] >= p[2] * 3, p => p[1] / Math.max(p[2], 1)));
 }
 
 function formatSparkXAxis(ts) {
@@ -629,7 +654,7 @@ function renderSparkline(id, elemId, data, color, isPercent, anomalies) {
           : (p.data[1] >= 1000000 ? (p.data[1] / 1000000).toFixed(2) + 'M/s'
             : p.data[1] >= 1000 ? (p.data[1] / 1000).toFixed(1) + 'K/s'
             : p.data[1].toFixed(0) + '/s');
-        const peakPoint = params.find(item => item.seriesName === 'Peak');
+        const peakPoint = params.find(item => item.seriesName === 'Alert');
         const peakStr = peakPoint ? (isPercent ? peakPoint.data[1].toFixed(1) + '%' : formatSpeed(peakPoint.data[1]) + '/s') : '';
         return dateStr + '<br/>' + timeStr + '<br/>Avg ' + valStr + (peakStr ? '<br/>Peak ' + peakStr + ' · click to inspect' : '');
       },
@@ -641,12 +666,12 @@ function renderSparkline(id, elemId, data, color, isPercent, anomalies) {
       lineStyle: { color, width: 1.5 },
       areaStyle: { color: color + '30' },
     }, {
-      name: 'Peak', type: 'scatter', data: anomalies || [], symbolSize: 7, z: 5,
+      name: 'Alert', type: 'scatter', data: anomalies || [], symbol: 'emptyCircle', symbolSize: 7, z: 5,
       itemStyle: { color: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
     }]
   });
   chart.on('click', params => {
-    if (params.seriesName === 'Peak' && params.data) openHistoricalDay(id, params.data[0]);
+    if (params.seriesName === 'Alert' && params.data) openHistoricalDay(id, params.data[0]);
   });
   sparkCharts[elemId] = chart;
 }
@@ -713,25 +738,63 @@ function renderTCPingChart(id, results) {
 
   const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
   const chart = echarts.init(chartEl);
-  const anomalySeries = currentTcppingRange === '168h' ? names.map(name => ({
-    name: name + ' alert', type: 'scatter', symbolSize: 7, z: 6,
-    data: results.filter(r => r.name === name && ((r.sample_count || 1) > (r.success_count != null ? r.success_count : (r.success ? 1 : 0)) || (r.latency_peak || 0) >= 200))
-      .map(r => [r.created_at * 1000, r.latency_peak || r.latency_ms]),
+  const dayNav = document.getElementById('tcpping-days-' + id);
+  if (dayNav) {
+    if (currentTcppingRange === '168h') {
+      const days = new Map();
+      results.forEach(r => {
+        const ts = r.created_at * 1000;
+        const key = localDayKey(ts);
+        if (!days.has(key)) days.set(key, ts);
+      });
+      dayNav.innerHTML = [...days.values()].sort((a, b) => a - b).slice(-7).map(ts =>
+        '<button type="button" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="View raw data for this day">' + formatHistoryDay(ts) + '</button>'
+      ).join('');
+      dayNav.hidden = false;
+    } else {
+      dayNav.innerHTML = '';
+      dayNav.hidden = true;
+    }
+  }
+  let tcppingAlerts = [];
+  if (currentTcppingRange === '168h') {
+    const baselines = {};
+    names.forEach(name => {
+      baselines[name] = median(results.filter(r => r.name === name && r.success).map(r => r.latency_ms));
+    });
+    const candidates = results.map(r => {
+      const samples = r.sample_count || 1;
+      const successes = r.success_count != null ? r.success_count : (r.success ? 1 : 0);
+      const lossRate = Math.max(0, samples - successes) / samples;
+      const peakLatency = r.latency_peak || r.latency_ms;
+      const baseline = Math.max(baselines[r.name] || 0, 1);
+      return [r.created_at * 1000, peakLatency, r.name, lossRate, baseline];
+    });
+    tcppingAlerts = dailyWorst(
+      candidates,
+      p => p[3] > 0 || p[1] >= Math.max(200, p[4] * 2),
+      p => p[3] * 1000 + p[1] / p[4]
+    );
+  }
+  const anomalySeries = currentTcppingRange === '168h' ? [{
+    name: 'Alert', type: 'scatter', symbol: 'emptyCircle', symbolSize: 7, z: 6,
+    data: tcppingAlerts,
     itemStyle: { color: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
-  })) : [];
+  }] : [];
   chart.setOption({
     tooltip: {
       trigger: 'axis', valueFormatter: v => v ? v.toFixed(1) + ' ms' : 'timeout',
       textStyle: { fontSize: 11 },
     },
     legend: { show: false, selected },
-    grid: { left: 8, right: 32, top: 8, bottom: 20 },
+    grid: { left: 8, right: 32, top: 8, bottom: is1d ? 20 : 8 },
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: 'hsl(var(--border) / 0.5)' } },
       minInterval: is1d ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
       splitNumber: is1d ? 5 : 7,
       axisLabel: {
+        show: is1d,
         color: 'hsl(var(--muted-foreground))', fontSize: 10,
         hideOverlap: true,
         formatter: v => formatRangeAxisLabel(v),
@@ -748,7 +811,9 @@ function renderTCPingChart(id, results) {
     series: series.concat(anomalySeries),
   });
   chart.on('click', params => {
-    if (params.seriesType === 'scatter' && params.data) openHistoricalDay(id, params.data[0]);
+    if (params.seriesType === 'scatter' && params.data) {
+      openHistoricalDay(id, params.data[0]);
+    }
   });
   tcppingChart = chart;
 

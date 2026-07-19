@@ -435,6 +435,19 @@ header {
   background: hsl(var(--card));
 }
 .tcpping-chart { height: 240px; }
+.tcpping-day-nav {
+  display: flex; align-items: center; justify-content: space-around;
+  padding: 2px 24px 0 8px;
+}
+.tcpping-day-nav[hidden] { display: none; }
+.tcpping-day-nav button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  padding: 3px 6px; border-radius: 4px; color: hsl(var(--muted-foreground));
+  font: 600 10px var(--font-mono); transition: color 0.12s, background 0.12s;
+}
+.tcpping-day-nav button:hover, .tcpping-day-nav button:focus-visible {
+  color: hsl(var(--foreground)); background: hsl(var(--accent)); outline: none;
+}
 .tcpping-stats {
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   overflow: hidden;
