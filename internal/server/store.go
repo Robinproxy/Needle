@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	ErrTokenNotFound      = errors.New("token not found")
+	ErrTokenNotFound     = errors.New("token not found")
 	ErrTokenAlreadyBound = errors.New("token already bound to another hostname")
-	ErrHostnameTaken      = errors.New("hostname already bound to another token")
+	ErrHostnameTaken     = errors.New("hostname already bound to another token")
 )
 
 type Store struct {
@@ -301,21 +301,37 @@ func (s *Store) RevokeToken(token string) error {
 	if token == "" {
 		return fmt.Errorf("token is required")
 	}
-	t, err := s.LookupToken(token)
+
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	if t.Hostname != "" {
+	defer tx.Rollback()
+
+	var hostname sql.NullString
+	err = tx.QueryRow(`SELECT hostname FROM agent_tokens WHERE token = ?`, token).Scan(&hostname)
+	if err == sql.ErrNoRows {
+		return ErrTokenNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	if hostname.Valid && hostname.String != "" {
 		var agentID int64
-		err = s.db.QueryRow(`SELECT id FROM agents WHERE hostname = ?`, t.Hostname).Scan(&agentID)
+		err = tx.QueryRow(`SELECT id FROM agents WHERE hostname = ?`, hostname.String).Scan(&agentID)
 		if err == nil {
-			_ = s.DeleteAgent(agentID)
+			if err := deleteAgentTx(tx, agentID); err != nil {
+				return err
+			}
 		} else if err != sql.ErrNoRows {
 			return err
 		}
 	}
-	_, err = s.db.Exec(`DELETE FROM agent_tokens WHERE token = ?`, token)
-	return err
+	if _, err := tx.Exec(`DELETE FROM agent_tokens WHERE token = ?`, token); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListTokens() ([]TokenRow, error) {
@@ -590,10 +606,14 @@ func calcNextReset(expiresAtUnix int64, period string) (int, string) {
 	now := time.Now()
 	addMonths := 0
 	switch period {
-	case "1m": addMonths = 1
-	case "3m": addMonths = 3
-	case "6m": addMonths = 6
-	case "12m": addMonths = 12
+	case "1m":
+		addMonths = 1
+	case "3m":
+		addMonths = 3
+	case "6m":
+		addMonths = 6
+	case "12m":
+		addMonths = 12
 	}
 	if addMonths == 0 {
 		return 0, ""
@@ -621,23 +641,38 @@ func (s *Store) GetStats() (*ServerStats, error) {
 }
 
 func (s *Store) DeleteAgent(id int64) error {
-	var hostname string
-	_ = s.db.QueryRow(`SELECT hostname FROM agents WHERE id = ?`, id).Scan(&hostname)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-	_, err := s.db.Exec("DELETE FROM metrics WHERE agent_id = ?", id)
-	if err != nil {
+	if err := deleteAgentTx(tx, id); err != nil {
 		return err
 	}
-	_, err = s.db.Exec("DELETE FROM tcpping_results WHERE agent_id = ?", id)
-	if err != nil {
+	return tx.Commit()
+}
+
+func deleteAgentTx(tx *sql.Tx, id int64) error {
+	var hostname string
+	err := tx.QueryRow(`SELECT hostname FROM agents WHERE id = ?`, id).Scan(&hostname)
+	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	_, err = s.db.Exec("DELETE FROM agents WHERE id = ?", id)
-	if err != nil {
+
+	if _, err := tx.Exec("DELETE FROM metrics WHERE agent_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM tcpping_results WHERE agent_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM agents WHERE id = ?", id); err != nil {
 		return err
 	}
 	if hostname != "" {
-		_, _ = s.db.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname)
+		if _, err := tx.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname); err != nil {
+			return err
+		}
 	}
 	return nil
 }
