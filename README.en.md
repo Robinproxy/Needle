@@ -321,6 +321,29 @@ Install the Agent:
 sudo bash /tmp/needle-agent.sh install
 ```
 
+Show this machine's Agent token:
+
+```bash
+sudo sed -n 's/^token:[[:space:]]*//p' /opt/needle-agent/agent.yaml
+```
+
+Copy the token shown above, then allow it on the Server. For a Docker Server:
+
+```bash
+cd ~/needle
+docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
+```
+
+For a binary or systemd Server:
+
+```bash
+sudo /opt/needle/bin/needle-server \
+  -db /opt/needle/data/needle.db \
+  allow-token YOUR_TOKEN
+```
+
+After the Agent's first successful report, the Server automatically binds the token to the Agent hostname; no separate registration command is required.
+
 Inspect installation details, service status, and recent logs:
 
 ```bash

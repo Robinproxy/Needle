@@ -321,6 +321,29 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 sudo bash /tmp/needle-agent.sh install
 ```
 
+查看本机 Agent Token：
+
+```bash
+sudo sed -n 's/^token:[[:space:]]*//p' /opt/needle-agent/agent.yaml
+```
+
+复制上一步显示的 Token，然后在 Server 上放行。Docker Server：
+
+```bash
+cd ~/needle
+docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
+```
+
+二进制或 systemd Server：
+
+```bash
+sudo /opt/needle/bin/needle-server \
+  -db /opt/needle/data/needle.db \
+  allow-token YOUR_TOKEN
+```
+
+Agent 首次成功上报后，Server 会自动将该 Token 绑定到 Agent 主机名，无需额外注册命令。
+
 查看安装信息、服务状态和最近日志：
 
 ```bash
