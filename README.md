@@ -1,15 +1,17 @@
+# Needle
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/Robinproxy/Needle/main/internal/server/static/favicon.svg" width="72" height="72" alt="Needle">
 </p>
 
-<h1 align="center">Needle</h1>
-
 <p align="center">
-  轻量级、纯出站上报的 VPS 监控面板
+  轻量、单文件、面向个人服务器的流量与状态监控工具
 </p>
 
 <p align="center">
-  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
+  <a href="README.en.md">English</a> ·
+  <a href="https://github.com/Robinproxy/Needle/releases">Releases</a> ·
+  <a href="https://github.com/Robinproxy/Needle/pkgs/container/needle">Container</a>
 </p>
 
 <p align="center">
@@ -18,442 +20,388 @@
   <a href="https://github.com/Robinproxy/Needle/actions"><img src="https://img.shields.io/github/actions/workflow/status/Robinproxy/Needle/docker.yml?branch=main&style=flat-square" alt="Build"></a>
 </p>
 
----
+Needle 由一个 Server 和多个 Agent 组成。Agent 只向外连接 Server，采集 CPU、内存、网络流量和 TCP Ping；Server 将数据保存在 SQLite 中，并提供只读 Web 面板。
 
-## 设计理念
+## 功能
 
-- **纯出站** — Agent 只上报 ，Server 永远不主动连 Agent
-- **面板只读** — 运维全部在终端完成，面板不做写操作
-- **零共享密钥** — 各vps相互隔离，一机一密钥
-
----
-
-## 特色功能
-
-| 特色 | 说明 |
-|------|------|
-| ⏱ **Traffic 周期** | 按计费周期展示用量 |
-| 🎯 **TCPing 多线路** | CMv4 / CUv6 等线路可切换 |
-| 🏁 **Region 国旗** | 自定义地区标识 |
-
----
+- CPU、内存、实时上下行速率与计费周期流量
+- TCP Ping 多线路延迟监控，可按线路显示或隐藏
+- `1d` 原始数据与 `7d` 降采样概览，兼顾细节和加载速度
+- 点击 7 天图表下方的日期，可同步查看当天 CPU、内存、流量和 TCP Ping 原始数据
+- 异常日期使用小红点提示，悬停可查看摘要；异常标记不会遮挡曲线
+- 页面自动刷新，并区分加载中、暂无数据、数据过期和请求失败
+- 每个 Agent 使用独立 Token，首次成功上报后绑定节点
+- 单二进制部署，SQLite 存储，无前端构建依赖
+- 支持 HTTPS、Cloudflare Tunnel、Docker Compose 和 systemd
 
 ## 架构
 
-```
-┌──────────────┐              ┌──────────────────┐
-│  Agent VPS   │── POST ──→   │                  │
-│  (唯一 token)│  Bearer      │  Needle Server   │
-└──────────────┘  + 指标       │  ┌────────────┐  │
-                              │  │ Dashboard  │  │
-                              │  └────────────┘  │
-                              │  ┌────────────┐  │
-                              │  │ SQLite     │  │
-                              │  │ 节点数据    │  │
-                              │  │ agent_tokens│ │
-                              │  └────────────┘  │
-                              └──────────────────┘
+```text
+Agent A ─┐
+Agent B ─┼── HTTPS ──> Needle Server ──> SQLite
+Agent C ─┘                   │
+                             └── Web Dashboard
 ```
 
+Agent 无需开放入站端口。生产环境建议让 Agent 通过 HTTPS 域名连接 Server，例如 Cloudflare Tunnel 或反向代理。
 
-## 命令速查
+## 快速部署
 
-curl：`apt-get update && apt-get install -y curl`。
-
-<details>
-<summary>Server · Docker</summary>
-
-| Operation | Command |
-|------|------|
-| Upgrade | `cd ~/needle && docker compose pull && docker compose up -d` |
-| Logs | `docker compose logs -f needle-server` |
-| Allow token | `docker compose exec needle-server needle-server -db /data/needle.db allow-token <token>` |
-| List tokens | `docker compose exec needle-server needle-server -db /data/needle.db list-tokens` |
-| List agents | `docker compose exec needle-server needle-server -db /data/needle.db list-agents` |
-| Revoke token | `docker compose exec needle-server needle-server -db /data/needle.db -y revoke-token <token>` |
-| Delete agent | `docker compose exec needle-server needle-server -db /data/needle.db delete-agent <hostname\|id>` |
-| Delete agent (-y) | `docker compose exec needle-server needle-server -db /data/needle.db -y delete-agent <hostname\|id>` |
-| Backup | `cp -a data/needle.db data/needle.db.bak` |
-| Uninstall (keep data) | `docker compose down` |
-| Uninstall (purge) | `docker compose down -v && rm -rf data` |
-
-> `exec` 不走 ENTRYPOINT：服务名 `needle-server` 后须再写一次二进制名 `needle-server`。
-
-</details>
-
-<details>
-<summary>Server · 二进制</summary>
-
-| Operation | Local Script | Pipe |
-|------|----------|------|
-| Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh` | — |
-| Install | `sudo bash /tmp/needle-server.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash` |
-| install/upgrade | `sudo bash /tmp/needle-server.sh` | same (no args) |
-| Upgrade | `sudo bash /tmp/needle-server.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- upgrade` |
-| Status | `sudo bash /tmp/needle-server.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- status` |
-| Uninstall (keep data) | `sudo bash /tmp/needle-server.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall` |
-| Uninstall (purge) | `sudo bash /tmp/needle-server.sh uninstall --purge` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \| sudo bash -s -- uninstall --purge` |
-| Allow token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>` | — |
-| List tokens | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens` | — |
-| List agents | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents` | — |
-| Delete agent | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname\|id>` | — |
-| Delete agent (-y) | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname\|id>` | — |
-| Revoke token | `sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>` | — |
-| Logs | `journalctl -u needle-server -f` | — |
-| Cleanup temp script | `rm -f /tmp/needle-server.sh` | not needed for pipe |
-
-</details>
-
-<details>
-<summary>Agent · 二进制</summary>
-
-| Operation | Local Script | Pipe |
-|------|----------|------|
-| Download script | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh` | — |
-| Install | `sudo bash /tmp/needle-agent.sh install` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash` |
-| install/upgrade | `sudo bash /tmp/needle-agent.sh` | same (no args) |
-| Upgrade | `sudo bash /tmp/needle-agent.sh upgrade` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- upgrade` |
-| Status | `sudo bash /tmp/needle-agent.sh status` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- status` |
-| Uninstall local | `sudo bash /tmp/needle-agent.sh uninstall` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall` |
-| Uninstall + notify Server | `sudo bash /tmp/needle-agent.sh uninstall --unregister` | `curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \| sudo bash -s -- uninstall --unregister` |
-| Logs | `journalctl -u needle-agent -f` | — |
-| Cleanup temp script | `rm -f /tmp/needle-agent.sh` | not needed for pipe |
-
-</details>
-
-<details>
-<summary>目录速查</summary>
-
-| Role | Path | Description |
-|------|------|------|
-| Docker | `~/needle/docker-compose.yml` | Compose file |
-| Docker | `~/needle/.env` | Optional `NEEDLE_PORT` |
-| Docker | `~/needle/data/needle.db` | SQLite (token allow-list) |
-| Docker | `/data` in container | Data volume |
-| Server binary | `/opt/needle/bin/needle-server` | Binary |
-| Server binary | `/opt/needle/.env` | `NEEDLE_LISTEN` (mode 600) |
-| Server binary | `/opt/needle/data/needle.db` | SQLite |
-| Server binary | `/etc/systemd/system/needle-server.service` | unit |
-| Agent | `/opt/needle-agent/bin/needle-agent` | Binary |
-| Agent | `/opt/needle-agent/agent.yaml` | Config + **per-agent token** (mode 600) |
-| Agent | `/etc/systemd/system/needle-agent.service` | unit |
-
-</details>
-
----
-
-## 部署详解
-
-### Server · Docker（推荐）
-
-#### 部署
+### 1. 部署 Server（推荐 Docker Compose）
 
 ```bash
-mkdir -p ~/needle && cd ~/needle
-
-cat > docker-compose.yml << 'EOF'
-services:
-  needle-server:
-    image: ghcr.io/robinproxy/needle:latest
-    ports:
-      - "127.0.0.1:${NEEDLE_PORT:-8008}:8008"
-    environment:
-      NEEDLE_LISTEN: ":8008"
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-EOF
-
-# 可选端口：echo "NEEDLE_PORT=8080" >> .env
+mkdir -p ~/needle/data
+cd ~/needle
+curl -fsSLO https://raw.githubusercontent.com/Robinproxy/Needle/main/docker-compose.yml
 docker compose up -d
 ```
 
-> **不再需要全局 `NEEDLE_TOKEN`。** Agent 用独立 token，用 `allow-token` 登记。端口默认只绑定本机，请通过 Cloudflare Tunnel、Caddy 或 Nginx 提供公网 HTTPS；如需直接监听公网，可自行移除端口映射中的 `127.0.0.1:`。
+默认只监听宿主机 `127.0.0.1:8008`，数据库保存在 `~/needle/data/needle.db`。
 
-Cloudflare Tunnel 示例（`cloudflared` 运行在宿主机）：
-
-```yaml
-ingress:
-  - hostname: needle.example.com
-    service: http://127.0.0.1:8008
-```
-
-Agent 使用 `server: https://needle.example.com`。公网链路由 Cloudflare 提供 TLS，Tunnel 到本机 Server 可以继续使用 loopback HTTP。
-
-<details>
-<summary>运维</summary>
+查看运行状态：
 
 ```bash
-cd ~/needle
-
-# 升级
-docker compose pull && docker compose up -d
-
-# 日志
-docker compose logs -f needle-server
-
-# 登记 Agent token（安装 Agent 时打印的完整 token）
-docker compose exec needle-server \
-  needle-server -db /data/needle.db allow-token <token>
-
-# 查看 token 白名单 / 节点
-docker compose exec needle-server \
-  needle-server -db /data/needle.db list-tokens
-docker compose exec needle-server \
-  needle-server -db /data/needle.db list-agents
-
-# 吊销 token（已绑定的节点数据会一并清理）
-docker compose exec needle-server \
-  needle-server -db /data/needle.db -y revoke-token <token>
-
-# 删节点数据
-docker compose exec needle-server \
-  needle-server -db /data/needle.db delete-agent <hostname|id>
-docker compose exec needle-server \
-  needle-server -db /data/needle.db -y delete-agent <hostname|id>
-
-# 备份
-cp -a data/needle.db data/needle.db.bak
-
-# 卸载（保留数据）
-docker compose down
-
-# 卸载（含数据）
-docker compose down -v && rm -rf data
+docker compose ps
+docker compose logs --tail=100 needle-server
+curl -fsS http://127.0.0.1:8008/api/health
 ```
 
-</details>
+### 2. 配置 HTTPS
 
-#### 目录
+以 Cloudflare Tunnel 为例：
 
-| 路径 | 说明 |
-|------|------|
-| `~/needle/docker-compose.yml` | 编排（路径按你创建的目录） |
-| `~/needle/.env` | 可选 `NEEDLE_PORT` |
-| `~/needle/data/needle.db` | SQLite（含 token 白名单） |
-| 容器内 `/data` | 数据卷挂载点 |
-| 镜像 | `ghcr.io/robinproxy/needle:latest` |
+- cloudflared 运行在宿主机：源服务填写 `http://127.0.0.1:8008`
+- cloudflared 与 Needle 在同一个 Docker 网络：可填写 `http://needle-server:8008`
+- Agent 配置中填写公开 HTTPS 地址，例如 `https://needle.example.com`
 
-本地构建：
+Tunnel 到本机服务之间使用 HTTP 是正常的；Agent 到公开域名之间仍然是 HTTPS。
 
-```bash
-git clone https://github.com/Robinproxy/Needle.git && cd Needle
-docker compose up -d --build
-```
+### 3. 安装 Agent
 
----
-
-### Server · 二进制（systemd）
-
-#### 部署
+在每台被监控服务器上执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  -o /tmp/needle-server.sh
-sudo bash /tmp/needle-server.sh install
-```
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh | sudo bash
-```
-
-<details>
-<summary>运维 · 脚本（二选一）</summary>
-
-本地脚本：
-
-```bash
-sudo bash /tmp/needle-server.sh              # 智能 install / upgrade
-sudo bash /tmp/needle-server.sh upgrade      # 只换二进制，保留 .env 与 data/
-sudo bash /tmp/needle-server.sh status
-sudo bash /tmp/needle-server.sh uninstall    # 停服务 + 删二进制，默认保留 data/ 与 .env
-sudo bash /tmp/needle-server.sh uninstall --purge   # 连 data/ 与 .env 一起删除
-```
-
-管道：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  | sudo bash -s -- upgrade
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  | sudo bash -s -- status
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  | sudo bash -s -- uninstall
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  | sudo bash -s -- uninstall --purge
-```
-
-</details>
-
-<details>
-<summary>运维 · Token / 节点 CLI</summary>
-
-```bash
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token <token>
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent <hostname|id>
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y delete-agent <hostname|id>
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db -y revoke-token <token>
-
-journalctl -u needle-server -f
-```
-
-> `delete-agent` 只删 Server 库数据，不会停远端 Agent。若 Agent 仍在上报，节点会重新出现。
-
-用完可删临时脚本：
-
-```bash
-rm -f /tmp/needle-server.sh
-```
-
-</details>
-
-#### 目录
-
-| 路径 | 说明 |
-|------|------|
-| `/opt/needle/bin/needle-server` | Server 二进制 |
-| `/opt/needle/.env` | `NEEDLE_LISTEN`（权限 600） |
-| `/opt/needle/data/needle.db` | SQLite |
-| `/etc/systemd/system/needle-server.service` | systemd unit |
-
-也可从 [Releases](https://github.com/Robinproxy/Needle/releases) 解压后前台运行（无 systemd）：
-
-```bash
-tar xzf needle-linux-amd64.tar.gz needle-server
-./needle-server -l :8008 -db ./data/needle.db
-```
-
----
-
-### Agent · 二进制（systemd）
-
-在每台 VPS 上执行。
-
-#### 部署
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  -o /tmp/needle-agent.sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
 sudo bash /tmp/needle-agent.sh install
 ```
 
-管道：
+安装程序会生成独立 Token，并写入 `/opt/needle-agent/agent.yaml`。将其中的 `server` 改为 Server 的 HTTPS 地址，然后在 Server 上放行该 Token。
+
+Docker Server：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh | sudo bash
+cd ~/needle
+docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
 ```
 
-安装结束会**自动生成独立 token** 并打印，例如：
-
-```text
-Agent token: a1b2c3d4...
-  sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token a1b2c3d4...
-  docker compose exec needle-server \
-    needle-server -db /data/needle.db allow-token a1b2c3d4...
-```
-
-**请到 Server 上执行 `allow-token`，否则上报 401。** Token 保存在本机 `agent.yaml`。
-
-<details>
-<summary>运维 · 脚本（二选一）</summary>
-
-本地脚本：
+二进制或 systemd Server：
 
 ```bash
-sudo bash /tmp/needle-agent.sh              # 智能 install / upgrade
-sudo bash /tmp/needle-agent.sh upgrade      # 零交互升级，保留 agent.yaml（含 token）
-sudo bash /tmp/needle-agent.sh status
-sudo bash /tmp/needle-agent.sh uninstall    # 仅卸本机（默认，不碰 Server 库）
-sudo bash /tmp/needle-agent.sh uninstall --unregister   # 先通知 Server 删节点，再卸本机
+sudo /opt/needle/bin/needle-server \
+  -db /opt/needle/data/needle.db \
+  allow-token YOUR_TOKEN
 ```
 
-管道：
+最后重启 Agent：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  | sudo bash -s -- upgrade
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  | sudo bash -s -- status
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  | sudo bash -s -- uninstall
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh \
-  | sudo bash -s -- uninstall --unregister
+sudo systemctl restart needle-agent
+sudo systemctl status needle-agent --no-pager
 ```
 
-日志与清理：
+打开 `https://needle.example.com` 即可查看面板。
 
-```bash
-journalctl -u needle-agent -f
-rm -f /tmp/needle-agent.sh
-```
+## 历史数据说明
 
-</details>
+| 视图 | 数据方式 | 适合用途 |
+| --- | --- | --- |
+| `1d` | 原始采样数据 | 排查最近 24 小时的具体变化 |
+| `7d` | 15 分钟时间桶降采样 | 快速观察一周趋势，降低加载和绘制压力 |
+| 日期视图 | 指定自然日的原始数据 | 从 7 天概览进入某一天详细排查 |
 
-#### 目录
+在 `7d` 视图中点击 TCP Ping 下方的日期，所有图表会同步切换到当天数据。日期上的红点表示当天存在异常提示；点击 `7d` 可返回一周概览。
 
-| 路径 | 说明 |
-|------|------|
-| `/opt/needle-agent/bin/needle-agent` | Agent 二进制 |
-| `/opt/needle-agent/agent.yaml` | 配置（含**独立 token**，权限 600） |
-| `/etc/systemd/system/needle-agent.service` | systemd unit |
+## Agent 配置
 
----
-
-## 配置
-
-### Server
-
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `NEEDLE_LISTEN` | 监听地址 | `:8008` |
-| `NEEDLE_PORT` | Docker 宿主机端口 | `8008` |
-
-> 已无全局 `NEEDLE_TOKEN`。鉴权仅靠数据库白名单（`allow-token`）。
-
-### agent.yaml
+配置文件：`/opt/needle-agent/agent.yaml`
 
 ```yaml
-hostname: ""                                     # 可选，默认系统主机名
-server: https://needle.example.com               # 必填，推荐使用 HTTPS
-token: replace-with-unique-agent-token           # 每台唯一；须在 Server allow-token
-region: SG                                       # ISO 国家码
-billing_period: "1m"                             # 1m/3m/6m/12m，可选
-expires_at: "2026-08-15"                         # YYYY-MM-DD，可选
-interval: 30                                     # 上报间隔（秒）
-tls_skip_verify: false                           # true = HTTPS 时跳过证书验证（仅自签名证书）
-allow_plain_http: false                          # true = 明确允许向远程 HTTP 地址明文发送 token
+hostname: ""
+server: https://needle.example.com
+token: replace-with-unique-agent-token
+region: SG
+
+billing_period: "1m"
+expires_at: "2026-08-15"
+interval: 30
+
+tls_skip_verify: false
+allow_plain_http: false
+
 tcpping:
-  - name: "CMv4"
-    target: "sh-cm-v4.ip.zstaticcdn.com:80"
-  - name: "CMv6"
-    target: "sh-cm-v6.ip.zstaticcdn.com:80"
-  - name: "CUv4"
-    target: "sh-cu-v4.ip.zstaticcdn.com:80"
-  - name: "CUv6"
-    target: "sh-cu-v6.ip.zstaticcdn.com:80"
-  - name: "CTv4"
-    target: "sh-ct-v4.ip.zstaticcdn.com:80"
-  - name: "CTv6"
-    target: "sh-ct-v6.ip.zstaticcdn.com:80"
+  - name: CMv4
+    target: sh-cm-v4.ip.zstaticcdn.com:80
 ```
 
-Agent 默认只允许 HTTPS，以及指向 `localhost`、`127.0.0.0/8` 或 `::1` 的本机 HTTP。其他 HTTP 地址会被拒绝，除非显式设置 `allow_plain_http: true`。旧字段 `insecure` 暂时兼容，但已弃用且仅等同于 `tls_skip_verify`。
+主要字段：
 
----
+| 字段 | 说明 |
+| --- | --- |
+| `hostname` | 留空时使用系统主机名 |
+| `server` | Server 地址，生产环境应使用 HTTPS |
+| `token` | 每台 Agent 独立使用的认证 Token |
+| `region` | 面板显示的地区代码 |
+| `billing_period` | 流量计费周期，例如 `1m` 表示每月 1 日开始 |
+| `expires_at` | 服务器到期日期，格式为 `YYYY-MM-DD` |
+| `interval` | 上报间隔，单位为秒 |
+| `tls_skip_verify` | 跳过 TLS 证书校验，仅用于临时排障 |
+| `allow_plain_http` | 允许连接远程明文 HTTP Server，不建议启用 |
+| `tcpping` | TCP Ping 目标列表 |
 
-## 常见场景
+修改配置后检查并重启：
 
-| 场景 | 做法 |
-|------|------|
-| 删除 VPS | Agent：`uninstall --unregister`； Server：`delete-agent` |
-| 更换 hostname | 需 `revoke-token` 再 `allow-token` |
+```bash
+sudo nano /opt/needle-agent/agent.yaml
+sudo systemctl restart needle-agent
+sudo journalctl -u needle-agent -n 100 --no-pager
+```
 
----
+远程 HTTP 默认会被 Agent 拒绝；`http://127.0.0.1` 等回环地址不受影响。不要为绕过证书问题长期启用 `tls_skip_verify` 或 `allow_plain_http`。
+
+## 日常运维
+
+### Docker Server
+
+查看状态和实时日志：
+
+```bash
+cd ~/needle
+docker compose ps
+docker compose logs -f --tail=100 needle-server
+```
+
+升级镜像：
+
+```bash
+cd ~/needle
+docker compose pull
+docker compose up -d
+docker image prune -f
+```
+
+重启或停止：
+
+```bash
+docker compose restart needle-server
+docker compose stop needle-server
+docker compose start needle-server
+```
+
+管理 Agent 和 Token：
+
+```bash
+# 查看已登记节点
+docker compose exec needle-server needle-server -db /data/needle.db list-agents
+
+# 查看允许接入的 Token
+docker compose exec needle-server needle-server -db /data/needle.db list-tokens
+
+# 新增 Token
+docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
+
+# 撤销 Token，并删除与其绑定的节点数据
+docker compose exec needle-server needle-server -db /data/needle.db revoke-token YOUR_TOKEN
+
+# 按节点 ID 或主机名删除节点数据
+docker compose exec needle-server needle-server -db /data/needle.db delete-agent HOSTNAME_OR_ID
+```
+
+`delete-agent` 只删除 Server 中的数据；如果 Agent 仍在运行并继续上报，节点会再次出现。永久移除节点时应先在 Agent 端执行 `uninstall --unregister`，或撤销其 Token。
+
+#### 备份与恢复
+
+SQLite 正在写入时不建议直接复制单个数据库文件。最稳妥的方式是短暂停止 Server，备份整个数据目录：
+
+```bash
+cd ~/needle
+docker compose stop needle-server
+cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
+docker compose start needle-server
+```
+
+恢复前先停止服务，并保留当前数据：
+
+```bash
+cd ~/needle
+docker compose down
+mv data "data.failed.$(date +%Y%m%d-%H%M%S)"
+cp -a data.backup.YYYYMMDD-HHMMSS data
+docker compose up -d
+```
+
+确认恢复正常后，再手动清理不需要的旧目录。
+
+### systemd Server
+
+安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh
+sudo bash /tmp/needle-server.sh install
+```
+
+升级、检查和日志：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
+  | sudo bash -s -- upgrade
+sudo systemctl status needle-server --no-pager
+sudo journalctl -u needle-server -f
+```
+
+备份数据库：
+
+```bash
+sudo systemctl stop needle-server
+sudo cp -a /opt/needle/data "/opt/needle/data.backup.$(date +%Y%m%d-%H%M%S)"
+sudo systemctl start needle-server
+```
+
+卸载程序但保留数据和配置：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh
+sudo bash /tmp/needle-server.sh uninstall
+```
+
+彻底删除程序、配置和数据：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh
+sudo bash /tmp/needle-server.sh uninstall --purge
+```
+
+### Agent 二进制运维
+
+安装脚本部署的是 Agent 二进制，并由 systemd 管理。先下载运维脚本，后续可使用它查看状态、升级或卸载：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
+```
+
+查看安装信息、服务状态和最近日志：
+
+```bash
+sudo bash /tmp/needle-agent.sh status
+sudo systemctl status needle-agent --no-pager
+sudo journalctl -u needle-agent -n 100 --no-pager
+```
+
+持续查看实时日志：
+
+```bash
+sudo journalctl -u needle-agent -f
+```
+
+启动、停止或重启 Agent：
+
+```bash
+sudo systemctl start needle-agent
+sudo systemctl stop needle-agent
+sudo systemctl restart needle-agent
+```
+
+修改配置后重启，并通过日志确认连接是否成功：
+
+```bash
+sudo nano /opt/needle-agent/agent.yaml
+sudo systemctl restart needle-agent
+sudo journalctl -u needle-agent -n 50 --no-pager
+```
+
+升级二进制；现有 `/opt/needle-agent/agent.yaml` 不会被覆盖：
+
+```bash
+sudo bash /tmp/needle-agent.sh upgrade
+sudo systemctl status needle-agent --no-pager
+```
+
+需要在前台排查时，先停止 systemd 服务，避免同一个 Agent 重复上报：
+
+```bash
+sudo systemctl stop needle-agent
+sudo /opt/needle-agent/bin/needle-agent /opt/needle-agent/agent.yaml
+# 按 Ctrl+C 退出后恢复服务
+sudo systemctl start needle-agent
+```
+
+仅卸载本机二进制和 systemd 服务，Server 上的历史数据会保留：
+
+```bash
+sudo bash /tmp/needle-agent.sh uninstall
+```
+
+通知 Server 删除节点数据后再卸载：
+
+```bash
+sudo bash /tmp/needle-agent.sh uninstall --unregister
+```
+
+### 常用路径
+
+| 内容 | 路径 |
+| --- | --- |
+| Server 二进制 | `/opt/needle/bin/needle-server` |
+| Server 环境配置 | `/opt/needle/.env` |
+| Server 数据库 | `/opt/needle/data/needle.db` |
+| Agent 二进制 | `/opt/needle-agent/bin/needle-agent` |
+| Agent 配置 | `/opt/needle-agent/agent.yaml` |
+| systemd 服务 | `/etc/systemd/system/needle-server.service`、`needle-agent.service` |
+
+## 升级说明
+
+- Web 面板和 Server API 的新功能只需要升级 Server。
+- Agent 采集、安全策略或本地配置能力发生变化时，才需要升级 Agent。
+- Server 升级脚本保留数据库和 `.env`；Agent 升级脚本保留 `agent.yaml`。
+- 升级前建议先备份 Server 数据目录，并阅读对应版本的 Release Notes。
+
+## 安全建议
+
+- 对外访问必须使用 HTTPS，Server 端口只绑定回环地址或内网地址。
+- 每台 Agent 使用独立 Token，不要在多台机器之间复用。
+- Token 泄露后立即执行 `revoke-token`，再为节点生成新 Token。
+- 不要将数据库、`.env`、`agent.yaml` 或 Token 提交到代码仓库。
+- Cloudflare Tunnel 或反向代理不能替代 Server 自身的 Token 校验。
+
+## 从源码构建
+
+需要 Go 1.24 或更高版本：
+
+```bash
+git clone https://github.com/Robinproxy/Needle.git
+cd Needle
+go test ./...
+go build -o needle-server ./cmd/server
+go build -o needle-agent ./cmd/agent
+```
+
+Server 参数：
+
+```text
+-l       监听地址，也可使用 NEEDLE_LISTEN
+-db      SQLite 数据库路径
+-cert    TLS 证书路径
+-key     TLS 私钥路径
+-y       跳过删除或撤销操作的确认
+```
 
 ## 感谢
 
-- **开发工具** — [opencode](https://opencode.ai) + [DeepSeek V4 Flash](https://deepseek.com/) + [Grok](https://x.ai/) + [GLM](https://zhipuai.cn/) 提供 AI 辅助编码
-- **TCPing 节点** — [zstaticcdn](https://lf3-ips.zstaticcdn.com/) 提供全球探测节点
-- **主题 UI 参考** — [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2) 的仪表盘设计灵感
+- 感谢 [akiasprin](https://github.com/akiasprin) 开源的 [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2)，为 Needle 的仪表盘设计提供了参考与灵感。
+- 感谢 [zstaticcdn](https://lf3-ips.zstaticcdn.com/) 提供 TCP Ping 探测节点。
+- 感谢 [OpenCode](https://opencode.ai/)、[DeepSeek](https://deepseek.com/)、[Grok](https://x.ai/)、[GLM](https://zhipuai.cn/) 和 [OpenAI Codex](https://openai.com/codex/) 在项目开发与代码审查过程中提供辅助。
+- 感谢所有开源项目作者、贡献者和使用 Needle 并提供反馈的朋友。
+
+## License
+
+[MIT](LICENSE)
