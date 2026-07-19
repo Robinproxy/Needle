@@ -30,13 +30,15 @@ type MetricRow struct {
 }
 
 type TCPingRow struct {
-	ID        int64   `json:"id"`
-	AgentID   int64   `json:"agent_id"`
-	Name      string  `json:"name"`
-	Target    string  `json:"target"`
-	LatencyMs float64 `json:"latency_ms"`
-	Success   bool    `json:"success"`
-	CreatedAt int64   `json:"created_at"`
+	ID           int64   `json:"id"`
+	AgentID      int64   `json:"agent_id"`
+	Name         string  `json:"name"`
+	Target       string  `json:"target"`
+	LatencyMs    float64 `json:"latency_ms"`
+	Success      bool    `json:"success"`
+	SampleCount  int64   `json:"sample_count,omitempty"`
+	SuccessCount int64   `json:"success_count,omitempty"`
+	CreatedAt    int64   `json:"created_at"`
 }
 
 type TrafficUsage struct {

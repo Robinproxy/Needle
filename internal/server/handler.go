@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"mime"
 	"net/http"
 	"regexp"
@@ -424,6 +425,7 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	since := time.Now().Add(-1 * time.Hour).Unix()
+	bucketSeconds := int64(0)
 	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 		if s, err := strconv.ParseInt(sinceStr, 10, 64); err == nil {
 			since = s
@@ -435,12 +437,13 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 				d = 720 * time.Hour
 			}
 			since = time.Now().Add(-d).Unix()
+			bucketSeconds = historyBucketSeconds(d)
 		}
 	}
 
 	switch parts[1] {
 	case "metrics":
-		metrics, err := h.store.GetMetrics(agentID, since)
+		metrics, err := h.store.GetMetricsSampled(agentID, since, bucketSeconds)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -457,7 +460,7 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(metrics)
 
 	case "tcpping":
-		results, err := h.store.GetTCPingResults(agentID, since)
+		results, err := h.store.GetTCPingResultsSampled(agentID, since, bucketSeconds)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -477,4 +480,16 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
+}
+
+func historyBucketSeconds(d time.Duration) int64 {
+	if d < 7*24*time.Hour {
+		return 0
+	}
+	bucket := int64(math.Ceil(d.Seconds() / 720))
+	if bucket < 900 {
+		bucket = 900
+	}
+	// Whole-minute buckets keep chart timestamps and query plans predictable.
+	return ((bucket + 59) / 60) * 60
 }

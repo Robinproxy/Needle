@@ -685,11 +685,12 @@ function renderTCPingChart(id, results) {
   // Render stats rows
   const statsHtml = names.map((name) => {
     const targetResults = results.filter(r => r.name === name);
-    const avg = targetResults.reduce((s, r, _, a) => s + (r.success ? r.latency_ms : 0), 0) / targetResults.filter(r => r.success).length || 0;
+    const successCount = targetResults.reduce((sum, r) => sum + (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0);
+    const avg = successCount ? targetResults.reduce((sum, r) => sum + r.latency_ms * (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0) / successCount : 0;
     const vals = targetResults.filter(r => r.success).map(r => r.latency_ms);
     const jitter = vals.length > 1 ? vals.reduce((s, v, idx, a) => idx > 0 ? s + Math.abs(v - a[idx - 1]) : s, 0) / (vals.length - 1) : 0;
-    const losses = targetResults.filter(r => !r.success).length;
-    const lossPct = (losses / targetResults.length * 100);
+    const sampleCount = targetResults.reduce((sum, r) => sum + (r.sample_count || 1), 0);
+    const lossPct = sampleCount ? ((sampleCount - successCount) / sampleCount * 100) : 0;
     const color = tcppingColor(name);
 
     const displayName = mapCarrier(name);
@@ -698,7 +699,7 @@ function renderTCPingChart(id, results) {
       + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
       + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
       + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
-       + '<span class="col-stat ' + (lossPct >= 5 && vals.length > 0 ? 'high-loss' : '') + '">' + (vals.length > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
+       + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '">' + (sampleCount > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
      + '</div>';
    }).join('');
    document.getElementById('tcpping-rows-' + id).innerHTML = statsHtml;

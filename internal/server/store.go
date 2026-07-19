@@ -452,6 +452,13 @@ func (s *Store) GetLatestMetric(agentID int64) (*MetricRow, error) {
 }
 
 func (s *Store) GetMetrics(agentID int64, since int64) ([]MetricRow, error) {
+	return s.GetMetricsSampled(agentID, since, 0)
+}
+
+func (s *Store) GetMetricsSampled(agentID int64, since, bucketSeconds int64) ([]MetricRow, error) {
+	if bucketSeconds > 0 {
+		return s.getMetricsAggregated(agentID, since, bucketSeconds)
+	}
 	rows, err := s.db.Query(
 		`SELECT id, agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
@@ -477,9 +484,45 @@ func (s *Store) GetMetrics(agentID int64, since int64) ([]MetricRow, error) {
 	return metrics, nil
 }
 
-func (s *Store) GetTCPingResults(agentID int64, since int64) ([]TCPingRow, error) {
+func (s *Store) getMetricsAggregated(agentID int64, since, bucketSeconds int64) ([]MetricRow, error) {
 	rows, err := s.db.Query(
-		`SELECT id, agent_id, name, target, latency_ms, success, created_at
+		`SELECT MAX(id), agent_id, AVG(cpu_usage),
+			CAST(ROUND(AVG(memory_total)) AS INTEGER), CAST(ROUND(AVG(memory_used)) AS INTEGER),
+			CAST(ROUND(AVG(disk_total)) AS INTEGER), CAST(ROUND(AVG(disk_used)) AS INTEGER),
+			AVG(network_up), AVG(network_down), MAX(total_sent), MAX(total_recv),
+			AVG(load1), AVG(load5), AVG(load15), MAX(uptime), MAX(created_at)
+		 FROM metrics WHERE agent_id = ? AND created_at >= ?
+		 GROUP BY agent_id, created_at / ? ORDER BY created_at`,
+		agentID, since, bucketSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var metrics []MetricRow
+	for rows.Next() {
+		var m MetricRow
+		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
+			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
+			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		metrics = append(metrics, m)
+	}
+	return metrics, rows.Err()
+}
+
+func (s *Store) GetTCPingResults(agentID int64, since int64) ([]TCPingRow, error) {
+	return s.GetTCPingResultsSampled(agentID, since, 0)
+}
+
+func (s *Store) GetTCPingResultsSampled(agentID int64, since, bucketSeconds int64) ([]TCPingRow, error) {
+	if bucketSeconds > 0 {
+		return s.getTCPingResultsAggregated(agentID, since, bucketSeconds)
+	}
+	rows, err := s.db.Query(
+		`SELECT id, agent_id, name, target, latency_ms, success, 1, success, created_at
 		 FROM tcpping_results WHERE agent_id = ? AND created_at >= ? ORDER BY created_at`,
 		agentID, since,
 	)
@@ -492,13 +535,41 @@ func (s *Store) GetTCPingResults(agentID int64, since int64) ([]TCPingRow, error
 	for rows.Next() {
 		var t TCPingRow
 		var success int
-		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success, &t.SampleCount, &t.SuccessCount, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		t.Success = success == 1
 		results = append(results, t)
 	}
-	return results, nil
+	return results, rows.Err()
+}
+
+func (s *Store) getTCPingResultsAggregated(agentID int64, since, bucketSeconds int64) ([]TCPingRow, error) {
+	rows, err := s.db.Query(
+		`SELECT MAX(id), agent_id, name, target,
+			COALESCE(AVG(CASE WHEN success = 1 THEN latency_ms END), 0),
+			CASE WHEN SUM(success) > 0 THEN 1 ELSE 0 END,
+			COUNT(*), SUM(success), MAX(created_at)
+		 FROM tcpping_results WHERE agent_id = ? AND created_at >= ?
+		 GROUP BY agent_id, name, target, created_at / ? ORDER BY created_at, name`,
+		agentID, since, bucketSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []TCPingRow
+	for rows.Next() {
+		var t TCPingRow
+		var success int
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success, &t.SampleCount, &t.SuccessCount, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		t.Success = success == 1
+		results = append(results, t)
+	}
+	return results, rows.Err()
 }
 
 type ServerStats struct {
