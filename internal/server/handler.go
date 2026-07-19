@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -11,15 +12,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 var regionCodeRe = regexp.MustCompile(`(?i)^[a-z]{2}$`)
 
 const (
-	maxRegionLen      = 32
-	maxTCPingNameLen  = 64
+	maxRegionLen       = 32
+	maxTCPingNameLen   = 64
 	maxTCPingTargetLen = 256
 	maxTCPingPerReport = 32
 )
@@ -64,8 +64,6 @@ var staticFiles embed.FS
 
 var Version = "dev"
 
-var reportThrottle sync.Map
-
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -76,11 +74,14 @@ func SecurityHeaders(next http.Handler) http.Handler {
 }
 
 type Handler struct {
-	store *Store
+	store         *Store
+	globalLimiter globalLimiter
+	tokenLimiter  *tokenLimiter
+	now           func() time.Time
 }
 
 func NewHandler(store *Store) *Handler {
-	return &Handler{store: store}
+	return &Handler{store: store, tokenLimiter: newTokenLimiter(), now: time.Now}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -100,38 +101,43 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/", fileServer)
 }
 
-func bearerToken(r *http.Request) string {
-	return strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+func bearerToken(r *http.Request) (string, bool) {
+	fields := strings.Fields(r.Header.Get("Authorization"))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || len(fields[1]) > 256 || hasControl(fields[1]) {
+		return "", false
+	}
+	return fields[1], true
 }
 
 // authorizeAgent checks whitelist token and hostname binding rules.
 // On first report with unbound token, binds hostname.
-func (h *Handler) authorizeAgent(token, hostname string) error {
+func (h *Handler) authorizeAgent(token, hostname string) (*TokenRow, error) {
 	if token == "" {
-		return errors.New("missing token")
+		return nil, errors.New("missing token")
 	}
 	if hostname == "" {
-		return errors.New("hostname required")
+		return nil, errors.New("hostname required")
 	}
 	row, err := h.store.LookupToken(token)
 	if err != nil {
 		if errors.Is(err, ErrTokenNotFound) {
-			return errors.New("unauthorized")
+			return nil, errors.New("unauthorized")
 		}
-		return err
+		return nil, err
 	}
 	if row.Hostname == "" {
 		if err := h.store.BindToken(token, hostname); err != nil {
 			log.Printf("report: bind failed for hostname %q: %v", hostname, err)
-			return err
+			return nil, err
 		}
 		log.Printf("agent registered: hostname=%q", hostname)
-		return nil
+		row.Hostname = hostname
+		return row, nil
 	}
 	if row.Hostname != hostname {
-		return errors.New("token bound to another hostname")
+		return nil, errors.New("token bound to another hostname")
 	}
-	return nil
+	return row, nil
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -175,8 +181,8 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	token := bearerToken(r)
-	if token == "" {
+	token, ok := bearerToken(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -202,7 +208,7 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
-			reportThrottle.Delete(a.ID)
+			h.tokenLimiter.Delete(row.ID)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 			return
@@ -219,52 +225,36 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Hostname      string `json:"hostname"`
-		Region        string `json:"region"`
-		ExpiresAt     *int64 `json:"expires_at"`
-		BillingPeriod string `json:"billing_period"`
-		CPU           *struct {
-			Percent float64 `json:"percent"`
-		} `json:"cpu"`
-		Memory *struct {
-			Total uint64 `json:"total"`
-			Used  uint64 `json:"used"`
-		} `json:"memory"`
-		Disk *struct {
-			Total uint64 `json:"total"`
-			Used  uint64 `json:"used"`
-		} `json:"disk"`
-		Network *struct {
-			Up        int64 `json:"up"`
-			Down      int64 `json:"down"`
-			TotalSent int64 `json:"total_sent"`
-			TotalRecv int64 `json:"total_recv"`
-		} `json:"network"`
-		Load *struct {
-			Load1  float64 `json:"load1"`
-			Load5  float64 `json:"load5"`
-			Load15 float64 `json:"load15"`
-		} `json:"load"`
-		Uptime    uint64 `json:"uptime"`
-		CreatedAt *int64 `json:"created_at"`
-		TCPing    []struct {
-			Name      string  `json:"name"`
-			Target    string  `json:"target"`
-			LatencyMs float64 `json:"latency_ms"`
-			Success   bool    `json:"success"`
-		} `json:"tcpping"`
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+	now := h.now()
+	if !h.globalLimiter.Allow(now) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
-	token := bearerToken(r)
-	if err := h.authorizeAgent(token, req.Hostname); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req reportRequest
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := validateReport(&req, now); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	token, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	tokenRow, err := h.authorizeAgent(token, req.Hostname)
+	if err != nil {
 		switch {
 		case errors.Is(err, ErrHostnameTaken), errors.Is(err, ErrTokenAlreadyBound):
 			log.Printf("report: conflict for hostname %q: %v", req.Hostname, err)
@@ -277,6 +267,11 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if !h.tokenLimiter.Allow(tokenRow.ID, now) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 
 	region := sanitizeRegion(req.Region)
 	agentID, err := h.store.UpsertAgent(req.Hostname, token, region, req.ExpiresAt, req.BillingPeriod)
@@ -286,20 +281,10 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// per-agent rate limit: 50 req/s (20ms window)
-	last, loaded := reportThrottle.LoadOrStore(agentID, time.Now().UnixMilli())
-	if loaded && time.Now().UnixMilli()-last.(int64) < 20 {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-		return
-	}
-	reportThrottle.Store(agentID, time.Now().UnixMilli())
-
 	var createdAt int64
 	if req.CreatedAt != nil {
 		createdAt = *req.CreatedAt
 	}
-	now := time.Now()
 	if createdAt < now.Add(-30*24*time.Hour).Unix() || createdAt > now.Add(5*time.Minute).Unix() {
 		createdAt = now.Unix()
 	}
@@ -350,11 +335,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tcpping := req.TCPing
-	if len(tcpping) > maxTCPingPerReport {
-		tcpping = tcpping[:maxTCPingPerReport]
-	}
-	for _, t := range tcpping {
+	for _, t := range req.TCPing {
 		name := sanitizeTCPingName(t.Name)
 		if name == "" {
 			continue
