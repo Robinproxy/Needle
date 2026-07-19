@@ -104,7 +104,11 @@ header {
   display: flex; align-items: center; justify-content: space-between;
   height: 56px;
 }
-.brand { display: flex; align-items: center; gap: 10px; }
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  appearance: none; border: 0; padding: 0; background: transparent;
+  color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+}
 .brand-icon { flex: 0 0 auto; }
 .brand-icon .brand-ring { fill: none; stroke: hsl(var(--primary)); stroke-width: 1.3; stroke-linecap: round; }
 .brand-icon .brand-ring-inner { fill: none; stroke: hsl(var(--muted-foreground)); stroke-width: 0.9; stroke-linecap: round; }
@@ -118,7 +122,7 @@ header {
 
 .header-icon-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px;
+  width: 40px; height: 40px;
   border: none; border-radius: calc(var(--radius) - 2px);
   background: hsl(var(--muted) / 0.3);
   color: hsl(var(--muted-foreground) / 0.5);
@@ -127,6 +131,17 @@ header {
 }
 .header-icon-btn:hover { color: hsl(var(--foreground)); background: hsl(var(--muted) / 0.5); }
 .header-icon-btn svg { width: 14px; height: 14px; }
+
+.brand:focus-visible,
+.header-icon-btn:focus-visible,
+.card:focus-visible,
+.list-row:focus-visible,
+.region-filter:focus-visible,
+.ping-label:focus-visible,
+.tcpping-stat-row:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
 
 .theme-btn-group {
   display: flex; gap: 2px;
@@ -171,7 +186,10 @@ header {
 }
 .server-info .item:first-child { padding-left: 0; }
 .server-info .item:last-child { border-right: none; }
-.server-info .item.region-filter { cursor: pointer; transition: opacity 0.15s; }
+.server-info .item.region-filter {
+  appearance: none; border: 0; background: transparent; color: inherit;
+  font: inherit; line-height: inherit; cursor: pointer; transition: opacity 0.15s;
+}
 .server-info .item.region-filter:hover { opacity: 0.7; }
 .server-info .item.active .label,
 .server-info .item.active .value { color: hsl(var(--primary)); }
@@ -307,7 +325,12 @@ header {
   width: 6px; height: 6px; border-radius: 50%;
   flex: 0 0 auto;
 }
-.card-ping .ping-label { color: hsl(var(--foreground)); font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-ping .ping-label {
+  appearance: none; border: 0; padding: 0; background: transparent;
+  color: hsl(var(--foreground)); font: inherit; font-weight: 700;
+  text-align: left; cursor: pointer; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .card-ping .ping-lat { color: hsl(var(--muted-foreground)); margin-right: 4px; }
 .card-ping .ping-loss { color: hsl(var(--muted-foreground)); }
 .card-ping .ping-tag { color: hsl(var(--muted-foreground)); }

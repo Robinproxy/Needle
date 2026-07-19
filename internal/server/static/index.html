@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -11,14 +11,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7/css/flag-icons.min.css">
-<link rel="stylesheet" href="/style.css?v=0.5.4">
+<link rel="stylesheet" href="/style.css?v=0.5.5">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 </head>
 <body>
   <header>
     <div class="container header-inner">
-      <div class="brand" onclick="goHome()" style="cursor:pointer" title="Home">
-        <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28">
+      <a class="brand" href="/" onclick="event.preventDefault();goHome()" aria-label="Go to dashboard home" title="Home">
+        <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
           <path class="brand-ring" d="M7.6 20.4C5.7 18.9 4.5 16.6 4.5 14c0-5.1 5.4-8.9 11.5-8.9S27.5 8.9 27.5 14c0 2.6-1.2 4.9-3.1 6.4"/>
           <path class="brand-ring-inner" d="M10.1 18.5C9 17.4 8.4 15.9 8.4 14.2c0-3.5 3.4-6.1 7.6-6.1s7.6 2.6 7.6 6.1c0 1.7-.6 3.2-1.7 4.3"/>
           <path class="brand-mast" d="M16 3.6v21.8M12.3 10.6 16 3.6l3.7 7M11.1 22.3 16 25.4l4.9-3.1"/>
@@ -30,13 +30,13 @@
           <h1>NEEDLE</h1>
           <p>Server Monitoring</p>
         </div>
-      </div>
+      </a>
       <div class="header-actions">
-        <button class="header-icon-btn" id="view-toggle" onclick="toggleView()" title="切换视图">
-          <svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <button class="header-icon-btn" id="view-toggle" type="button" onclick="toggleView()" aria-label="Switch to list view" title="Switch to list view">
+          <svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         </button>
-        <button class="header-icon-btn" id="theme-cycle" onclick="cycleTheme()" title="切换主题">
-          <svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>
+        <button class="header-icon-btn" id="theme-cycle" type="button" onclick="cycleTheme()" aria-label="Change theme, currently light" title="Change theme, currently light">
+          <svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>
         </button>
       </div>
     </div>
@@ -51,7 +51,7 @@
     </a>
   </div>
 
-  <div id="dashboard-alert" class="dashboard-alert container" hidden>
+  <div id="dashboard-alert" class="dashboard-alert container" role="status" aria-live="polite" hidden>
     <span id="dashboard-alert-text"></span>
     <button class="btn btn-ghost btn-sm" type="button" onclick="fullRefresh()">Retry</button>
   </div>
@@ -59,7 +59,7 @@
   <main class="container">
     <div id="card-grid" class="card-grid"></div>
 
-    <div id="empty-state" class="empty-state">
+    <div id="empty-state" class="empty-state" role="status" aria-live="polite">
       <div class="empty-icon">
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       </div>
@@ -72,10 +72,10 @@
     <div class="container footer-inner">
       <span id="version-label">NEEDLE</span>
       <span>Server Monitoring</span>
-      <span id="footer-status" class="footer-status loading">● Connecting...</span>
+      <span id="footer-status" class="footer-status loading" role="status" aria-live="polite">● Connecting...</span>
     </div>
   </footer>
 
-<script src="/app.js?v=0.5.9"></script>
+<script src="/app.js?v=0.5.10"></script>
 </body>
 </html>

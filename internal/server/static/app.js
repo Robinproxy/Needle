@@ -123,6 +123,10 @@ function setRegionFilter(code) {
   filterRegion = filterRegion === code ? '' : code;
   renderAll();
   renderInfoBar();
+  const selectedCode = filterRegion;
+  const selectedFilter = Array.from(document.querySelectorAll('#server-info [data-region]'))
+    .find(el => el.getAttribute('data-region') === selectedCode);
+  selectedFilter?.focus();
 }
 
 function renderInfoBar() {
@@ -144,12 +148,13 @@ function renderInfoBar() {
     .map(([code, count]) => {
       const label = /^[a-zA-Z]{2}$/.test(code) ? flagEmoji(code) : escapeHtml(code);
       const active = filterRegion === code;
-      return '<span class="item region-filter' + (active ? ' active' : '') + '" data-region="' + escapeAttr(code) + '" style="cursor:pointer"><span class="value pri">' + label + '</span> <span class="value">' + count + '</span></span>';
+      const regionName = /^[a-zA-Z]{2}$/.test(code) ? code.toUpperCase() : code;
+      return '<button type="button" class="item region-filter' + (active ? ' active' : '') + '" data-region="' + escapeAttr(code) + '" aria-pressed="' + active + '" aria-label="Filter by region ' + escapeAttr(regionName) + ', ' + count + ' node' + (count === 1 ? '' : 's') + '"><span class="value pri">' + label + '</span> <span class="value">' + count + '</span></button>';
     })
     .join('');
 
   document.getElementById('server-info').innerHTML =
-    '<span class="item' + (!filterRegion ? ' active' : '') + '" data-region="" style="cursor:pointer"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></span>'
+    '<button type="button" class="item region-filter' + (!filterRegion ? ' active' : '') + '" data-region="" aria-pressed="' + (!filterRegion) + '" aria-label="Show all nodes, ' + online + ' online out of ' + total + '"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></button>'
     + regionHtml;
 }
 
@@ -217,13 +222,13 @@ function switchCardFormat(mode) {
 }
 
 const VIEW_ICONS = {
-  card: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
-  list: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="21" y2="6"/></svg>',
+  card: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  list: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="21" y2="6"/></svg>',
 };
 const THEME_ICONS = {
-  light: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>',
-  dark: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9c-4 0-7-3-7-7 0-1 .2-2 .7-3A9 9 0 0 1 12 3z"/></svg>',
-  system: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M7 4V2M17 4V2" stroke-width="1.2"/></svg>',
+  light: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>',
+  dark: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 9 9c-4 0-7-3-7-7 0-1 .2-2 .7-3A9 9 0 0 1 12 3z"/></svg>',
+  system: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M7 4V2M17 4V2" stroke-width="1.2"/></svg>',
 };
 
 function toggleView() {
@@ -240,6 +245,18 @@ function updateHeaderIcons() {
   if (viewIcon) viewIcon.outerHTML = VIEW_ICONS[cardFormat];
   const themeIcon = document.getElementById('theme-icon');
   if (themeIcon) themeIcon.outerHTML = THEME_ICONS[themeMode];
+  const viewToggle = document.getElementById('view-toggle');
+  if (viewToggle) {
+    const label = cardFormat === 'card' ? 'Switch to list view' : 'Switch to card view';
+    viewToggle.setAttribute('aria-label', label);
+    viewToggle.title = label;
+  }
+  const themeToggle = document.getElementById('theme-cycle');
+  if (themeToggle) {
+    const label = 'Change theme, currently ' + themeMode;
+    themeToggle.setAttribute('aria-label', label);
+    themeToggle.title = label;
+  }
 }
 
 function renderAll(scrollToDetail) {
@@ -345,7 +362,7 @@ function renderCard(a, idx, isActive) {
     const dotBg = tcppingColor(p.name);
     const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
     const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
-    pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><span class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" style="cursor:pointer">' + escapeHtml(mapCarrier(p.name)) + '</span><span class="ping-lat"><span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + latClr + '">' + latStr + '</span></span><span class="ping-loss"><span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lossClr + '">' + lossStr + '</span></span></div>';
+    pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><button type="button" class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" aria-label="Show next TCP Ping target for ' + escapeAttr(a.agent.hostname) + '">' + escapeHtml(mapCarrier(p.name)) + '</button><span class="ping-lat"><span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + latClr + '">' + latStr + '</span></span><span class="ping-loss"><span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lossClr + '">' + lossStr + '</span></span></div>';
   }
 
   let expiryHtml = '';
@@ -354,7 +371,7 @@ function renderCard(a, idx, isActive) {
     expiryHtml = '<span class="expiry-days' + ec + '" title="Due ' + expiryDate + '">' + expiryDays + '</span>';
   }
 
-  return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
+  return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<div class="card-top">'
       + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
       + '<span class="card-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
@@ -402,7 +419,7 @@ function renderListRow(a, idx, isActive) {
       + '</span>';
   }
 
-  return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
+  return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
     + '<span class="list-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
     + '<span class="list-region">' + regionLabel + '</span>'
@@ -482,7 +499,7 @@ function renderDetailContent(id) {
   const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
   detailEl.innerHTML = '<div class="detail-header">'
     + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
-    + '<button class="btn btn-ghost btn-sm" onclick="toggleExpand(' + id + ')">\u2715</button>'
+    + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
     + '</div>'
     + '<div class="spark-grid">'
       + '<div class="spark-item"><div class="spark-header"><span class="label">CPU</span><span class="value" id="spark-cpu-val">—</span></div><div id="spark-cpu" class="spark-chart"></div></div>'
@@ -818,7 +835,7 @@ function renderTCPingChart(id, results) {
     const color = tcppingColor(name);
 
     const displayName = mapCarrier(name);
-    return '<div class="tcpping-stat-row" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
+    return '<div class="tcpping-stat-row" role="button" tabindex="0" aria-pressed="true" aria-label="Toggle ' + escapeAttr(displayName) + ' TCP Ping line" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
       + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
       + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
       + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
@@ -847,7 +864,9 @@ function applyTcppingSelections(id, names) {
   names.forEach(n => { selected[n] = saved[n] !== undefined ? saved[n] : true; });
   tcppingChart.setOption({ legend: { selected } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
-    r.classList.toggle('hidden', selected[r.dataset.name] === false);
+    const isSelected = selected[r.dataset.name] !== false;
+    r.classList.toggle('hidden', !isSelected);
+    r.setAttribute('aria-pressed', String(isSelected));
   });
   const allHidden = names.every(n => selected[n] === false);
   document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
@@ -860,7 +879,10 @@ function tcppingSelectAll(id) {
   const selected = {};
   tcppingChart.getOption().series.forEach(s => { selected[s.name] = true; });
   tcppingChart.setOption({ legend: { selected } });
-  document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => r.classList.remove('hidden'));
+  document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
+    r.classList.remove('hidden');
+    r.setAttribute('aria-pressed', 'true');
+  });
   saveTcppingSelections(id);
   document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
     b.classList.toggle('active', i === 0);
@@ -872,7 +894,10 @@ function tcppingSelectNone(id) {
   const selected = {};
   tcppingChart.getOption().series.forEach(s => { selected[s.name] = false; });
   tcppingChart.setOption({ legend: { selected } });
-  document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => r.classList.add('hidden'));
+  document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
+    r.classList.add('hidden');
+    r.setAttribute('aria-pressed', 'false');
+  });
   saveTcppingSelections(id);
   document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
     b.classList.toggle('active', i === 1);
@@ -886,7 +911,11 @@ function tcppingToggleLine(id, name) {
   sel[name] = !sel[name];
   tcppingChart.setOption({ legend: { selected: { ...sel } } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
-    if (r.dataset.name === name) r.classList.toggle('hidden');
+    if (r.dataset.name === name) {
+      const isSelected = sel[name] !== false;
+      r.classList.toggle('hidden', !isSelected);
+      r.setAttribute('aria-pressed', String(isSelected));
+    }
   });
   saveTcppingSelections(id);
 }
@@ -1151,7 +1180,35 @@ window.addEventListener('resize', () => {
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && expandedId) { toggleExpand(expandedId); }
+  if (e.key === 'Escape' && expandedId) {
+    const id = expandedId;
+    toggleExpand(id);
+    document.querySelector('[data-id="' + id + '"]')?.focus();
+    return;
+  }
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const regionFilter = e.target.closest('.region-filter[data-region]');
+  if (regionFilter) {
+    e.preventDefault();
+    regionFilter.click();
+    return;
+  }
+  const tcppingRow = e.target.closest('.tcpping-stat-row[data-name]');
+  if (tcppingRow) {
+    const id = parseInt(tcppingRow.getAttribute('data-agent-id'), 10);
+    const name = tcppingRow.getAttribute('data-name');
+    if (!Number.isFinite(id) || name == null) return;
+    e.preventDefault();
+    tcppingToggleLine(id, name);
+    return;
+  }
+  const node = e.target.closest('.card[role="button"], .list-row[role="button"]');
+  if (!node || e.target.closest('button, a')) return;
+  const id = parseInt(node.getAttribute('data-id'), 10);
+  if (!Number.isFinite(id)) return;
+  e.preventDefault();
+  toggleExpand(id);
+  document.querySelector('[data-id="' + id + '"]')?.focus();
 });
 
 document.getElementById('server-info')?.addEventListener('click', e => {
@@ -1171,5 +1228,3 @@ document.addEventListener('click', e => {
 
 fullRefresh();
 setInterval(softRefresh, 30000);
-
-updateViewIcon();
