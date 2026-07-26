@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="256" height="256">
-  <rect width="32" height="32" fill="#ffffff"/><!-- True-vector remake of avatar.png: same geometry as the dashboard's
+  <!-- True-vector remake of avatar.png: same geometry as the dashboard's
        inline brand icon, weighted and colored to match the raster avatar. -->
   <g fill="none" stroke-linecap="round">
     <path d="M7.6 20.4C5.7 18.9 4.5 16.6 4.5 14c0-5.1 5.4-8.9 11.5-8.9S27.5 8.9 27.5 14c0 2.6-1.2 4.9-3.1 6.4" stroke="#4A7FC7" stroke-width="1.6"/>
