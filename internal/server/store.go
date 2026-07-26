@@ -94,6 +94,7 @@ func (s *Store) migrate() error {
 			region TEXT DEFAULT '',
 			expires_at INTEGER,
 			billing_period TEXT DEFAULT '',
+			last_seen INTEGER,
 			created_at INTEGER DEFAULT (strftime('%s','now'))
 		)`,
 		`CREATE TABLE IF NOT EXISTS metrics (
@@ -180,6 +181,9 @@ func (s *Store) migrate() error {
 	}
 	// drop redundant plaintext token copy (v0.6.2); auth uses agent_tokens only
 	s.db.Exec("ALTER TABLE agents DROP COLUMN token")
+	// last_seen (v0.6.3): report receipt time, survives metric purge.
+	// After the autoincrement rebuild so the rebuild cannot drop it.
+	s.db.Exec("ALTER TABLE agents ADD COLUMN last_seen INTEGER")
 	return nil
 }
 
@@ -436,17 +440,18 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 }
 
 func (s *Store) UpsertAgent(hostname, region string, expiresAt *int64, billingPeriod string) (int64, error) {
-	return upsertAgent(s.db, hostname, region, expiresAt, billingPeriod)
+	return upsertAgent(s.db, hostname, region, expiresAt, billingPeriod, s.now().Unix())
 }
 
-func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPeriod string) (int64, error) {
+func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPeriod string, lastSeen int64) (int64, error) {
 	_, err := x.Exec(
-		`INSERT INTO agents(hostname, region, expires_at, billing_period) VALUES(?, ?, ?, ?)
+		`INSERT INTO agents(hostname, region, expires_at, billing_period, last_seen) VALUES(?, ?, ?, ?, ?)
 		 ON CONFLICT(hostname) DO UPDATE SET
 		   region = excluded.region,
 		   expires_at = excluded.expires_at,
-		   billing_period = excluded.billing_period`,
-		hostname, region, expiresAt, billingPeriod,
+		   billing_period = excluded.billing_period,
+		   last_seen = excluded.last_seen`,
+		hostname, region, expiresAt, billingPeriod, lastSeen,
 	)
 	if err != nil {
 		return 0, err
@@ -520,7 +525,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	agentID, err := upsertAgent(tx, r.Hostname, r.Region, r.ExpiresAt, r.BillingPeriod)
+	agentID, err := upsertAgent(tx, r.Hostname, r.Region, r.ExpiresAt, r.BillingPeriod, s.now().Unix())
 	if err != nil {
 		return 0, err
 	}
@@ -549,7 +554,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 }
 
 func (s *Store) GetAgents() ([]AgentRow, error) {
-	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period FROM agents ORDER BY id")
+	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen FROM agents ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +563,7 @@ func (s *Store) GetAgents() ([]AgentRow, error) {
 	var agents []AgentRow
 	for rows.Next() {
 		var a AgentRow
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod); err != nil {
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)

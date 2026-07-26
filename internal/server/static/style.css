@@ -360,7 +360,15 @@ header {
 .list-row .status-dot { flex: 0 0 auto; }
 .list-hostname { font-weight: 600; min-width: 120px; }
 .server-info .fi { font-size: 11px; }
-.list-region { font-size: 14px; min-width: 28px; text-align: center; }
+/* Outline mostly-white flags (JP, SG, PL...) so they don't float on the card */
+.fi {
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px hsl(var(--border) / 0.35);
+}
+.list-region {
+  font-size: 14px; min-width: 28px; max-width: 88px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .list-session { font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-foreground) / 0.5); min-width: 28px; }
 .list-bars { display: flex; gap: 12px; flex: 1; min-width: 0; }
 .list-bar { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
@@ -562,6 +570,7 @@ footer {
 @media (max-width: 639px) {
   .card-grid { grid-template-columns: 1fr; }
   .spark-grid { grid-template-columns: repeat(2, 1fr); }
+  .list-hostname { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .list-bars { gap: 6px; }
   .list-bar .metric-bar { width: 36px; }
   .list-bar-val { width: 32px; }
@@ -570,4 +579,10 @@ footer {
   .brand-text p { display: none; }
   .list-region { display: none; }
   .list-session { display: none; }
+  /* Bars can't fit: keep label+value pairs only, sized to their content */
+  .list-bars { flex: 0 0 auto; gap: 8px; }
+  .list-bar { flex: 0 0 auto; }
+  .list-bar .metric-bar { display: none; }
+  .list-bar-label { width: auto; }
+  .list-bar-val { width: auto; min-width: 34px; }
 }

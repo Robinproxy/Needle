@@ -147,7 +147,9 @@ func runListAgents(dbPath string) error {
 	fmt.Printf("%-6s %-24s %-8s %s\n", "ID", "HOSTNAME", "REGION", "LAST_SEEN")
 	for _, a := range agents {
 		lastSeen := "-"
-		if m, err := store.GetLatestMetric(a.ID); err == nil && m != nil {
+		if a.LastSeen != nil {
+			lastSeen = time.Unix(*a.LastSeen, 0).UTC().Format(time.RFC3339)
+		} else if m, err := store.GetLatestMetric(a.ID); err == nil && m != nil {
 			lastSeen = time.Unix(m.CreatedAt, 0).UTC().Format(time.RFC3339)
 		}
 		fmt.Printf("%-6d %-24s %-8s %s\n", a.ID, a.Hostname, a.Region, lastSeen)

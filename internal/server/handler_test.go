@@ -26,6 +26,7 @@ func TestHandleAgentsIncludesTrafficAvailability(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
 	var got []struct {
+		Agent   AgentRow     `json:"agent"`
 		Traffic TrafficUsage `json:"traffic"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
@@ -33,6 +34,9 @@ func TestHandleAgentsIncludesTrafficAvailability(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Traffic.Available || got[0].Traffic.HasData || got[0].Traffic.Reason != "billing_not_configured" {
 		t.Fatalf("traffic = %+v, want billing_not_configured", got)
+	}
+	if got[0].Agent.LastSeen == nil {
+		t.Fatal("agent.last_seen missing after a report")
 	}
 }
 

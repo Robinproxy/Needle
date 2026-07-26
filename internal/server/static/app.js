@@ -134,8 +134,8 @@ function renderInfoBar() {
   const d = infoData?.db_stats || {};
   const now = Date.now();
   const online = agents.filter(a => {
-    const m = a.latest_metric;
-    return m && (now - m.created_at * 1000 < 120000);
+    const seen = lastSeenMs(a);
+    return seen && (now - seen < 120000);
   }).length;
   const total = d.agent_count || 0;
 
@@ -341,14 +341,16 @@ function trafficHTML(data) {
 function renderCard(a, idx, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
-  const cpu = m ? m.cpu_usage : 0;
-  const memPct = m ? (m.memory_used / m.memory_total * 100) : 0;
+  // null (not 0) when there is no data: pct() renders it as an em dash.
+  const cpu = m ? m.cpu_usage : null;
+  const memPct = m && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
   const memStr = m ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : '';
-  const diskPct = m ? (m.disk_used / m.disk_total * 100) : 0;
+  const diskPct = m && m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : null;
   const diskStr = m ? formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total) : '';
-  const upSpeed = m ? formatSpeed(m.network_up) : '0';
-  const downSpeed = m ? formatSpeed(m.network_down) : '0';
+  const upSpeed = m ? formatSpeed(m.network_up) : '—';
+  const downSpeed = m ? formatSpeed(m.network_down) : '—';
   const uptime = m ? formatUptime(m.uptime) : '-';
+  const seenTs = lastSeenMs(a);
   const sess = String(idx + 1).padStart(2, '0');
   const expiryDays = a.expiry_days || 0;
   const expiryDate = a.expiry_date || '';
@@ -369,7 +371,7 @@ function renderCard(a, idx, isActive) {
   let expiryHtml = '';
   if (expiryDays > 0) {
     const ec = expiryDays < 7 ? ' expiry-urgent' : '';
-    expiryHtml = '<span class="expiry-days' + ec + '" title="Due ' + expiryDate + '">' + expiryDays + '</span>';
+    expiryHtml = '<span class="expiry-days' + ec + '" title="Due ' + expiryDate + '">' + expiryDays + 'd</span>';
   }
 
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
@@ -380,25 +382,26 @@ function renderCard(a, idx, isActive) {
     + '</div>'
     + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
     + '<div class="card-metrics">'
-      + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value ' + metricColor(cpu) + '">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + cpu.toFixed(0) + '%"></div></div></div>'
-      + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value ' + metricColor(memPct) + '">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
-      + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value ' + metricColor(diskPct) + '">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
+      + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value ' + metricColor(cpu) + '">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + (cpu || 0).toFixed(0) + '%"></div></div></div>'
+      + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value ' + metricColor(memPct) + '">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + (memPct || 0).toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
+      + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value ' + metricColor(diskPct) + '">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + (diskPct || 0).toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
     + '</div>'
     + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '">' + trafficHTML(a.traffic) + '</div>'
     + pingHtml
-    + '<div class="card-footer-line"><div class="net"><span class="net-down">\u2193 ' + downSpeed + '</span><span class="net-up">\u2191 ' + upSpeed + '</span></div><span>' + (m ? relativeTime(m.created_at * 1000) : '') + '</span></div>'
+    + '<div class="card-footer-line"><div class="net"><span class="net-down">\u2193 ' + downSpeed + '</span><span class="net-up">\u2191 ' + upSpeed + '</span></div><span>' + (seenTs ? relativeTime(seenTs) : '') + '</span></div>'
   + '</div>';
 }
 
 function renderListRow(a, idx, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
-  const cpu = m ? m.cpu_usage : 0;
-  const memPct = m ? (m.memory_used / m.memory_total * 100) : 0;
-  const diskPct = m ? (m.disk_used / m.disk_total * 100) : 0;
-  const upSpeed = m ? formatSpeed(m.network_up) : '0';
-  const downSpeed = m ? formatSpeed(m.network_down) : '0';
+  const cpu = m ? m.cpu_usage : null;
+  const memPct = m && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
+  const diskPct = m && m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : null;
+  const upSpeed = m ? formatSpeed(m.network_up) : '—';
+  const downSpeed = m ? formatSpeed(m.network_down) : '—';
   const uptime = m ? formatUptime(m.uptime) : '-';
+  const seenTs = lastSeenMs(a);
   const region = a.agent.region;
   const regionLabel = region && region.length === 2 ? flagEmoji(region) : escapeHtml(region || '');
   const sess = String(idx + 1).padStart(2, '0');
@@ -426,15 +429,22 @@ function renderListRow(a, idx, isActive) {
     + '<span class="list-region">' + regionLabel + '</span>'
     + '<span class="list-session">#' + sess + '</span>'
     + '<div class="list-bars">'
-      + '<div class="list-bar"><span class="list-bar-label">CPU</span><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + cpu.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(cpu) + '</span></div>'
-      + '<div class="list-bar"><span class="list-bar-label">MEM</span><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + memPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(memPct) + '</span></div>'
-      + '<div class="list-bar"><span class="list-bar-label">DSK</span><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + diskPct.toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(diskPct) + '</span></div>'
+      + '<div class="list-bar"><span class="list-bar-label">CPU</span><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + (cpu || 0).toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(cpu) + '</span></div>'
+      + '<div class="list-bar"><span class="list-bar-label">MEM</span><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + (memPct || 0).toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(memPct) + '</span></div>'
+      + '<div class="list-bar"><span class="list-bar-label">DSK</span><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + (diskPct || 0).toFixed(0) + '%"></div></div><span class="list-bar-val">' + pct(diskPct) + '</span></div>'
     + '</div>'
     + pingHtml
     + '<span class="list-net">\u2193' + downSpeed + ' \u2191' + upSpeed + '</span>'
     + '<span class="list-uptime">' + uptime + '</span>'
-    + '<span class="list-time">' + (m ? relativeTime(m.created_at * 1000) : '') + '</span>'
+    + '<span class="list-time">' + (seenTs ? relativeTime(seenTs) : '') + '</span>'
   + '</div>';
+}
+
+// lastSeenMs prefers the server-side receipt time (survives metric purge)
+// and falls back to the latest metric for pre-upgrade rows.
+function lastSeenMs(a) {
+  if (a.agent.last_seen) return a.agent.last_seen * 1000;
+  return a.latest_metric ? a.latest_metric.created_at * 1000 : 0;
 }
 
 function relativeTime(ts) {
@@ -1040,8 +1050,8 @@ async function fullRefresh() {
     const [data, info] = await Promise.all([fetchJSON('/api/agents'), fetchJSON('/api/info')]);
     agents = data;
     agents.forEach(a => {
-      const m = a.latest_metric;
-      a._online = m && (Date.now() - m.created_at * 1000 < 120000);
+      const seen = lastSeenMs(a);
+      a._online = !!seen && (Date.now() - seen < 120000);
     });
     infoData = info;
     renderInfoBar();
@@ -1072,8 +1082,8 @@ async function softRefresh() {
     const previousIDs = agents.map(a => a.agent.id).join(',');
     agents = data;
     agents.forEach(a => {
-      const m = a.latest_metric;
-      a._online = m && (Date.now() - m.created_at * 1000 < 120000);
+      const seen = lastSeenMs(a);
+      a._online = !!seen && (Date.now() - seen < 120000);
     });
     infoData = info;
     renderInfoBar();
@@ -1091,6 +1101,10 @@ async function softRefresh() {
         dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
         dot.onclick = null;
       }
+
+      const seenTs = lastSeenMs(a);
+      const seenEl = card.querySelector(card.classList.contains('card') ? '.card-footer-line > span:last-child' : '.list-time');
+      if (seenEl && seenTs) seenEl.textContent = relativeTime(seenTs);
 
       if (!m) return;
       const cpu = m.cpu_usage;
@@ -1125,7 +1139,7 @@ async function softRefresh() {
         if (sub) { const u = sub.querySelector('span:first-child'); if (u) u.textContent = formatUptime(m.uptime); }
         const expiryEl = sub ? sub.querySelector('.expiry-days') : null;
         if (a.expiry_days > 0 && expiryEl) {
-          expiryEl.textContent = a.expiry_days;
+          expiryEl.textContent = a.expiry_days + 'd';
           expiryEl.className = 'expiry-days' + (a.expiry_days < 7 ? ' expiry-urgent' : '');
           expiryEl.title = 'Due ' + (a.expiry_date || '');
         }
@@ -1134,8 +1148,6 @@ async function softRefresh() {
         const netUp = card.querySelector('.card-footer-line .net-up');
         if (netDown) netDown.textContent = '\u2193 ' + formatSpeed(m.network_down);
         if (netUp) netUp.textContent = '\u2191 ' + formatSpeed(m.network_up);
-        const timeEl = card.querySelector('.card-footer-line > span:last-child');
-        if (timeEl) timeEl.textContent = relativeTime(m.created_at * 1000);
 
         const pingLabel = card.querySelector('.ping-label');
         const pingLat = card.querySelector('.ping-lat');
@@ -1169,8 +1181,6 @@ async function softRefresh() {
         if (netEl) netEl.textContent = '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up);
         const uptimeEl = card.querySelector('.list-uptime');
         if (uptimeEl) uptimeEl.textContent = formatUptime(m.uptime);
-        const timeEl = card.querySelector('.list-time');
-        if (timeEl) timeEl.textContent = relativeTime(m.created_at * 1000);
       }
     });
 

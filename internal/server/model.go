@@ -7,6 +7,7 @@ type AgentRow struct {
 	CreatedAt     int64  `json:"created_at"`
 	ExpiresAt     *int64 `json:"expires_at"`
 	BillingPeriod string `json:"billing_period"`
+	LastSeen      *int64 `json:"last_seen"` // server receipt time of the latest report
 }
 
 type MetricRow struct {
