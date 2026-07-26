@@ -730,9 +730,8 @@ func clampedMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time
 	return time.Date(y, m, day, 0, 0, 0, 0, loc)
 }
 
-func calcNextReset(expiresAtUnix int64, period string) (int, string) {
+func calcNextReset(expiresAtUnix int64, period string, now time.Time) (int, string) {
 	anchor := time.Unix(expiresAtUnix, 0)
-	now := time.Now()
 	addMonths := 0
 	switch period {
 	case "1m":
@@ -747,9 +746,16 @@ func calcNextReset(expiresAtUnix int64, period string) (int, string) {
 	if addMonths == 0 {
 		return 0, ""
 	}
+	// Each candidate is derived from the original anchor (not the previous
+	// candidate) with the day clamped per month, so a day-31 anchor stays on
+	// the month's last day instead of drifting via AddDate normalization.
+	hour, min, sec := anchor.Clock()
+	loc := anchor.Location()
+	y, m, _ := anchor.Date()
 	nextReset := anchor
-	for !nextReset.After(now) {
-		nextReset = nextReset.AddDate(0, addMonths, 0)
+	for k := 1; !nextReset.After(now); k++ {
+		b := clampedMonthDay(y, m+time.Month(k*addMonths), anchor.Day(), loc)
+		nextReset = time.Date(b.Year(), b.Month(), b.Day(), hour, min, sec, 0, loc)
 	}
 	days := int(nextReset.Sub(now).Hours()/24) + 1
 	return days, nextReset.Format("2006-01-02")

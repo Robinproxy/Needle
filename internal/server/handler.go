@@ -388,6 +388,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		ExpiryDate   string        `json:"expiry_date"`
 	}
 
+	now := h.now()
 	result := make([]agentWithMetric, 0, len(agents))
 	for _, a := range agents {
 		m, _ := h.store.GetLatestMetric(a.ID)
@@ -399,7 +400,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		expiryDays, expiryDate := 0, ""
 		if a.ExpiresAt != nil && a.BillingPeriod != "" {
-			expiryDays, expiryDate = calcNextReset(*a.ExpiresAt, a.BillingPeriod)
+			expiryDays, expiryDate = calcNextReset(*a.ExpiresAt, a.BillingPeriod, now)
 		}
 		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, Traffic: traffic, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
 	}

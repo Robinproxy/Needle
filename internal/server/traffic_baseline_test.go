@@ -239,6 +239,59 @@ func TestPurgeRemovesStaleBaselines(t *testing.T) {
 	}
 }
 
+func TestCalcNextReset(t *testing.T) {
+	loc := time.Local
+	date := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, loc)
+	}
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, loc)
+	cases := []struct {
+		name     string
+		anchor   time.Time
+		period   string
+		now      time.Time
+		wantDays int
+		wantDate string
+	}{
+		{"future annual anchor counts to renewal", date(2027, 2, 15), "12m", now, 204, "2027-02-15"},
+		{"future monthly anchor", date(2026, 8, 23), "1m", now, 28, "2026-08-23"},
+		{"lapsed day-31 monthly stays on month end", date(2026, 1, 31), "1m", now, 5, "2026-07-31"},
+		{"lapsed day-31 quarterly clamps to feb", date(2025, 8, 31), "3m",
+			time.Date(2026, 1, 15, 12, 0, 0, 0, loc), 44, "2026-02-28"},
+		{"leap-day annual clamps to feb 28", date(2028, 2, 29), "12m",
+			time.Date(2029, 1, 10, 12, 0, 0, 0, loc), 49, "2029-02-28"},
+		{"unknown period disables the badge", date(2026, 8, 23), "", now, 0, ""},
+	}
+	for _, tc := range cases {
+		days, dateStr := calcNextReset(tc.anchor.Unix(), tc.period, tc.now)
+		if days != tc.wantDays || dateStr != tc.wantDate {
+			t.Errorf("%s: calcNextReset = (%d, %q), want (%d, %q)",
+				tc.name, days, dateStr, tc.wantDays, tc.wantDate)
+		}
+	}
+}
+
+// The due badge and the traffic reset must land on the same calendar day for
+// monthly billing, whatever the anchor's day of month.
+func TestDueAndTrafficResetAgree(t *testing.T) {
+	loc := time.Local
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, loc)
+	for day := 1; day <= 31; day++ {
+		anchor := time.Date(2026, 1, day, 0, 0, 0, 0, loc)
+		_, dueDate := calcNextReset(anchor.Unix(), "1m", now)
+		due, err := time.ParseInLocation("2006-01-02", dueDate, loc)
+		if err != nil {
+			t.Fatalf("day %d: parse due date %q: %v", day, dueDate, err)
+		}
+		cycleStart := monthlyBoundary(anchor.Day(), now)
+		next := monthlyBoundary(anchor.Day(), due.Add(12*time.Hour))
+		if !next.Equal(due) {
+			t.Errorf("day %d: due %s but traffic resets %s (cycle started %s)",
+				day, due.Format("2006-01-02"), next.Format("2006-01-02"), cycleStart.Format("2006-01-02"))
+		}
+	}
+}
+
 func TestMonthlyBoundary(t *testing.T) {
 	loc := time.UTC
 	cases := []struct {
