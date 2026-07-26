@@ -24,7 +24,8 @@ Needle consists of one Server and multiple Agents. Agents make outbound-only con
 
 - CPU, memory, real-time network rates, and billing-cycle traffic usage (physical NICs only; loopback, container, and VPN interfaces are excluded)
 - Multi-route TCP Ping monitoring with per-route show and hide controls
-- Raw `1d` history and a downsampled `7d` overview for detail without slow rendering
+- Raw `1d` history, a downsampled `7d` overview, and a `30d` hourly trend view; raw data is kept 7 days, hourly rollups 90 days
+- Monthly traffic resets on the `expires_at` day of month, with cycle-start snapshots that survive data purging
 - Click a date below the seven-day chart to load raw CPU, memory, traffic, and TCP Ping data for that day
 - Anomaly dates are marked with a small red dot and a hover summary without covering chart lines
 - Automatic refresh with distinct loading, no-data, stale-data, and request-error states
