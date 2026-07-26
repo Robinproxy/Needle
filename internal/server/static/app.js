@@ -1012,7 +1012,13 @@ async function fullRefresh() {
     infoData = info;
     renderInfoBar();
     const version = document.getElementById('version-label');
-    if (version) version.textContent = 'NEEDLE ' + info.version;
+    if (version) {
+      // git-describe builds look like "v0.6.3-2-ga9ad000": show the clean
+      // tag, keep the full build string in the tooltip.
+      const v = String(info.version || '');
+      version.textContent = 'NEEDLE ' + (v.split('-')[0] || v);
+      version.title = v;
+    }
     if (wasExpanded && !agents.find(a => a.agent.id === wasExpanded)) {
       expandedId = null;
     }
