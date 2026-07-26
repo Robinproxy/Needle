@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -103,6 +104,51 @@ func TestHandleReportRateLimitDoesNotWrite(t *testing.T) {
 	}
 	if len(metrics) != 2 {
 		t.Fatalf("metric rows = %d, want 2", len(metrics))
+	}
+}
+
+func TestHandleReportCreatesTrafficBaseline(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.now = h.now
+	now := h.now()
+	if err := store.AllowToken("test-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	expiresAt := now.AddDate(0, 1, 0).Unix()
+	report := func(sent, recv int64) string {
+		return fmt.Sprintf(
+			`{"hostname":"node-1","expires_at":%d,"billing_period":"1m","cpu":{"percent":10},"network":{"total_sent":%d,"total_recv":%d}}`,
+			expiresAt, sent, recv)
+	}
+	if w := sendReport(t, h, "Bearer test-token", report(100, 200)); w.Code != http.StatusOK {
+		t.Fatalf("report status = %d, body=%s", w.Code, w.Body.String())
+	}
+
+	boundary := monthlyBoundary(time.Unix(expiresAt, 0).Day(), now).Unix()
+	var baseSent, baseRecv int64
+	if err := store.db.QueryRow(
+		`SELECT total_sent, total_recv FROM traffic_baselines WHERE boundary = ?`, boundary,
+	).Scan(&baseSent, &baseRecv); err != nil {
+		t.Fatalf("baseline row: %v", err)
+	}
+	if baseSent != 100 || baseRecv != 200 {
+		t.Fatalf("baseline = %d/%d, want 100/200", baseSent, baseRecv)
+	}
+
+	if w := sendReport(t, h, "Bearer test-token", report(600, 900)); w.Code != http.StatusOK {
+		t.Fatalf("second report status = %d, body=%s", w.Code, w.Body.String())
+	}
+	agents, err := store.GetAgents()
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("agents = %d, err = %v", len(agents), err)
+	}
+	usage, err := store.GetTrafficUsage(agents[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !usage.HasData || usage.Sent != 500 || usage.Recv != 700 {
+		t.Fatalf("usage = %+v, want sent=500 recv=700", usage)
 	}
 }
 

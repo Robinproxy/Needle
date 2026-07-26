@@ -336,6 +336,16 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Snapshot the billing cycle's starting counters after the metric insert
+	// so the seed query can see this report. Derived data: log-and-continue.
+	if req.ExpiresAt != nil && req.Network != nil {
+		resetDay := time.Unix(*req.ExpiresAt, 0).Day()
+		boundary := monthlyBoundary(resetDay, now)
+		if err := h.store.EnsureTrafficBaseline(agentID, boundary.Unix()); err != nil {
+			log.Printf("report: ensure traffic baseline for %q: %v", req.Hostname, err)
+		}
+	}
+
 	for _, t := range req.TCPing {
 		name := sanitizeTCPingName(t.Name)
 		if name == "" {
@@ -448,8 +458,10 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
 		if d, err := time.ParseDuration(rangeStr); err == nil {
-			if d > 720*time.Hour {
-				d = 720 * time.Hour
+			// Metrics are purged after 7 days; longer ranges would only pad
+			// the window with rows that no longer exist.
+			if d > 168*time.Hour {
+				d = 168 * time.Hour
 			}
 			since = now.Add(-d).Unix()
 			bucketSeconds = historyBucketSeconds(d)

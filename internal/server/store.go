@@ -19,7 +19,8 @@ var (
 )
 
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	now func() time.Time
 }
 
 func NewStore(path string) (*Store, error) {
@@ -38,7 +39,7 @@ func newStore(path string, purge bool) (*Store, error) {
 	}
 	// Restrict DB file perms (tokens live here). Best-effort for existing files.
 	_ = os.Chmod(path, 0600)
-	s := &Store{db: db}
+	s := &Store{db: db, now: time.Now}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -96,6 +97,14 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hostname
 			ON agent_tokens(hostname) WHERE hostname IS NOT NULL AND hostname != ''`,
+		`CREATE TABLE IF NOT EXISTS traffic_baselines (
+			agent_id INTEGER NOT NULL,
+			boundary INTEGER NOT NULL,
+			total_sent INTEGER NOT NULL,
+			total_recv INTEGER NOT NULL,
+			created_at INTEGER NOT NULL,
+			PRIMARY KEY (agent_id, boundary)
+		)`,
 	}
 	for _, q := range queries {
 		if _, err := s.db.Exec(q); err != nil {
@@ -641,14 +650,22 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 
 	usage := &TrafficUsage{Available: true}
 	resetDay := time.Unix(expiresAt.Int64, 0).Day()
-	boundary := monthlyBoundary(resetDay)
+	boundary := monthlyBoundary(resetDay, s.now())
 	boundaryUnix := boundary.Unix()
 
 	var baseSent, baseRecv sql.NullInt64
 	err = s.db.QueryRow(
-		`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? AND created_at >= ? ORDER BY created_at LIMIT 1`,
+		`SELECT total_sent, total_recv FROM traffic_baselines WHERE agent_id = ? AND boundary = ?`,
 		agentID, boundaryUnix,
 	).Scan(&baseSent, &baseRecv)
+	if err == sql.ErrNoRows {
+		// No snapshot yet (pre-baseline install or first report of the cycle
+		// not seen): fall back to the earliest surviving metric of the cycle.
+		err = s.db.QueryRow(
+			`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? AND created_at >= ? ORDER BY created_at LIMIT 1`,
+			agentID, boundaryUnix,
+		).Scan(&baseSent, &baseRecv)
+	}
 	if err == sql.ErrNoRows {
 		usage.Reason = "no_data"
 		return usage, nil
@@ -678,26 +695,39 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 	return usage, nil
 }
 
-func monthlyBoundary(day int) time.Time {
-	now := time.Now()
+// EnsureTrafficBaseline snapshots the billing cycle's starting traffic
+// counters, once per agent per cycle. Seeded from the earliest metric at or
+// after the boundary so pre-upgrade data still in the retention window is
+// preserved; a no-op until such a metric exists (retried on the next report).
+func (s *Store) EnsureTrafficBaseline(agentID, boundary int64) error {
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO traffic_baselines(agent_id, boundary, total_sent, total_recv, created_at)
+		 SELECT ?, ?, total_sent, total_recv, ?
+		 FROM metrics WHERE agent_id = ? AND created_at >= ?
+		 ORDER BY created_at LIMIT 1`,
+		agentID, boundary, s.now().Unix(), agentID, boundary,
+	)
+	return err
+}
+
+func monthlyBoundary(day int, now time.Time) time.Time {
 	y, m, _ := now.Date()
-	loc := now.Location()
-
-	boundary := time.Date(y, m, day, 0, 0, 0, 0, loc)
-	if boundary.Month() != m {
-		boundary = time.Date(y, m+1, 0, 0, 0, 0, 0, loc)
-	}
-
+	boundary := clampedMonthDay(y, m, day, now.Location())
 	if now.Before(boundary) {
-		boundary = boundary.AddDate(0, -1, 0)
-		y2, m2, _ := boundary.Date()
-		boundary = time.Date(y2, m2, day, 0, 0, 0, 0, loc)
-		if boundary.Month() != m2 {
-			boundary = time.Date(y2, m2+1, 0, 0, 0, 0, 0, loc)
-		}
+		// time.Date normalizes month 0 to December of the previous year.
+		boundary = clampedMonthDay(y, m-1, day, now.Location())
 	}
-
 	return boundary
+}
+
+// clampedMonthDay returns midnight of the given day in y/m, clamped to the
+// month's last day (reset day 31 in February yields Feb 28/29, not a
+// normalized date in March).
+func clampedMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time {
+	if last := time.Date(y, m+1, 0, 0, 0, 0, 0, loc).Day(); day > last {
+		day = last
+	}
+	return time.Date(y, m, day, 0, 0, 0, 0, loc)
 }
 
 func calcNextReset(expiresAtUnix int64, period string) (int, string) {
@@ -768,6 +798,9 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 	if _, err := tx.Exec("DELETE FROM agents WHERE id = ?", id); err != nil {
 		return err
 	}
+	if _, err := tx.Exec("DELETE FROM traffic_baselines WHERE agent_id = ?", id); err != nil {
+		return err
+	}
 	if hostname != "" {
 		if _, err := tx.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname); err != nil {
 			return err
@@ -777,7 +810,7 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 }
 
 func (s *Store) PurgeOldData() {
-	cutoff := time.Now().Add(-7 * 24 * time.Hour).Unix()
+	cutoff := s.now().Add(-7 * 24 * time.Hour).Unix()
 	if res, err := s.db.Exec("DELETE FROM metrics WHERE created_at < ?", cutoff); err != nil {
 		log.Printf("purge metrics: %v", err)
 	} else if n, _ := res.RowsAffected(); n > 0 {
@@ -787,6 +820,11 @@ func (s *Store) PurgeOldData() {
 		log.Printf("purge tcpping: %v", err)
 	} else if n, _ := res.RowsAffected(); n > 0 {
 		log.Printf("purged %d old tcpping rows", n)
+	}
+	// Keep the current and previous cycle's baselines (62d covers both).
+	baselineCutoff := s.now().Add(-62 * 24 * time.Hour).Unix()
+	if _, err := s.db.Exec("DELETE FROM traffic_baselines WHERE boundary < ?", baselineCutoff); err != nil {
+		log.Printf("purge traffic baselines: %v", err)
 	}
 }
 
