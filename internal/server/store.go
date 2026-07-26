@@ -18,6 +18,11 @@ var (
 	ErrHostnameTaken     = errors.New("hostname already bound to another token")
 )
 
+const (
+	rawRetention    = 7 * 24 * time.Hour  // 30s-granularity metrics/tcpping rows
+	hourlyRetention = 90 * 24 * time.Hour // hourly rollups backing the 30d view
+)
+
 type Store struct {
 	db   *sql.DB
 	path string
@@ -134,6 +139,29 @@ func (s *Store) migrate() error {
 			total_recv INTEGER NOT NULL,
 			created_at INTEGER NOT NULL,
 			PRIMARY KEY (agent_id, boundary)
+		)`,
+		`CREATE TABLE IF NOT EXISTS metrics_hourly (
+			agent_id INTEGER NOT NULL,
+			hour_start INTEGER NOT NULL,
+			cpu_avg REAL, cpu_peak REAL,
+			memory_total INTEGER, memory_used INTEGER, memory_peak_pct REAL,
+			disk_total INTEGER, disk_used INTEGER,
+			net_up_avg REAL, net_up_peak REAL,
+			net_down_avg REAL, net_down_peak REAL,
+			total_sent INTEGER, total_recv INTEGER,
+			load1 REAL, load5 REAL, load15 REAL,
+			uptime INTEGER,
+			sample_count INTEGER NOT NULL,
+			PRIMARY KEY (agent_id, hour_start)
+		)`,
+		`CREATE TABLE IF NOT EXISTS tcpping_hourly (
+			agent_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			hour_start INTEGER NOT NULL,
+			latency_avg REAL, latency_peak REAL,
+			sample_count INTEGER NOT NULL,
+			success_count INTEGER NOT NULL,
+			PRIMARY KEY (agent_id, name, hour_start)
 		)`,
 	}
 	for _, q := range queries {
@@ -637,6 +665,69 @@ func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds 
 	return metrics, rows.Err()
 }
 
+// GetMetricsHourly serves windows beyond raw retention from metrics_hourly,
+// in the same avg+peak row shape as getMetricsAggregated. At 1h granularity a
+// 30d window is at most 720 rows — no query-time aggregation needed.
+func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, error) {
+	rows, err := s.db.Query(
+		`SELECT 0, agent_id, COALESCE(cpu_avg, 0), COALESCE(memory_total, 0), COALESCE(memory_used, 0),
+			COALESCE(disk_total, 0), COALESCE(disk_used, 0), COALESCE(net_up_avg, 0), COALESCE(net_down_avg, 0),
+			COALESCE(total_sent, 0), COALESCE(total_recv, 0), COALESCE(load1, 0), COALESCE(load5, 0),
+			COALESCE(load15, 0), COALESCE(uptime, 0), hour_start,
+			COALESCE(cpu_peak, 0), COALESCE(memory_peak_pct, 0), COALESCE(net_up_peak, 0), COALESCE(net_down_peak, 0)
+		 FROM metrics_hourly WHERE agent_id = ? AND hour_start >= ? AND (? = 0 OR hour_start < ?)
+		 ORDER BY hour_start`,
+		agentID, since, until, until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var metrics []MetricRow
+	for rows.Next() {
+		var m MetricRow
+		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
+			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
+			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt,
+			&m.CPUPeak, &m.MemoryPeakPct, &m.NetworkUpPeak, &m.NetworkDownPeak); err != nil {
+			return nil, err
+		}
+		metrics = append(metrics, m)
+	}
+	return metrics, rows.Err()
+}
+
+// GetTCPingHourly mirrors GetMetricsHourly for TCPing lines. Target is not
+// kept in the rollup; the dashboard keys series by name only.
+func (s *Store) GetTCPingHourly(agentID, since, until int64) ([]TCPingRow, error) {
+	rows, err := s.db.Query(
+		`SELECT 0, agent_id, name, '', COALESCE(latency_avg, 0),
+			CASE WHEN success_count > 0 THEN 1 ELSE 0 END,
+			sample_count, success_count, hour_start, COALESCE(latency_peak, 0)
+		 FROM tcpping_hourly WHERE agent_id = ? AND hour_start >= ? AND (? = 0 OR hour_start < ?)
+		 ORDER BY hour_start, name`,
+		agentID, since, until, until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []TCPingRow
+	for rows.Next() {
+		var t TCPingRow
+		var success int
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success,
+			&t.SampleCount, &t.SuccessCount, &t.CreatedAt, &t.LatencyPeak); err != nil {
+			return nil, err
+		}
+		t.Success = success == 1
+		results = append(results, t)
+	}
+	return results, rows.Err()
+}
+
 func (s *Store) GetTCPingResults(agentID int64, since int64) ([]TCPingRow, error) {
 	return s.GetTCPingResultsSampled(agentID, since, 0)
 }
@@ -934,8 +1025,50 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 	return nil
 }
 
+// rollUpHourly re-aggregates every hour still covered by raw retention into
+// the hourly tables. Recomputing the whole raw window each pass needs no
+// watermark bookkeeping and self-heals missed runs: an hour's row stops
+// changing only once its raw rows age out, days after it was last rewritten.
+func (s *Store) rollUpHourly() {
+	cutoff := s.now().Add(-rawRetention).Unix()
+	if _, err := s.db.Exec(
+		`INSERT OR REPLACE INTO metrics_hourly(
+			agent_id, hour_start, cpu_avg, cpu_peak,
+			memory_total, memory_used, memory_peak_pct,
+			disk_total, disk_used,
+			net_up_avg, net_up_peak, net_down_avg, net_down_peak,
+			total_sent, total_recv, load1, load5, load15, uptime, sample_count)
+		 SELECT agent_id, (created_at/3600)*3600, AVG(cpu_usage), MAX(cpu_usage),
+			CAST(ROUND(AVG(memory_total)) AS INTEGER), CAST(ROUND(AVG(memory_used)) AS INTEGER),
+			MAX(CASE WHEN memory_total > 0 THEN memory_used * 100.0 / memory_total ELSE 0 END),
+			CAST(ROUND(AVG(disk_total)) AS INTEGER), CAST(ROUND(AVG(disk_used)) AS INTEGER),
+			AVG(network_up), MAX(network_up), AVG(network_down), MAX(network_down),
+			MAX(total_sent), MAX(total_recv), AVG(load1), AVG(load5), AVG(load15),
+			MAX(uptime), COUNT(*)
+		 FROM metrics WHERE created_at >= ?
+		 GROUP BY agent_id, created_at/3600`, cutoff,
+	); err != nil {
+		log.Printf("rollup metrics: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT OR REPLACE INTO tcpping_hourly(
+			agent_id, name, hour_start, latency_avg, latency_peak, sample_count, success_count)
+		 SELECT agent_id, name, (created_at/3600)*3600,
+			COALESCE(AVG(CASE WHEN success = 1 THEN latency_ms END), 0),
+			MAX(latency_ms), COUNT(*), SUM(success)
+		 FROM tcpping_results WHERE created_at >= ?
+		 GROUP BY agent_id, name, created_at/3600`, cutoff,
+	); err != nil {
+		log.Printf("rollup tcpping: %v", err)
+	}
+}
+
 func (s *Store) PurgeOldData() {
-	cutoff := s.now().Add(-7 * 24 * time.Hour).Unix()
+	// Roll up strictly before deleting so raw rows are always aggregated
+	// into the hourly tables before they age out.
+	s.rollUpHourly()
+
+	cutoff := s.now().Add(-rawRetention).Unix()
 	if res, err := s.db.Exec("DELETE FROM metrics WHERE created_at < ?", cutoff); err != nil {
 		log.Printf("purge metrics: %v", err)
 	} else if n, _ := res.RowsAffected(); n > 0 {
@@ -945,6 +1078,13 @@ func (s *Store) PurgeOldData() {
 		log.Printf("purge tcpping: %v", err)
 	} else if n, _ := res.RowsAffected(); n > 0 {
 		log.Printf("purged %d old tcpping rows", n)
+	}
+	hourlyCutoff := s.now().Add(-hourlyRetention).Unix()
+	if _, err := s.db.Exec("DELETE FROM metrics_hourly WHERE hour_start < ?", hourlyCutoff); err != nil {
+		log.Printf("purge metrics_hourly: %v", err)
+	}
+	if _, err := s.db.Exec("DELETE FROM tcpping_hourly WHERE hour_start < ?", hourlyCutoff); err != nil {
+		log.Printf("purge tcpping_hourly: %v", err)
 	}
 	// Keep the current and previous cycle's baselines (62d covers both).
 	baselineCutoff := s.now().Add(-62 * 24 * time.Hour).Unix()

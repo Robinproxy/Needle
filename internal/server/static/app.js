@@ -515,6 +515,7 @@ function renderDetailContent(id) {
           + '<div class="theme-btn-group detail-range-group">'
             + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
             + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
+            + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
           + '</div>'
         + '</div>'
         + '<div class="tcpping-controls">'

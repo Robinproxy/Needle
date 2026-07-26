@@ -473,6 +473,7 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	since := now.Add(-1 * time.Hour).Unix()
 	until := int64(0)
 	bucketSeconds := int64(0)
+	useHourly := false
 	sinceStr, untilStr := r.URL.Query().Get("since"), r.URL.Query().Get("until")
 	if untilStr != "" {
 		var parseErr error
@@ -493,19 +494,29 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
 		if d, err := time.ParseDuration(rangeStr); err == nil {
-			// Metrics are purged after 7 days; longer ranges would only pad
-			// the window with rows that no longer exist.
-			if d > 168*time.Hour {
-				d = 168 * time.Hour
+			// 30d is the longest view, backed by hourly rollups (90d retention).
+			if d > 720*time.Hour {
+				d = 720 * time.Hour
 			}
 			since = now.Add(-d).Unix()
-			bucketSeconds = historyBucketSeconds(d)
+			if d > 168*time.Hour {
+				// Beyond raw retention: read the hourly tables directly.
+				useHourly = true
+			} else {
+				bucketSeconds = historyBucketSeconds(d)
+			}
 		}
 	}
 
 	switch parts[1] {
 	case "metrics":
-		metrics, err := h.store.GetMetricsWindowSampled(agentID, since, until, bucketSeconds)
+		var metrics []MetricRow
+		var err error
+		if useHourly {
+			metrics, err = h.store.GetMetricsHourly(agentID, since, until)
+		} else {
+			metrics, err = h.store.GetMetricsWindowSampled(agentID, since, until, bucketSeconds)
+		}
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -522,7 +533,13 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(metrics)
 
 	case "tcpping":
-		results, err := h.store.GetTCPingResultsWindowSampled(agentID, since, until, bucketSeconds)
+		var results []TCPingRow
+		var err error
+		if useHourly {
+			results, err = h.store.GetTCPingHourly(agentID, since, until)
+		} else {
+			results, err = h.store.GetTCPingResultsWindowSampled(agentID, since, until, bucketSeconds)
+		}
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
