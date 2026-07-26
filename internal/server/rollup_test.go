@@ -187,4 +187,19 @@ func TestHandleAgentDetailHourlyRange(t *testing.T) {
 	if len(recent) != 1 || recent[0].CPUUsage != 10 {
 		t.Fatalf("recent window rows = %+v, want the raw report row (cpu 10)", recent)
 	}
+
+	// A recent week-wide window is served bucketed from raw data.
+	weekStart := now.Add(-6 * 24 * time.Hour).Unix()
+	week := get("/api/agents/" + strconv.FormatInt(agentID, 10) + "/metrics?since=" + strconv.FormatInt(weekStart, 10) + "&until=" + strconv.FormatInt(now.Add(time.Minute).Unix(), 10))
+	if len(week) != 1 || week[0].CPUUsage != 10 {
+		t.Fatalf("week window rows = %+v, want one bucketed row (cpu 10)", week)
+	}
+
+	// Windows beyond 8 days are rejected.
+	tooWide := httptest.NewRecorder()
+	h.handleAgentDetail(tooWide, httptest.NewRequest(http.MethodGet,
+		"/api/agents/"+strconv.FormatInt(agentID, 10)+"/metrics?since="+strconv.FormatInt(now.Add(-9*24*time.Hour).Unix(), 10)+"&until="+strconv.FormatInt(now.Unix(), 10), nil))
+	if tooWide.Code != http.StatusBadRequest {
+		t.Fatalf("9-day window status = %d, want %d", tooWide.Code, http.StatusBadRequest)
+	}
 }

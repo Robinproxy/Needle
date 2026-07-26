@@ -474,15 +474,11 @@ header {
 .tcpping-day-nav button:hover, .tcpping-day-nav button:focus-visible {
   color: hsl(var(--foreground)); background: hsl(var(--accent)); outline: none;
 }
-/* 30d view: one cell per day, wraps on narrow screens */
-.tcpping-day-nav.compact {
-  justify-content: flex-start; flex-wrap: wrap; gap: 1px; padding-right: 8px;
+.tcpping-day-nav button.active {
+  color: hsl(var(--foreground)); background: hsl(var(--accent));
 }
-.tcpping-day-nav.compact button {
-  padding: 2px 0; min-width: 19px; text-align: center; font-size: 9px;
-}
-.tcpping-day-nav.compact button.has-alert::before {
-  width: 4px; height: 4px; margin-right: 2px;
+.tcpping-day-nav button.nav-back {
+  font-size: 14px; line-height: 1; padding: 1px 8px 4px;
 }
 .tcpping-stats {
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);

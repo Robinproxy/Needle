@@ -9,6 +9,7 @@ let currentTcppingRange = '24h';
 let currentTcppingId = null;
 let currentMetricsRange = '24h';
 let currentHistoryDay = null;
+let currentHistoryWeek = null;
 let detailDayAlerts = new Map();
 let gridCols = 4;
 let refreshInFlight = false;
@@ -452,6 +453,7 @@ function toggleExpand(id) {
   } else {
     destroyDetailCharts();
     currentHistoryDay = null;
+    currentHistoryWeek = null;
     expandedId = id;
     renderAll(true);
   }
@@ -515,7 +517,7 @@ function renderDetailContent(id) {
           + '<div class="theme-btn-group detail-range-group">'
             + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
             + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
-            + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
+            + '<button type="button" class="theme-btn' + (range === '672h' || currentHistoryWeek ? ' active' : '') + '" data-range="672h" onclick="switchDetailRange(' + id + ',\'672h\')">28d</button>'
           + '</div>'
         + '</div>'
         + '<div class="tcpping-controls">'
@@ -548,11 +550,14 @@ function detailDataURL(id, kind, range) {
   if (currentHistoryDay) {
     return '/api/agents/' + id + '/' + kind + '?since=' + currentHistoryDay.start + '&until=' + currentHistoryDay.end;
   }
+  if (currentHistoryWeek) {
+    return '/api/agents/' + id + '/' + kind + '?since=' + currentHistoryWeek.start + '&until=' + currentHistoryWeek.end;
+  }
   return '/api/agents/' + id + '/' + kind + '?range=' + range;
 }
 
 function openHistoricalDay(id, ts) {
-  if (!overviewDays(currentMetricsRange) && !overviewDays(currentTcppingRange)) return;
+  if (!overviewDays(currentMetricsRange) && !overviewDays(currentTcppingRange) && !currentHistoryWeek) return;
   const d = new Date(ts);
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
@@ -571,8 +576,48 @@ function openHistoricalDay(id, ts) {
     dayBtn.classList.add('active');
   }
   document.querySelector('[data-range="168h"]')?.classList.remove('active');
-  document.querySelector('[data-range="720h"]')?.classList.remove('active');
+  if (!currentHistoryWeek) {
+    document.querySelector('[data-range="672h"]')?.classList.remove('active');
+  }
   loadDetailData(id, 'day');
+}
+
+// openHistoricalWeek drills from the 28d overview into one week (7d window).
+function openHistoricalWeek(id, ts) {
+  if (currentMetricsRange !== '672h' && !currentHistoryWeek && !currentHistoryDay) return;
+  currentHistoryDay = null;
+  currentHistoryWeek = {
+    start: Math.floor(ts / 1000),
+    end: Math.floor(Math.min(ts + 7 * 86400000, Date.now()) / 1000),
+  };
+  currentMetricsRange = 'week';
+  currentTcppingRange = 'week';
+  const dayBtn = document.getElementById('detail-day-btn');
+  if (dayBtn) { dayBtn.textContent = '1d'; dayBtn.title = 'Last 24 hours'; dayBtn.classList.remove('active'); }
+  loadDetailData(id, 'week');
+}
+
+// closeHistoricalLevel steps back one drill level: day -> week -> 28d.
+function closeHistoricalLevel(id) {
+  const dayBtn = document.getElementById('detail-day-btn');
+  if (currentHistoryDay) {
+    currentHistoryDay = null;
+    if (dayBtn) { dayBtn.textContent = '1d'; dayBtn.title = 'Last 24 hours'; dayBtn.classList.remove('active'); }
+    if (currentHistoryWeek) {
+      currentMetricsRange = 'week';
+      currentTcppingRange = 'week';
+      loadDetailData(id, 'week');
+      return;
+    }
+    switchDetailRange(id, '168h');
+    return;
+  }
+  if (currentHistoryWeek) {
+    currentHistoryWeek = null;
+    currentMetricsRange = '672h';
+    currentTcppingRange = '672h';
+    loadDetailData(id, '672h');
+  }
 }
 
 function loadDetailData(id, range) {
@@ -590,11 +635,11 @@ function localDayKey(ts) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// Overview ranges ('168h' and '720h') get per-day anomaly detection and the
-// clickable day navigation below the TCPing chart.
+// Overview ranges ('168h' and '672h') get per-day anomaly detection and the
+// clickable drill-down navigation below the TCPing chart.
 function overviewDays(range) {
   if (range === '168h') return 7;
-  if (range === '720h') return 30;
+  if (range === '672h') return 28;
   return 0;
 }
 
@@ -712,8 +757,9 @@ function renderSparkline(elemId, data, color, isPercent) {
 
 function switchDetailRange(id, range) {
   id = +id;
-  if (!currentHistoryDay && currentMetricsRange === range && currentTcppingRange === range) return;
+  if (!currentHistoryDay && !currentHistoryWeek && currentMetricsRange === range && currentTcppingRange === range) return;
   currentHistoryDay = null;
+  currentHistoryWeek = null;
   currentMetricsRange = range;
   currentTcppingRange = range;
   const rangeBtns = document.querySelectorAll('#tcpping-section-' + id + ' .detail-range-group .theme-btn');
@@ -785,29 +831,7 @@ function renderTCPingChart(id, results) {
       recordDayAlert(p[0], message);
     });
   }
-  const dayNav = document.getElementById('tcpping-days-' + id);
-  if (dayNav) {
-    if (overview) {
-      const compact = overview > 7;
-      const days = new Map();
-      results.forEach(r => {
-        const ts = r.created_at * 1000;
-        const key = localDayKey(ts);
-        if (!days.has(key)) days.set(key, ts);
-      });
-      dayNav.innerHTML = [...days.values()].sort((a, b) => a - b).slice(-overview).map(ts => {
-        const alerts = detailDayAlerts.get(localDayKey(ts)) || [];
-        const title = [localDayKey(ts)].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
-        const label = compact ? new Date(ts).getDate() : formatHistoryDay(ts);
-        return '<button type="button" class="' + (alerts.length ? 'has-alert' : '') + '" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">' + label + '</button>';
-      }).join('');
-      dayNav.classList.toggle('compact', compact);
-      dayNav.hidden = false;
-    } else {
-      dayNav.innerHTML = '';
-      dayNav.hidden = true;
-    }
-  }
+  renderDayNav(id, results);
   chart.setOption({
     tooltip: {
       trigger: 'axis', valueFormatter: v => v ? v.toFixed(1) + ' ms' : 'timeout',
@@ -866,6 +890,64 @@ function tcppingStatsHTML(id, results, names) {
       + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '">' + (sampleCount > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
     + '</div>';
   }).join('');
+}
+
+// renderDayNav draws the drill-down row below the TCPing chart:
+// 7d view -> its 7 days; 28d view -> four week buttons; inside a week (or a
+// day within it) -> a back button plus that week's days. Anomaly dots come
+// from detailDayAlerts, which is computed at the overview levels and kept
+// while drilling.
+function renderDayNav(id, results) {
+  const nav = document.getElementById('tcpping-days-' + id);
+  if (!nav) return;
+
+  const dayButton = (ts) => {
+    const key = localDayKey(ts);
+    const alerts = detailDayAlerts.get(key) || [];
+    const active = currentHistoryDay && localDayKey(currentHistoryDay.start * 1000) === key;
+    const title = [key].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
+    return '<button type="button" class="' + (alerts.length ? 'has-alert' : '') + (active ? ' active' : '')
+      + '" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">'
+      + formatHistoryDay(ts) + '</button>';
+  };
+
+  let html = '';
+  if (currentHistoryWeek) {
+    html += '<button type="button" class="nav-back" onclick="closeHistoricalLevel(' + Number(id) + ')" aria-label="Back to 28 days" title="Back">‹</button>';
+    for (let i = 0; i < 7; i++) {
+      const ts = currentHistoryWeek.start * 1000 + i * 86400000;
+      if (ts > Date.now()) break;
+      html += dayButton(ts);
+    }
+  } else if (currentTcppingRange === '672h') {
+    const n = new Date();
+    const todayStart = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+    for (let w = 3; w >= 0; w--) {
+      const start = todayStart - (7 * w + 6) * 86400000;
+      let alerts = [];
+      for (let i = 0; i < 7; i++) {
+        alerts = alerts.concat(detailDayAlerts.get(localDayKey(start + i * 86400000)) || []);
+      }
+      const endLabel = Math.min(start + 6 * 86400000, todayStart);
+      const label = formatHistoryDay(start) + '–' + formatHistoryDay(endLabel);
+      const title = [label].concat(alerts.length ? alerts.slice(0, 8) : ['No detected anomalies'])
+        .concat(alerts.length > 8 ? ['…'] : []).join('\n');
+      html += '<button type="button" class="' + (alerts.length ? 'has-alert' : '')
+        + '" onclick="openHistoricalWeek(' + Number(id) + ',' + start + ')" title="' + escapeAttr(title) + '">'
+        + label + '</button>';
+    }
+  } else if (currentTcppingRange === '168h') {
+    const days = new Map();
+    (results || []).forEach(r => {
+      const ts = r.created_at * 1000;
+      const key = localDayKey(ts);
+      if (!days.has(key)) days.set(key, ts);
+    });
+    html = [...days.values()].sort((a, b) => a - b).slice(-7).map(dayButton).join('');
+  }
+
+  nav.innerHTML = html;
+  nav.hidden = html === '';
 }
 
 function saveTcppingSelections(id) {
@@ -1106,7 +1188,7 @@ async function softRefresh() {
 }
 
 function updateDetailCharts(id) {
-  if (currentHistoryDay) return;
+  if (currentHistoryDay || currentHistoryWeek) return;
   const metricsRange = currentMetricsRange || '24h';
   const tcppingRange = currentTcppingRange || '24h';
   fetch('/api/agents/' + id + '/metrics?range=' + metricsRange).then(r => r.json()).then(metrics => {

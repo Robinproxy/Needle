@@ -481,14 +481,22 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		if parseErr == nil {
 			until, parseErr = strconv.ParseInt(untilStr, 10, 64)
 		}
-		if parseErr != nil || until <= since || until-since > int64((25*time.Hour)/time.Second) || until > now.Add(5*time.Minute).Unix() {
+		// Windows up to a week: day drill-down (~24h) and week drill-down (~7d).
+		if parseErr != nil || until <= since || until-since > int64((8*24*time.Hour)/time.Second) || until > now.Add(5*time.Minute).Unix() {
 			http.Error(w, "invalid time window", http.StatusBadRequest)
 			return
 		}
-		// Day windows starting before raw retention read the hourly rollups;
-		// this also gives straddling days a complete (if coarser) picture.
+		// Windows starting before raw retention read the hourly rollups; this
+		// also gives straddling windows a complete (if coarser) picture.
 		if since < now.Add(-rawRetention).Unix() {
 			useHourly = true
+		} else if dur := until - since; dur > int64((25*time.Hour)/time.Second) {
+			// Day windows stay raw; longer (week) windows aim for ~720
+			// points, in whole minutes.
+			bucketSeconds = (dur/720 + 59) / 60 * 60
+			if bucketSeconds < 60 {
+				bucketSeconds = 60
+			}
 		}
 	} else if sinceStr != "" {
 		var parseErr error
