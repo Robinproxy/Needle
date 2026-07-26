@@ -23,6 +23,13 @@ type Store struct {
 	now func() time.Time
 }
 
+// execer is the shared subset of *sql.DB and *sql.Tx, so single-statement
+// writes can run standalone or inside a report transaction.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func NewStore(path string) (*Store, error) {
 	return newStore(path, true)
 }
@@ -373,7 +380,11 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 }
 
 func (s *Store) UpsertAgent(hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
-	_, err := s.db.Exec(
+	return upsertAgent(s.db, hostname, token, region, expiresAt, billingPeriod)
+}
+
+func upsertAgent(x execer, hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
+	_, err := x.Exec(
 		`INSERT INTO agents(hostname, token, region, expires_at, billing_period) VALUES(?, ?, ?, ?, ?)
 		 ON CONFLICT(hostname) DO UPDATE SET
 		   token = excluded.token,
@@ -386,17 +397,21 @@ func (s *Store) UpsertAgent(hostname, token, region string, expiresAt *int64, bi
 		return 0, err
 	}
 	var id int64
-	if err := s.db.QueryRow("SELECT id FROM agents WHERE hostname = ?", hostname).Scan(&id); err != nil {
+	if err := x.QueryRow("SELECT id FROM agents WHERE hostname = ?", hostname).Scan(&id); err != nil {
 		return 0, err
 	}
 	return id, nil
 }
 
 func (s *Store) InsertMetric(m *MetricRow, createdAt int64) error {
+	return insertMetric(s.db, m, createdAt)
+}
+
+func insertMetric(x execer, m *MetricRow, createdAt int64) error {
 	if createdAt <= 0 {
 		createdAt = time.Now().Unix()
 	}
-	_, err := s.db.Exec(
+	_, err := x.Exec(
 		`INSERT INTO metrics(agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
 			total_sent, total_recv, load1, load5, load15, uptime, created_at)
@@ -409,6 +424,10 @@ func (s *Store) InsertMetric(m *MetricRow, createdAt int64) error {
 }
 
 func (s *Store) InsertTCPing(t *TCPingRow, createdAt int64) error {
+	return insertTCPing(s.db, t, createdAt)
+}
+
+func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 	if createdAt <= 0 {
 		createdAt = time.Now().Unix()
 	}
@@ -416,12 +435,63 @@ func (s *Store) InsertTCPing(t *TCPingRow, createdAt int64) error {
 	if t.Success {
 		suc = 1
 	}
-	_, err := s.db.Exec(
+	_, err := x.Exec(
 		`INSERT INTO tcpping_results(agent_id, name, target, latency_ms, success, created_at)
 		 VALUES(?, ?, ?, ?, ?, ?)`,
 		t.AgentID, t.Name, t.Target, t.LatencyMs, suc, createdAt,
 	)
 	return err
+}
+
+// ReportWrite is one agent report; SaveReport persists it atomically.
+type ReportWrite struct {
+	Hostname         string
+	Token            string
+	Region           string
+	ExpiresAt        *int64
+	BillingPeriod    string
+	Metric           *MetricRow  // nil when the report carries no metric
+	TCPings          []TCPingRow // AgentID is filled in by SaveReport
+	CreatedAt        int64
+	BaselineBoundary *int64 // billing-cycle boundary to snapshot, nil to skip
+}
+
+// SaveReport writes the agent upsert, metric, traffic baseline, and TCPing
+// rows in one transaction: a report either lands completely or not at all,
+// and the WAL commits once instead of once per row.
+func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	agentID, err := upsertAgent(tx, r.Hostname, r.Token, r.Region, r.ExpiresAt, r.BillingPeriod)
+	if err != nil {
+		return 0, err
+	}
+	if r.Metric != nil {
+		r.Metric.AgentID = agentID
+		if err := insertMetric(tx, r.Metric, r.CreatedAt); err != nil {
+			return 0, err
+		}
+	}
+	// After the metric insert so the baseline seed can see this report.
+	if r.BaselineBoundary != nil {
+		if err := ensureTrafficBaseline(tx, s.now().Unix(), agentID, *r.BaselineBoundary); err != nil {
+			return 0, err
+		}
+	}
+	for i := range r.TCPings {
+		r.TCPings[i].AgentID = agentID
+		if err := insertTCPing(tx, &r.TCPings[i], r.CreatedAt); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return agentID, nil
 }
 
 func (s *Store) GetAgents() ([]AgentRow, error) {
@@ -700,12 +770,16 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 // after the boundary so pre-upgrade data still in the retention window is
 // preserved; a no-op until such a metric exists (retried on the next report).
 func (s *Store) EnsureTrafficBaseline(agentID, boundary int64) error {
-	_, err := s.db.Exec(
+	return ensureTrafficBaseline(s.db, s.now().Unix(), agentID, boundary)
+}
+
+func ensureTrafficBaseline(x execer, stampedAt, agentID, boundary int64) error {
+	_, err := x.Exec(
 		`INSERT OR IGNORE INTO traffic_baselines(agent_id, boundary, total_sent, total_recv, created_at)
 		 SELECT ?, ?, total_sent, total_recv, ?
 		 FROM metrics WHERE agent_id = ? AND created_at >= ?
 		 ORDER BY created_at LIMIT 1`,
-		agentID, boundary, s.now().Unix(), agentID, boundary,
+		agentID, boundary, stampedAt, agentID, boundary,
 	)
 	return err
 }

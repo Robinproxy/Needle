@@ -152,6 +152,33 @@ func TestHandleReportCreatesTrafficBaseline(t *testing.T) {
 	}
 }
 
+func TestHandleReportIsAtomic(t *testing.T) {
+	h, store := newTestHandler(t)
+	if err := store.AllowToken("test-token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		`CREATE TRIGGER fail_ping BEFORE INSERT ON tcpping_results BEGIN SELECT RAISE(ABORT, 'forced failure'); END`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"hostname":"node-1","cpu":{"percent":10},"tcpping":[{"name":"CMv4","target":"example.com:80","latency_ms":5,"success":true}]}`
+	if w := sendReport(t, h, "Bearer test-token", body); w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	for _, table := range []string{"agents", "metrics", "tcpping_results"} {
+		var count int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows after failed report = %d, want 0 (partial write)", table, count)
+		}
+	}
+}
+
 func TestHandleReportRejectsInvalidValuesBeforeBinding(t *testing.T) {
 	h, store := newTestHandler(t)
 	if err := store.AllowToken("test-token"); err != nil {

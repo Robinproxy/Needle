@@ -274,20 +274,21 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	region := sanitizeRegion(req.Region)
-	agentID, err := h.store.UpsertAgent(req.Hostname, token, region, req.ExpiresAt, req.BillingPeriod)
-	if err != nil {
-		log.Printf("report: upsert agent %q: %v", req.Hostname, err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
 	var createdAt int64
 	if req.CreatedAt != nil {
 		createdAt = *req.CreatedAt
 	}
 	if createdAt < now.Add(-30*24*time.Hour).Unix() || createdAt > now.Add(5*time.Minute).Unix() {
 		createdAt = now.Unix()
+	}
+
+	write := &ReportWrite{
+		Hostname:      req.Hostname,
+		Token:         token,
+		Region:        sanitizeRegion(req.Region),
+		ExpiresAt:     req.ExpiresAt,
+		BillingPeriod: req.BillingPeriod,
+		CreatedAt:     createdAt,
 	}
 
 	if req.CPU != nil {
@@ -313,9 +314,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			load5 = req.Load.Load5
 			load15 = req.Load.Load15
 		}
-
-		if err := h.store.InsertMetric(&MetricRow{
-			AgentID:     agentID,
+		write.Metric = &MetricRow{
 			CPUUsage:    req.CPU.Percent,
 			MemoryTotal: memTotal,
 			MemoryUsed:  memUsed,
@@ -329,21 +328,13 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			Load5:       load5,
 			Load15:      load15,
 			Uptime:      int64(req.Uptime),
-		}, createdAt); err != nil {
-			log.Printf("report: insert metric for agent %q: %v", req.Hostname, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
 		}
 	}
 
-	// Snapshot the billing cycle's starting counters after the metric insert
-	// so the seed query can see this report. Derived data: log-and-continue.
 	if req.ExpiresAt != nil && req.Network != nil {
 		resetDay := time.Unix(*req.ExpiresAt, 0).Day()
-		boundary := monthlyBoundary(resetDay, now)
-		if err := h.store.EnsureTrafficBaseline(agentID, boundary.Unix()); err != nil {
-			log.Printf("report: ensure traffic baseline for %q: %v", req.Hostname, err)
-		}
+		boundary := monthlyBoundary(resetDay, now).Unix()
+		write.BaselineBoundary = &boundary
 	}
 
 	for _, t := range req.TCPing {
@@ -351,17 +342,18 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		if name == "" {
 			continue
 		}
-		if err := h.store.InsertTCPing(&TCPingRow{
-			AgentID:   agentID,
+		write.TCPings = append(write.TCPings, TCPingRow{
 			Name:      name,
 			Target:    sanitizeTCPingTarget(t.Target),
 			LatencyMs: t.LatencyMs,
 			Success:   t.Success,
-		}, createdAt); err != nil {
-			log.Printf("report: insert tcpping for agent %q: %v", req.Hostname, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
+		})
+	}
+
+	if _, err := h.store.SaveReport(write); err != nil {
+		log.Printf("report: save for agent %q: %v", req.Hostname, err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
