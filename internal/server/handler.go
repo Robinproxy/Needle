@@ -498,13 +498,6 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 				bucketSeconds = 60
 			}
 		}
-	} else if sinceStr != "" {
-		var parseErr error
-		since, parseErr = strconv.ParseInt(sinceStr, 10, 64)
-		if parseErr != nil || since > now.Add(5*time.Minute).Unix() {
-			http.Error(w, "invalid since", http.StatusBadRequest)
-			return
-		}
 	} else if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
 		if d, err := time.ParseDuration(rangeStr); err == nil {
 			// 30d is the longest view, backed by hourly rollups (90d retention).

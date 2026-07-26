@@ -601,14 +601,6 @@ func (s *Store) GetLatestMetric(agentID int64) (*MetricRow, error) {
 	return &m, nil
 }
 
-func (s *Store) GetMetrics(agentID int64, since int64) ([]MetricRow, error) {
-	return s.GetMetricsSampled(agentID, since, 0)
-}
-
-func (s *Store) GetMetricsSampled(agentID int64, since, bucketSeconds int64) ([]MetricRow, error) {
-	return s.GetMetricsWindowSampled(agentID, since, 0, bucketSeconds)
-}
-
 func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
 	if bucketSeconds > 0 {
 		return s.getMetricsAggregated(agentID, since, until, bucketSeconds)
@@ -733,13 +725,6 @@ func (s *Store) GetTCPingHourly(agentID, since, until int64) ([]TCPingRow, error
 	return results, rows.Err()
 }
 
-func (s *Store) GetTCPingResults(agentID int64, since int64) ([]TCPingRow, error) {
-	return s.GetTCPingResultsSampled(agentID, since, 0)
-}
-
-func (s *Store) GetTCPingResultsSampled(agentID int64, since, bucketSeconds int64) ([]TCPingRow, error) {
-	return s.GetTCPingResultsWindowSampled(agentID, since, 0, bucketSeconds)
-}
 
 func (s *Store) GetTCPingResultsWindowSampled(agentID int64, since, until, bucketSeconds int64) ([]TCPingRow, error) {
 	if bucketSeconds > 0 {
@@ -1020,6 +1005,15 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM traffic_baselines WHERE agent_id = ?", id); err != nil {
+		return err
+	}
+	// Hourly rollups too: agent ids are reused (plain INTEGER PRIMARY KEY),
+	// so leftovers would surface as the previous agent's history on the
+	// next agent that claims the id.
+	if _, err := tx.Exec("DELETE FROM metrics_hourly WHERE agent_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM tcpping_hourly WHERE agent_id = ?", id); err != nil {
 		return err
 	}
 	if hostname != "" {

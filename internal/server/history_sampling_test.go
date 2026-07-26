@@ -40,7 +40,7 @@ func TestGetMetricsSampledAggregatesTimeBuckets(t *testing.T) {
 		}
 	}
 
-	metrics, err := store.GetMetricsSampled(agentID, base, 120)
+	metrics, err := store.GetMetricsWindowSampled(agentID, base, 0, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestGetTCPingResultsSampledPreservesLossCounts(t *testing.T) {
 		}
 	}
 
-	results, err := store.GetTCPingResultsSampled(agentID, base, 120)
+	results, err := store.GetTCPingResultsWindowSampled(agentID, base, 0, 120)
 	if err != nil {
 		t.Fatal(err)
 	}

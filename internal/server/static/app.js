@@ -350,7 +350,6 @@ function renderCard(a, idx, isActive) {
   const downSpeed = m ? formatSpeed(m.network_down) : '—';
   const uptime = m ? formatUptime(m.uptime) : '-';
   const seenTs = lastSeenMs(a);
-  const sess = String(idx + 1).padStart(2, '0');
   const expiryDays = a.expiry_days || 0;
   const expiryDate = a.expiry_date || '';
 
@@ -672,11 +671,6 @@ function renderSparklines(id, metrics) {
   renderSparkline('spark-mem', memData, '#22c55e', true);
   renderSparkline('spark-netin', netInData, '#8b5cf6', false);
   renderSparkline('spark-netout', netOutData, '#f59e0b', false);
-}
-
-function formatSparkXAxis(ts) {
-  const d = new Date(ts);
-  return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
 function renderSparkline(elemId, data, color, isPercent) {
