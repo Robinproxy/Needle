@@ -28,6 +28,7 @@ type Config struct {
 	TLSSkipVerify  bool                     `yaml:"tls_skip_verify"`
 	AllowPlainHTTP bool                     `yaml:"allow_plain_http"`
 	Insecure       *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
+	Interfaces     []string                 `yaml:"interfaces"`
 	TCPing         []collector.TCPingTarget `yaml:"tcpping"`
 }
 
@@ -86,7 +87,20 @@ func main() {
 
 	log.Printf("Needle Agent - server: %s, interval: %ds", serverURL, cfg.Interval)
 
-	netCollector := collector.NewNetworkCollector()
+	var expiresAtUnix *int64
+	if cfg.ExpiresAt != "" {
+		t, err := time.Parse("2006-01-02", cfg.ExpiresAt)
+		if err != nil {
+			log.Printf("WARNING: invalid expires_at %q (expected YYYY-MM-DD); billing period and due date will not be reported", cfg.ExpiresAt)
+		} else {
+			// Anchor at noon UTC so the calendar day survives conversion to
+			// the server's timezone anywhere from UTC-11 to UTC+12.
+			unix := time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, time.UTC).Unix()
+			expiresAtUnix = &unix
+		}
+	}
+
+	netCollector := collector.NewNetworkCollector(cfg.Interfaces)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -139,15 +153,6 @@ func main() {
 			return
 		}
 		tcpping := collector.TCPing(cfg.TCPing)
-
-		var expiresAtUnix *int64
-		if cfg.ExpiresAt != "" {
-			t, err := time.Parse("2006-01-02", cfg.ExpiresAt)
-			if err == nil {
-				unix := t.Unix()
-				expiresAtUnix = &unix
-			}
-		}
 
 		data := &agentpkg.ReportData{
 			Hostname:      hostname,

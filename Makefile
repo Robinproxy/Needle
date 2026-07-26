@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -ldflags "-X needle/internal/server.Version=$(VERSION)"
 
-.PHONY: build-agent build-server build clean release
+.PHONY: build-agent build-server build clean clean-data release
 
 build-agent:
 	go build $(LDFLAGS) -o bin/needle-agent ./cmd/agent
@@ -40,7 +40,11 @@ release:
 	  done
 
 clean:
-	rm -rf bin/ data/ release/
+	rm -rf bin/ release/
+
+# Destroys the local SQLite database. Kept out of `clean` on purpose.
+clean-data:
+	rm -rf data/
 
 run-server:
 	./bin/needle-server -l :8008
