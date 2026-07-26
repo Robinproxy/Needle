@@ -15,8 +15,9 @@ demo
 # Output of go coverage
 *.out
 
-# Dependency directories
-vendor/
+# Dependency directories (Go vendoring at repo root only;
+# internal/server/static/vendor/ holds embedded frontend assets and is tracked)
+/vendor/
 
 # Data directory (SQLite DB)
 data/

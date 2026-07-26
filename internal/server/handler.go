@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -98,8 +100,44 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	if err != nil {
 		log.Fatalf("static files: %v", err)
 	}
-	fileServer := http.FileServer(http.FS(staticFS))
-	mux.Handle("/", fileServer)
+	mux.Handle("/", staticHandler(staticFS))
+}
+
+// staticHandler serves the embedded assets with content-hash ETags: embed.FS
+// carries no modtimes, so without this every dashboard refresh re-downloads
+// every asset. no-cache forces revalidation, keeping clients current across
+// deploys at the cost of a cheap 304 round trip.
+func staticHandler(fsys fs.FS) http.Handler {
+	etags := make(map[string]string)
+	fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		etags[path] = `"` + hex.EncodeToString(sum[:8]) + `"`
+		return nil
+	})
+
+	fileServer := http.FileServer(http.FS(fsys))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		if etag, ok := etags[path]; ok {
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", etag)
+			if strings.Contains(r.Header.Get("If-None-Match"), etag) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func bearerToken(r *http.Request) (string, bool) {

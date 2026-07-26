@@ -152,6 +152,40 @@ func TestHandleReportCreatesTrafficBaseline(t *testing.T) {
 	}
 }
 
+func TestStaticETagRevalidation(t *testing.T) {
+	h, _ := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/app.js", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	etag := w.Header().Get("ETag")
+	if etag == "" || w.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("missing cache headers: etag=%q cache-control=%q", etag, w.Header().Get("Cache-Control"))
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	req.Header.Set("If-None-Match", etag)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("revalidation status = %d, want %d", w.Code, http.StatusNotModified)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("304 response carried a %d-byte body", w.Body.Len())
+	}
+
+	// The index route ("/") must revalidate too.
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusOK || w.Header().Get("ETag") == "" {
+		t.Fatalf("index: status = %d, etag = %q", w.Code, w.Header().Get("ETag"))
+	}
+}
+
 func TestHandleReportIsAtomic(t *testing.T) {
 	h, store := newTestHandler(t)
 	if err := store.AllowToken("test-token"); err != nil {

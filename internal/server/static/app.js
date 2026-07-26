@@ -440,7 +440,8 @@ function relativeTime(ts) {
   const diff = Math.floor((Date.now() - ts) / 1000);
   if (diff < 60) return 'just now';
   if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-  return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
 }
 
 function toggleExpand(id) {
@@ -823,8 +824,15 @@ function renderTCPingChart(id, results) {
   });
   tcppingChart = chart;
 
-  // Render stats rows
-  const statsHtml = names.map((name) => {
+  document.getElementById('tcpping-rows-' + id).innerHTML = tcppingStatsHTML(id, results, names);
+  applyTcppingSelections(id, names);
+}
+
+// Shared renderer for the TCPing stats rows. Latency is weighted by
+// success_count and loss by sample_count so aggregated (7d) and raw (24h)
+// rows use the same math, and every render keeps the a11y attributes.
+function tcppingStatsHTML(id, results, names) {
+  return names.map((name) => {
     const targetResults = results.filter(r => r.name === name);
     const successCount = targetResults.reduce((sum, r) => sum + (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0);
     const avg = successCount ? targetResults.reduce((sum, r) => sum + r.latency_ms * (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0) / successCount : 0;
@@ -840,11 +848,9 @@ function renderTCPingChart(id, results) {
       + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
       + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
       + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
-       + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '">' + (sampleCount > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
-     + '</div>';
-   }).join('');
-   document.getElementById('tcpping-rows-' + id).innerHTML = statsHtml;
-   applyTcppingSelections(id, names);
+      + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '">' + (sampleCount > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
+    + '</div>';
+  }).join('');
 }
 
 function saveTcppingSelections(id) {
@@ -1123,25 +1129,8 @@ function updateDetailCharts(id) {
     });
     if (tcppingChart) tcppingChart.setOption({ series });
 
-    const statsHtml = names.map((name) => {
-      const targetResults = results.filter(r => r.name === name);
-      const avg = targetResults.reduce((s, r, _, a) => s + (r.success ? r.latency_ms : 0), 0) / targetResults.filter(r => r.success).length || 0;
-      const vals = targetResults.filter(r => r.success).map(r => r.latency_ms);
-      const jitter = vals.length > 1 ? vals.reduce((s, v, idx, a) => idx > 0 ? s + Math.abs(v - a[idx - 1]) : s, 0) / (vals.length - 1) : 0;
-      const losses = targetResults.filter(r => !r.success).length;
-      const lossPct = (losses / targetResults.length * 100);
-      const color = tcppingColor(name);
-      const displayName = mapCarrier(name);
-      return '<div class="tcpping-stat-row" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
-        + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
-        + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
-        + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
-        + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
-        + '<span class="col-stat ' + (lossPct >= 5 && vals.length > 0 ? 'high-loss' : '') + '">' + (vals.length > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
-      + '</div>';
-    }).join('');
     const rowsEl = document.getElementById('tcpping-rows-' + id);
-    if (rowsEl) rowsEl.innerHTML = statsHtml;
+    if (rowsEl) rowsEl.innerHTML = tcppingStatsHTML(id, results, names);
     applyTcppingSelections(id, names);
   }).catch(() => {});
 }
