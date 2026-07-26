@@ -22,7 +22,7 @@ Needle 由一个 Server 和多个 Agent 组成。Agent 只向外连接 Server，
 
 ## 功能
 
-- CPU、内存、实时上下行速率与计费周期流量
+- CPU、内存、实时上下行速率与计费周期流量（仅统计物理网卡，自动排除 loopback/容器/VPN 虚拟接口）
 - TCP Ping 多线路延迟监控，可按线路显示或隐藏
 - `1d` 原始数据与 `7d` 降采样概览，兼顾细节和加载速度
 - 点击 7 天图表下方的日期，可同步查看当天 CPU、内存、流量和 TCP Ping 原始数据
@@ -162,9 +162,10 @@ tcpping:
 | `server` | Server 地址，生产环境应使用 HTTPS |
 | `token` | 每台 Agent 独立使用的认证 Token |
 | `region` | 面板显示的地区代码 |
-| `billing_period` | 流量计费周期，例如 `1m` 表示每月 1 日开始 |
-| `expires_at` | 服务器到期日期，格式为 `YYYY-MM-DD` |
+| `billing_period` | 计费周期（`1m`/`3m`/`6m`/`12m`），用于面板的到期倒计时 |
+| `expires_at` | 服务器到期日期，格式为 `YYYY-MM-DD`；流量每月在该日期的同一天清零 |
 | `interval` | 上报间隔，单位为秒 |
+| `interfaces` | 网卡白名单，例如 `["eth0"]`；留空时自动统计物理网卡（排除 loopback、docker/veth、VPN 隧道等虚拟接口） |
 | `tls_skip_verify` | 跳过 TLS 证书校验，仅用于临时排障 |
 | `allow_plain_http` | 允许连接远程明文 HTTP Server，不建议启用 |
 | `tcpping` | TCP Ping 目标列表 |

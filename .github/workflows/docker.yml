@@ -28,7 +28,7 @@ jobs:
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION=${{ github.ref_name }}
           else
-            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "${{ github.sha }}" | cut -c1-7)
+            VERSION=$(git describe --tags --always 2>/dev/null || echo "${{ github.sha }}" | cut -c1-7)
           fi
           docker build --build-arg VERSION=$VERSION -t ghcr.io/robinproxy/needle:latest .
           if [ "${{ github.ref_type }}" = "tag" ]; then

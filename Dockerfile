@@ -13,5 +13,7 @@ USER needle
 WORKDIR /data
 EXPOSE 8008
 VOLUME /data
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8008/api/health || exit 1
 ENTRYPOINT ["needle-server"]
 CMD ["-l", ":8008", "-db", "/data/needle.db"]

@@ -47,6 +47,10 @@ func newStore(path string, purge bool) (*Store, error) {
 	// Restrict DB file perms (tokens live here). Best-effort for existing files.
 	_ = os.Chmod(path, 0600)
 	s := &Store{db: db, now: time.Now}
+	if err := s.enableIncrementalVacuum(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -55,6 +59,25 @@ func newStore(path string, purge bool) (*Store, error) {
 		s.startPurgeLoop()
 	}
 	return s, nil
+}
+
+// enableIncrementalVacuum switches the DB to incremental auto-vacuum so
+// pages freed by the purge loop can be returned to the OS instead of the
+// file staying at its historical peak size. The mode change only takes
+// effect after a full VACUUM, so one runs once on upgrade.
+func (s *Store) enableIncrementalVacuum() error {
+	var mode int
+	if err := s.db.QueryRow("PRAGMA auto_vacuum").Scan(&mode); err != nil {
+		return err
+	}
+	if mode == 2 { // already incremental
+		return nil
+	}
+	if _, err := s.db.Exec("PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec("VACUUM")
+	return err
 }
 
 func (s *Store) migrate() error {
@@ -905,6 +928,9 @@ func (s *Store) PurgeOldData() {
 	baselineCutoff := s.now().Add(-62 * 24 * time.Hour).Unix()
 	if _, err := s.db.Exec("DELETE FROM traffic_baselines WHERE boundary < ?", baselineCutoff); err != nil {
 		log.Printf("purge traffic baselines: %v", err)
+	}
+	if _, err := s.db.Exec("PRAGMA incremental_vacuum"); err != nil {
+		log.Printf("incremental vacuum: %v", err)
 	}
 }
 

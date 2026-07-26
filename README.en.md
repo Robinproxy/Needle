@@ -22,7 +22,7 @@ Needle consists of one Server and multiple Agents. Agents make outbound-only con
 
 ## Features
 
-- CPU, memory, real-time network rates, and billing-cycle traffic usage
+- CPU, memory, real-time network rates, and billing-cycle traffic usage (physical NICs only; loopback, container, and VPN interfaces are excluded)
 - Multi-route TCP Ping monitoring with per-route show and hide controls
 - Raw `1d` history and a downsampled `7d` overview for detail without slow rendering
 - Click a date below the seven-day chart to load raw CPU, memory, traffic, and TCP Ping data for that day
@@ -162,9 +162,10 @@ Key fields:
 | `server` | Server URL; HTTPS is required for production |
 | `token` | A unique authentication token for this Agent |
 | `region` | Region code shown on the dashboard |
-| `billing_period` | Traffic billing cycle, for example `1m` starts on the first day of each month |
-| `expires_at` | Server renewal date in `YYYY-MM-DD` format |
+| `billing_period` | Billing cycle (`1m`/`3m`/`6m`/`12m`) used for the dashboard renewal countdown |
+| `expires_at` | Server renewal date in `YYYY-MM-DD` format; traffic resets monthly on that day of month |
 | `interval` | Reporting interval in seconds |
+| `interfaces` | NIC whitelist such as `["eth0"]`; when empty, physical NICs are counted automatically (loopback, docker/veth bridges, and VPN tunnels are excluded) |
 | `tls_skip_verify` | Skips TLS certificate verification; use only for temporary troubleshooting |
 | `allow_plain_http` | Allows a remote plaintext HTTP Server; not recommended |
 | `tcpping` | TCP Ping target list |
