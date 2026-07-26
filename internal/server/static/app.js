@@ -9,7 +9,6 @@ let currentTcppingRange = '24h';
 let currentTcppingId = null;
 let currentMetricsRange = '24h';
 let currentHistoryDay = null;
-let currentHistoryWeek = null;
 let detailDayAlerts = new Map();
 let gridCols = 4;
 let refreshInFlight = false;
@@ -463,7 +462,6 @@ function toggleExpand(id) {
   } else {
     destroyDetailCharts();
     currentHistoryDay = null;
-    currentHistoryWeek = null;
     expandedId = id;
     renderAll(true);
   }
@@ -525,10 +523,9 @@ function renderDetailContent(id) {
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
           + '<div class="theme-btn-group detail-range-group">'
-            + '<button type="button" id="detail-back-btn" class="theme-btn" style="display:' + (currentHistoryWeek || currentHistoryDay ? '' : 'none') + '" onclick="closeHistoricalLevel(' + id + ')" aria-label="Back" title="Back">‹</button>'
             + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
             + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
-            + '<button type="button" class="theme-btn' + (range === '672h' || currentHistoryWeek ? ' active' : '') + '" data-range="672h" onclick="switchDetailRange(' + id + ',\'672h\')">28d</button>'
+            + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
           + '</div>'
         + '</div>'
         + '<div class="tcpping-controls">'
@@ -561,14 +558,11 @@ function detailDataURL(id, kind, range) {
   if (currentHistoryDay) {
     return '/api/agents/' + id + '/' + kind + '?since=' + currentHistoryDay.start + '&until=' + currentHistoryDay.end;
   }
-  if (currentHistoryWeek) {
-    return '/api/agents/' + id + '/' + kind + '?since=' + currentHistoryWeek.start + '&until=' + currentHistoryWeek.end;
-  }
   return '/api/agents/' + id + '/' + kind + '?range=' + range;
 }
 
 function openHistoricalDay(id, ts) {
-  if (!overviewDays(currentMetricsRange) && !overviewDays(currentTcppingRange) && !currentHistoryWeek) return;
+  if (!overviewDays(currentMetricsRange) && !overviewDays(currentTcppingRange)) return;
   const d = new Date(ts);
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
@@ -587,53 +581,8 @@ function openHistoricalDay(id, ts) {
     dayBtn.classList.add('active');
   }
   document.querySelector('[data-range="168h"]')?.classList.remove('active');
-  if (!currentHistoryWeek) {
-    document.querySelector('[data-range="672h"]')?.classList.remove('active');
-  }
-  updateBackBtn();
+  document.querySelector('[data-range="720h"]')?.classList.remove('active');
   loadDetailData(id, 'day');
-}
-
-// openHistoricalWeek drills from the 28d overview into one week (7d window).
-function openHistoricalWeek(id, ts) {
-  if (currentMetricsRange !== '672h' && !currentHistoryWeek && !currentHistoryDay) return;
-  currentHistoryDay = null;
-  currentHistoryWeek = {
-    start: Math.floor(ts / 1000),
-    end: Math.floor(Math.min(ts + 7 * 86400000, Date.now()) / 1000),
-  };
-  currentMetricsRange = 'week';
-  currentTcppingRange = 'week';
-  const dayBtn = document.getElementById('detail-day-btn');
-  if (dayBtn) { dayBtn.textContent = '1d'; dayBtn.title = 'Last 24 hours'; dayBtn.classList.remove('active'); }
-  updateBackBtn();
-  loadDetailData(id, 'week');
-}
-
-// closeHistoricalLevel steps back one drill level: day -> week -> 28d.
-function closeHistoricalLevel(id) {
-  const dayBtn = document.getElementById('detail-day-btn');
-  if (currentHistoryDay) {
-    currentHistoryDay = null;
-    if (dayBtn) { dayBtn.textContent = '1d'; dayBtn.title = 'Last 24 hours'; dayBtn.classList.remove('active'); }
-    if (currentHistoryWeek) {
-      currentMetricsRange = 'week';
-      currentTcppingRange = 'week';
-      updateBackBtn();
-      loadDetailData(id, 'week');
-      return;
-    }
-    updateBackBtn();
-    switchDetailRange(id, '168h');
-    return;
-  }
-  if (currentHistoryWeek) {
-    currentHistoryWeek = null;
-    currentMetricsRange = '672h';
-    currentTcppingRange = '672h';
-    updateBackBtn();
-    loadDetailData(id, '672h');
-  }
 }
 
 function loadDetailData(id, range) {
@@ -651,12 +600,10 @@ function localDayKey(ts) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// Overview ranges ('168h' and '672h') get per-day anomaly detection and the
-// clickable drill-down navigation below the TCPing chart.
+// The 7d view gets per-day anomaly detection and the clickable day
+// navigation below the TCPing chart; 30d is a plain trend view.
 function overviewDays(range) {
-  if (range === '168h') return 7;
-  if (range === '672h') return 28;
-  return 0;
+  return range === '168h' ? 7 : 0;
 }
 
 function dailyWorst(points, qualifies, severity, limit) {
@@ -773,10 +720,8 @@ function renderSparkline(elemId, data, color, isPercent) {
 
 function switchDetailRange(id, range) {
   id = +id;
-  if (!currentHistoryDay && !currentHistoryWeek && currentMetricsRange === range && currentTcppingRange === range) return;
+  if (!currentHistoryDay && currentMetricsRange === range && currentTcppingRange === range) return;
   currentHistoryDay = null;
-  currentHistoryWeek = null;
-  updateBackBtn();
   currentMetricsRange = range;
   currentTcppingRange = range;
   const rangeBtns = document.querySelectorAll('#tcpping-section-' + id + ' .detail-range-group .theme-btn');
@@ -822,7 +767,7 @@ function renderTCPingChart(id, results) {
   const chartWin = chartWindowMs();
   // Overview ranges: clamp the axis to the earliest data point so a young
   // deployment doesn't render weeks of blank chart.
-  if (!currentHistoryDay && !currentHistoryWeek) {
+  if (!currentHistoryDay) {
     const dataMin = results.reduce((min, r) => Math.min(min, r.created_at * 1000), Infinity);
     if (dataMin > chartWin[0]) chartWin[0] = dataMin;
   }
@@ -867,6 +812,8 @@ function renderTCPingChart(id, results) {
       type: 'time',
       min: chartWin[0], max: chartWin[1],
       axisLine: { lineStyle: { color: 'hsl(var(--border) / 0.5)' } },
+      // 7d and 30d draw their own date row below the chart (renderDayNav);
+      // only the day views use echarts' axis labels.
       minInterval: is1d ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
       splitNumber: is1d ? 5 : 7,
       axisLabel: {
@@ -917,84 +864,46 @@ function tcppingStatsHTML(id, results, names) {
   }).join('');
 }
 
-// navWindowMs is the time window the drill-down selector maps onto: the
-// week while drilled into one (even at day level, so the day buttons stay
-// put), otherwise the current range.
-function navWindowMs() {
-  if (currentHistoryWeek) return [currentHistoryWeek.start * 1000, currentHistoryWeek.end * 1000];
+// chartWindowMs pins the TCPing x-axis to the queried window instead of
+// echarts' auto-rounded data extent, so the day selector below lines up.
+function chartWindowMs() {
+  if (currentHistoryDay) return [currentHistoryDay.start * 1000, currentHistoryDay.end * 1000];
   const now = Date.now();
-  const hours = currentTcppingRange === '672h' ? 672 : currentTcppingRange === '168h' ? 168 : 24;
+  const hours = currentTcppingRange === '720h' ? 720 : currentTcppingRange === '168h' ? 168 : 24;
   return [now - hours * 3600000, now];
 }
 
-// chartWindowMs pins the TCPing x-axis to the queried window instead of
-// echarts' auto-rounded data extent, so the selector below lines up exactly.
-function chartWindowMs() {
-  if (currentHistoryDay) return [currentHistoryDay.start * 1000, currentHistoryDay.end * 1000];
-  return navWindowMs();
-}
-
-// renderDayNav draws the drill-down selector under the TCPing chart:
-// 7d view -> its days; 28d view -> 1w..4w for weeks that have data; inside a
-// week -> its days (back lives in the range-button group). Each button is
-// absolutely positioned under its span of the chart axis, whose grid runs
-// from 8px on the left to 32px from the right edge.
+// renderDayNav draws the row under the TCPing chart: clickable day buttons
+// for the 7d view, plain date marks (5-day units on a full window) for the
+// 30d trend view. Everything is absolutely positioned under its point on the
+// chart axis, whose grid runs from 8px on the left to 32px from the right.
 function renderDayNav(id, results, overviewWin) {
   const nav = document.getElementById('tcpping-days-' + id);
   if (!nav) return;
 
-  // Drilled into a week (or a day of it): map onto the week. Otherwise use
-  // the chart's (possibly data-clamped) overview window so buttons line up.
-  const win = currentHistoryWeek ? navWindowMs() : (overviewWin || navWindowMs());
-  const posStyle = (startMs, endMs) => {
-    const center = (Math.max(startMs, win[0]) + Math.min(endMs, win[1])) / 2;
-    const f = Math.min(1, Math.max(0, (center - win[0]) / (win[1] - win[0])));
-    return 'left:calc(8px + (100% - 40px) * ' + f.toFixed(4) + ')';
-  };
-  const dayButton = (ts) => { // ts: local midnight of the day
-    const key = localDayKey(ts);
-    const alerts = detailDayAlerts.get(key) || [];
-    const active = currentHistoryDay && localDayKey(currentHistoryDay.start * 1000) === key;
-    const title = [key].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
-    return '<button type="button" class="' + (alerts.length ? 'has-alert' : '') + (active ? ' active' : '')
-      + '" style="' + posStyle(ts, ts + 86400000) + '" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">'
-      + formatHistoryDay(ts) + '</button>';
-  };
-
   let html = '';
-  if (currentHistoryWeek) {
-    for (let i = 0; i < 7; i++) {
-      const ts = currentHistoryWeek.start * 1000 + i * 86400000;
-      if (ts > Date.now()) break;
-      html += dayButton(ts);
+  if (currentTcppingRange === '720h' && overviewWin) {
+    const win = overviewWin;
+    const days = Math.max(1, Math.round((win[1] - win[0]) / 86400000));
+    const step = Math.max(1, Math.ceil(days / 6)) * 86400000;
+    for (let t = win[0]; t < win[1] - step / 2; t += step) {
+      const f = Math.min(1, Math.max(0, (t - win[0]) / (win[1] - win[0])));
+      html += '<span class="axis-date" style="left:calc(8px + (100% - 40px) * ' + f.toFixed(4) + ')">'
+        + formatHistoryDay(t) + '</span>';
     }
-  } else if (currentTcppingRange === '672h') {
-    const n = new Date();
-    const todayStart = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
-    const weeks = [];
-    for (let w = 3; w >= 0; w--) {
-      const start = todayStart - (7 * w + 6) * 86400000;
-      const end = start + 7 * 86400000;
-      const hasData = (results || []).some(r => {
-        const t = r.created_at * 1000;
-        return t >= start && t < end;
-      });
-      if (hasData) weeks.push({ start, end }); // don't offer empty weeks
-    }
-    // Number the visible weeks 1w..Nw, oldest to newest, matching the axis.
-    html = weeks.map((wk, i) => {
-      let alerts = [];
-      for (let d = 0; d < 7; d++) {
-        alerts = alerts.concat(detailDayAlerts.get(localDayKey(wk.start + d * 86400000)) || []);
-      }
-      const rangeLabel = formatHistoryDay(wk.start) + ' – ' + formatHistoryDay(Math.min(wk.end - 86400000, todayStart));
-      const title = [rangeLabel].concat(alerts.length ? alerts.slice(0, 8) : ['No detected anomalies'])
-        .concat(alerts.length > 8 ? ['…'] : []).join('\n');
+  } else if (currentTcppingRange === '168h' && overviewWin) {
+    const win = overviewWin;
+    const dayButton = (ts) => { // ts: local midnight of the day
+      const key = localDayKey(ts);
+      const alerts = detailDayAlerts.get(key) || [];
+      const center = (Math.max(ts, win[0]) + Math.min(ts + 86400000, win[1])) / 2;
+      const f = Math.min(1, Math.max(0, (center - win[0]) / (win[1] - win[0])));
+      const title = [key].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
       return '<button type="button" class="' + (alerts.length ? 'has-alert' : '')
-        + '" style="' + posStyle(wk.start, wk.end) + '" onclick="openHistoricalWeek(' + Number(id) + ',' + wk.start + ')" title="' + escapeAttr(title) + '">'
-        + (i + 1) + 'w</button>';
-    }).join('');
-  } else if (currentTcppingRange === '168h') {
+        + '" style="left:calc(8px + (100% - 40px) * ' + f.toFixed(4) + ')"'
+        + ' onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">'
+        + formatHistoryDay(ts) + '</button>';
+    };
     const days = new Set();
     (results || []).forEach(r => days.add(localDayKey(r.created_at * 1000)));
     html = [...days].sort().slice(-7).map(key => {
@@ -1005,12 +914,6 @@ function renderDayNav(id, results, overviewWin) {
 
   nav.innerHTML = html;
   nav.hidden = html === '';
-}
-
-// updateBackBtn shows the ‹ button in the range group while drilled in.
-function updateBackBtn() {
-  const b = document.getElementById('detail-back-btn');
-  if (b) b.style.display = (currentHistoryWeek || currentHistoryDay) ? '' : 'none';
 }
 
 function saveTcppingSelections(id) {
@@ -1251,7 +1154,7 @@ async function softRefresh() {
 }
 
 function updateDetailCharts(id) {
-  if (currentHistoryDay || currentHistoryWeek) return;
+  if (currentHistoryDay) return;
   const metricsRange = currentMetricsRange || '24h';
   const tcppingRange = currentTcppingRange || '24h';
   fetch('/api/agents/' + id + '/metrics?range=' + metricsRange).then(r => r.json()).then(metrics => {
@@ -1289,7 +1192,7 @@ function updateDetailCharts(id) {
     });
     if (tcppingChart) {
       const now = Date.now();
-      const hours = currentTcppingRange === '672h' ? 672 : currentTcppingRange === '168h' ? 168 : 24;
+      const hours = currentTcppingRange === '720h' ? 720 : currentTcppingRange === '168h' ? 168 : 24;
       const dataMin = results.reduce((min, r) => Math.min(min, r.created_at * 1000), Infinity);
       tcppingChart.setOption({ xAxis: { min: Math.max(now - hours * 3600000, dataMin), max: now }, series });
     }

@@ -484,10 +484,12 @@ header {
 .tcpping-day-nav button:hover, .tcpping-day-nav button:focus-visible {
   color: hsl(var(--foreground)); background: hsl(var(--accent)); outline: none;
 }
-.tcpping-day-nav button.active {
-  color: hsl(var(--foreground)); background: hsl(var(--accent));
+/* Non-interactive date marks on the 30d trend view */
+.tcpping-day-nav .axis-date {
+  position: absolute; top: 5px; transform: translateX(-50%);
+  font: 600 10px var(--font-mono); color: hsl(var(--muted-foreground));
+  white-space: nowrap;
 }
-#detail-back-btn { padding-left: 9px; padding-right: 9px; }
 .tcpping-stats {
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   overflow: hidden;
