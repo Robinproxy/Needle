@@ -464,13 +464,15 @@ header {
   background: hsl(var(--card));
 }
 .tcpping-chart { height: 240px; }
+/* Selector row under the TCPing chart. Buttons are absolutely positioned by
+   the JS under their span of the chart's time axis. */
 .tcpping-day-nav {
-  display: flex; align-items: center; justify-content: space-around;
-  padding: 2px 24px 0 8px;
+  position: relative; height: 24px;
 }
 .tcpping-day-nav[hidden] { display: none; }
 .tcpping-day-nav button {
   appearance: none; border: 0; background: transparent; cursor: pointer;
+  position: absolute; top: 3px; transform: translateX(-50%); white-space: nowrap;
   padding: 3px 6px; border-radius: 4px; color: hsl(var(--muted-foreground));
   font: 600 10px var(--font-mono); transition: color 0.12s, background 0.12s;
 }
@@ -485,9 +487,7 @@ header {
 .tcpping-day-nav button.active {
   color: hsl(var(--foreground)); background: hsl(var(--accent));
 }
-.tcpping-day-nav button.nav-back {
-  font-size: 14px; line-height: 1; padding: 1px 8px 4px;
-}
+#detail-back-btn { padding-left: 9px; padding-right: 9px; }
 .tcpping-stats {
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   overflow: hidden;
