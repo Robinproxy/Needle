@@ -485,6 +485,11 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid time window", http.StatusBadRequest)
 			return
 		}
+		// Day windows starting before raw retention read the hourly rollups;
+		// this also gives straddling days a complete (if coarser) picture.
+		if since < now.Add(-rawRetention).Unix() {
+			useHourly = true
+		}
 	} else if sinceStr != "" {
 		var parseErr error
 		since, parseErr = strconv.ParseInt(sinceStr, 10, 64)

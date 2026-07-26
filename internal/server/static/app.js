@@ -552,7 +552,7 @@ function detailDataURL(id, kind, range) {
 }
 
 function openHistoricalDay(id, ts) {
-  if (currentMetricsRange !== '168h' && currentTcppingRange !== '168h') return;
+  if (!overviewDays(currentMetricsRange) && !overviewDays(currentTcppingRange)) return;
   const d = new Date(ts);
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
@@ -571,6 +571,7 @@ function openHistoricalDay(id, ts) {
     dayBtn.classList.add('active');
   }
   document.querySelector('[data-range="168h"]')?.classList.remove('active');
+  document.querySelector('[data-range="720h"]')?.classList.remove('active');
   loadDetailData(id, 'day');
 }
 
@@ -589,7 +590,15 @@ function localDayKey(ts) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-function dailyWorst(points, qualifies, severity) {
+// Overview ranges ('168h' and '720h') get per-day anomaly detection and the
+// clickable day navigation below the TCPing chart.
+function overviewDays(range) {
+  if (range === '168h') return 7;
+  if (range === '720h') return 30;
+  return 0;
+}
+
+function dailyWorst(points, qualifies, severity, limit) {
   const byDay = new Map();
   points.forEach(point => {
     if (!qualifies(point)) return;
@@ -597,7 +606,7 @@ function dailyWorst(points, qualifies, severity) {
     const current = byDay.get(key);
     if (!current || severity(point) > severity(current)) byDay.set(key, point);
   });
-  return [...byDay.values()].sort((a, b) => a[0] - b[0]).slice(-7);
+  return [...byDay.values()].sort((a, b) => a[0] - b[0]).slice(-(limit || 7));
 }
 
 function median(values) {
@@ -636,12 +645,12 @@ function renderSparklines(id, metrics) {
   document.getElementById('spark-netin-val').innerHTML = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  <span style="color:#8b5cf6">peak ' + formatSpeed(netInPeak) + '</span>' : '—';
   document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(netOutPeak) + '</span>' : '—';
 
-  const isOverview = currentMetricsRange === '168h';
-  if (isOverview) detailDayAlerts = new Map();
+  const overview = overviewDays(currentMetricsRange);
+  if (overview) detailDayAlerts = new Map();
   const dailyAlerts = (field, averages, qualifies, severity) => {
-    if (!isOverview) return [];
+    if (!overview) return [];
     const points = metrics.map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]]);
-    return dailyWorst(points, qualifies, severity);
+    return dailyWorst(points, qualifies, severity, overview);
   };
   const cpuAlerts = dailyAlerts('cpu_peak', cpuData, p => p[1] >= 85, p => p[1]);
   const memAlerts = dailyAlerts('memory_peak_pct', memData, p => p[1] >= 85, p => p[1]);
@@ -748,8 +757,9 @@ function renderTCPingChart(id, results) {
 
   const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
   const chart = echarts.init(chartEl);
+  const overview = overviewDays(currentTcppingRange);
   let tcppingAlerts = [];
-  if (currentTcppingRange === '168h') {
+  if (overview) {
     const baselines = {};
     names.forEach(name => {
       baselines[name] = median(results.filter(r => r.name === name && r.success).map(r => r.latency_ms));
@@ -765,7 +775,8 @@ function renderTCPingChart(id, results) {
     tcppingAlerts = dailyWorst(
       candidates,
       p => p[3] > 0 || p[1] >= Math.max(200, p[4] * 2),
-      p => p[3] * 1000 + p[1] / p[4]
+      p => p[3] * 1000 + p[1] / p[4],
+      overview
     );
     tcppingAlerts.forEach(p => {
       const message = p[3] > 0
@@ -776,18 +787,21 @@ function renderTCPingChart(id, results) {
   }
   const dayNav = document.getElementById('tcpping-days-' + id);
   if (dayNav) {
-    if (currentTcppingRange === '168h') {
+    if (overview) {
+      const compact = overview > 7;
       const days = new Map();
       results.forEach(r => {
         const ts = r.created_at * 1000;
         const key = localDayKey(ts);
         if (!days.has(key)) days.set(key, ts);
       });
-      dayNav.innerHTML = [...days.values()].sort((a, b) => a - b).slice(-7).map(ts => {
+      dayNav.innerHTML = [...days.values()].sort((a, b) => a - b).slice(-overview).map(ts => {
         const alerts = detailDayAlerts.get(localDayKey(ts)) || [];
         const title = [localDayKey(ts)].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
-        return '<button type="button" class="' + (alerts.length ? 'has-alert' : '') + '" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">' + formatHistoryDay(ts) + '</button>';
+        const label = compact ? new Date(ts).getDate() : formatHistoryDay(ts);
+        return '<button type="button" class="' + (alerts.length ? 'has-alert' : '') + '" onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">' + label + '</button>';
       }).join('');
+      dayNav.classList.toggle('compact', compact);
       dayNav.hidden = false;
     } else {
       dayNav.innerHTML = '';

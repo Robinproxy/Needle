@@ -173,4 +173,18 @@ func TestHandleAgentDetailHourlyRange(t *testing.T) {
 	if len(short) != 1 || short[0].CPUUsage != 10 {
 		t.Fatalf("24h rows = %+v, want the raw report row (cpu 10)", short)
 	}
+
+	// Day drill-down beyond raw retention routes to the hourly table too.
+	dayStart := hour - hour%86400
+	oldDay := get("/api/agents/" + strconv.FormatInt(agentID, 10) + "/metrics?since=" + strconv.FormatInt(dayStart, 10) + "&until=" + strconv.FormatInt(dayStart+86400, 10))
+	if len(oldDay) != 1 || oldDay[0].CPUUsage != 42 {
+		t.Fatalf("old day window rows = %+v, want the hourly row (cpu 42)", oldDay)
+	}
+
+	// A recent day window stays on raw data.
+	recentStart := now.Add(-2 * time.Hour).Unix()
+	recent := get("/api/agents/" + strconv.FormatInt(agentID, 10) + "/metrics?since=" + strconv.FormatInt(recentStart, 10) + "&until=" + strconv.FormatInt(now.Add(time.Minute).Unix(), 10))
+	if len(recent) != 1 || recent[0].CPUUsage != 10 {
+		t.Fatalf("recent window rows = %+v, want the raw report row (cpu 10)", recent)
+	}
 }
