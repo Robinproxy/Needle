@@ -34,9 +34,9 @@ type Reporter struct {
 }
 
 func NewReporter(serverURL, token string, tlsSkipVerify bool) *Reporter {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: tlsSkipVerify},
-	}
+	// Clone keeps the default proxy support and connection-pool settings.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: tlsSkipVerify}
 	return &Reporter{
 		serverURL: serverURL,
 		token:     token,

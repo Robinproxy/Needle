@@ -31,7 +31,7 @@ func seedAgentForDelete(t *testing.T, store *Store) seededAgent {
 	if err := store.BindToken(token, "node-1"); err != nil {
 		t.Fatal(err)
 	}
-	id, err := store.UpsertAgent("node-1", token, "SG", nil, "1m")
+	id, err := store.UpsertAgent("node-1", "SG", nil, "1m")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,7 @@ func TestHistoryBucketSeconds(t *testing.T) {
 
 func TestGetMetricsSampledAggregatesTimeBuckets(t *testing.T) {
 	_, store := newTestHandler(t)
-	agentID, err := store.UpsertAgent("node-1", "token", "SG", nil, "")
+	agentID, err := store.UpsertAgent("node-1", "SG", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestGetMetricsSampledAggregatesTimeBuckets(t *testing.T) {
 
 func TestGetTCPingResultsSampledPreservesLossCounts(t *testing.T) {
 	_, store := newTestHandler(t)
-	agentID, err := store.UpsertAgent("node-1", "token", "SG", nil, "")
+	agentID, err := store.UpsertAgent("node-1", "SG", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestGetTCPingResultsSampledPreservesLossCounts(t *testing.T) {
 
 func TestHistoryWindowExcludesFollowingDay(t *testing.T) {
 	_, store := newTestHandler(t)
-	agentID, err := store.UpsertAgent("node-1", "token", "SG", nil, "")
+	agentID, err := store.UpsertAgent("node-1", "SG", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

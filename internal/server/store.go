@@ -19,8 +19,9 @@ var (
 )
 
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db   *sql.DB
+	path string
+	now  func() time.Time
 }
 
 // execer is the shared subset of *sql.DB and *sql.Tx, so single-statement
@@ -46,7 +47,7 @@ func newStore(path string, purge bool) (*Store, error) {
 	}
 	// Restrict DB file perms (tokens live here). Best-effort for existing files.
 	_ = os.Chmod(path, 0600)
-	s := &Store{db: db, now: time.Now}
+	s := &Store{db: db, path: path, now: time.Now}
 	if err := s.enableIncrementalVacuum(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -85,7 +86,6 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS agents (
 			id INTEGER PRIMARY KEY,
 			hostname TEXT UNIQUE NOT NULL,
-			token TEXT NOT NULL,
 			region TEXT DEFAULT '',
 			expires_at INTEGER,
 			billing_period TEXT DEFAULT '',
@@ -147,7 +147,12 @@ func (s *Store) migrate() error {
 	// migrate expires_at and billing_period (added in v0.3.5)
 	s.db.Exec("ALTER TABLE agents ADD COLUMN expires_at INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN billing_period TEXT DEFAULT ''")
-	return s.migrateDropAutoIncrement()
+	if err := s.migrateDropAutoIncrement(); err != nil {
+		return err
+	}
+	// drop redundant plaintext token copy (v0.6.2); auth uses agent_tokens only
+	s.db.Exec("ALTER TABLE agents DROP COLUMN token")
+	return nil
 }
 
 // migrateDropAutoIncrement rebuilds tables that historically used AUTOINCREMENT.
@@ -399,22 +404,21 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 		}
 		out = append(out, t)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
-func (s *Store) UpsertAgent(hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
-	return upsertAgent(s.db, hostname, token, region, expiresAt, billingPeriod)
+func (s *Store) UpsertAgent(hostname, region string, expiresAt *int64, billingPeriod string) (int64, error) {
+	return upsertAgent(s.db, hostname, region, expiresAt, billingPeriod)
 }
 
-func upsertAgent(x execer, hostname, token, region string, expiresAt *int64, billingPeriod string) (int64, error) {
+func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPeriod string) (int64, error) {
 	_, err := x.Exec(
-		`INSERT INTO agents(hostname, token, region, expires_at, billing_period) VALUES(?, ?, ?, ?, ?)
+		`INSERT INTO agents(hostname, region, expires_at, billing_period) VALUES(?, ?, ?, ?)
 		 ON CONFLICT(hostname) DO UPDATE SET
-		   token = excluded.token,
 		   region = excluded.region,
 		   expires_at = excluded.expires_at,
 		   billing_period = excluded.billing_period`,
-		hostname, token, region, expiresAt, billingPeriod,
+		hostname, region, expiresAt, billingPeriod,
 	)
 	if err != nil {
 		return 0, err
@@ -469,7 +473,6 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
 	Hostname         string
-	Token            string
 	Region           string
 	ExpiresAt        *int64
 	BillingPeriod    string
@@ -489,7 +492,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	agentID, err := upsertAgent(tx, r.Hostname, r.Token, r.Region, r.ExpiresAt, r.BillingPeriod)
+	agentID, err := upsertAgent(tx, r.Hostname, r.Region, r.ExpiresAt, r.BillingPeriod)
 	if err != nil {
 		return 0, err
 	}
@@ -532,7 +535,19 @@ func (s *Store) GetAgents() ([]AgentRow, error) {
 		}
 		agents = append(agents, a)
 	}
-	return agents, nil
+	return agents, rows.Err()
+}
+
+// AgentIDByHostname reports the agent's id, or ok=false when no such agent.
+func (s *Store) AgentIDByHostname(hostname string) (id int64, ok bool, err error) {
+	err = s.db.QueryRow(`SELECT id FROM agents WHERE hostname = ?`, hostname).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 func (s *Store) GetLatestMetric(agentID int64) (*MetricRow, error) {
@@ -587,7 +602,7 @@ func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSecon
 		}
 		metrics = append(metrics, m)
 	}
-	return metrics, nil
+	return metrics, rows.Err()
 }
 
 func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
@@ -715,7 +730,7 @@ func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
 		t.Success = success == 1
 		results = append(results, t)
 	}
-	return results, nil
+	return results, rows.Err()
 }
 
 func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
@@ -860,13 +875,20 @@ func calcNextReset(expiresAtUnix int64, period string, now time.Time) (int, stri
 
 func (s *Store) GetStats() (*ServerStats, error) {
 	var stats ServerStats
-	s.db.QueryRow("SELECT COUNT(*) FROM agents").Scan(&stats.AgentCount)
-	s.db.QueryRow("SELECT COUNT(*) FROM metrics").Scan(&stats.MetricCount)
-	s.db.QueryRow("SELECT COUNT(*) FROM tcpping_results").Scan(&stats.TCPingCount)
-
-	var path string
-	s.db.QueryRow("PRAGMA database_list").Scan(new(string), new(string), &path)
-	if fi, err := os.Stat(path); err == nil {
+	counts := []struct {
+		query string
+		dst   *int
+	}{
+		{"SELECT COUNT(*) FROM agents", &stats.AgentCount},
+		{"SELECT COUNT(*) FROM metrics", &stats.MetricCount},
+		{"SELECT COUNT(*) FROM tcpping_results", &stats.TCPingCount},
+	}
+	for _, c := range counts {
+		if err := s.db.QueryRow(c.query).Scan(c.dst); err != nil {
+			return nil, err
+		}
+	}
+	if fi, err := os.Stat(s.path); err == nil {
 		stats.DBSize = fi.Size()
 	}
 	return &stats, nil

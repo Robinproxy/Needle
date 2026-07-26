@@ -26,7 +26,7 @@ func newTrafficTestStore(t *testing.T, now time.Time, resetDay int) (*Store, int
 	}
 	// expires_at only contributes its day-of-month to the cycle boundary.
 	expiresAt := time.Date(now.Year(), now.Month()+1, resetDay, 12, 0, 0, 0, now.Location()).Unix()
-	id, err := store.UpsertAgent("node-1", token, "SG", &expiresAt, "1m")
+	id, err := store.UpsertAgent("node-1", "SG", &expiresAt, "1m")
 	if err != nil {
 		t.Fatal(err)
 	}

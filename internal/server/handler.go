@@ -72,6 +72,12 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		// All assets are same-origin since v0.6.1; 'unsafe-inline' is needed
+		// for the inline event handlers and style attributes in the dashboard.
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; "+
+				"base-uri 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -193,8 +199,9 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	stats, _ := h.store.GetStats()
-	if stats == nil {
+	stats, err := h.store.GetStats()
+	if err != nil {
+		log.Printf("info: stats: %v", err)
 		stats = &ServerStats{}
 	}
 	info := map[string]interface{}{
@@ -236,26 +243,24 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agents, err := h.store.GetAgents()
+	agentID, found, err := h.store.AgentIDByHostname(req.Hostname)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	for _, a := range agents {
-		if a.Hostname == req.Hostname {
-			if err := h.store.DeleteAgent(a.ID); err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
-			h.tokenLimiter.Delete(row.ID)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-			return
-		}
+	if !found {
+		// agent row gone but token still bound
+		_ = h.store.RevokeToken(token)
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
 	}
-	// agent row gone but token still bound
-	_ = h.store.RevokeToken(token)
-	http.Error(w, "agent not found", http.StatusNotFound)
+	if err := h.store.DeleteAgent(agentID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.tokenLimiter.Delete(row.ID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +327,6 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 
 	write := &ReportWrite{
 		Hostname:      req.Hostname,
-		Token:         token,
 		Region:        sanitizeRegion(req.Region),
 		ExpiresAt:     req.ExpiresAt,
 		BillingPeriod: req.BillingPeriod,

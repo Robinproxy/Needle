@@ -3,7 +3,6 @@ package server
 type AgentRow struct {
 	ID            int64  `json:"id"`
 	Hostname      string `json:"hostname"`
-	Token         string `json:"-"`
 	Region        string `json:"region"`
 	CreatedAt     int64  `json:"created_at"`
 	ExpiresAt     *int64 `json:"expires_at"`
