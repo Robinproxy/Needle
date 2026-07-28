@@ -758,13 +758,7 @@ function renderTCPingChart(id, results) {
   if (tcppingChart) { try { tcppingChart.dispose(); } catch(e) {} }
 
   const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
-  const chartWin = chartWindowMs();
-  // Overview ranges: clamp the axis to the earliest data point so a young
-  // deployment doesn't render weeks of blank chart.
-  if (!currentHistoryDay) {
-    const dataMin = results.reduce((min, r) => Math.min(min, r.created_at * 1000), Infinity);
-    if (dataMin > chartWin[0]) chartWin[0] = dataMin;
-  }
+  const chartWin = chartWindowForResults(results);
   const chart = echarts.init(chartEl);
   const overview = overviewDays(currentTcppingRange);
   let tcppingAlerts = [];
@@ -806,10 +800,10 @@ function renderTCPingChart(id, results) {
       type: 'time',
       min: chartWin[0], max: chartWin[1],
       axisLine: { lineStyle: { color: 'hsl(var(--border) / 0.5)' } },
-      // 7d and 30d draw their own date row below the chart (renderDayNav);
-      // only the day views use echarts' axis labels.
+      // Overview views draw one coordinated tick+date row in renderDayNav.
       minInterval: is1d ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
       splitNumber: is1d ? 5 : 7,
+      axisTick: { show: is1d },
       axisLabel: {
         show: is1d,
         color: 'hsl(var(--muted-foreground))', fontSize: 10,
@@ -867,10 +861,42 @@ function chartWindowMs() {
   return [now - hours * 3600000, now];
 }
 
-// renderDayNav draws the row under the TCPing chart: clickable day buttons
-// for the 7d view, plain date marks (5-day units on a full window) for the
-// 30d trend view. Everything is absolutely positioned under its point on the
-// chart axis, whose grid runs from 8px on the left to 32px from the right.
+// Keep the plot filled on young deployments while making the custom date axis
+// use exactly the same window as ECharts.
+function chartWindowForResults(results) {
+  const win = chartWindowMs();
+  if (!currentHistoryDay && results && results.length) {
+    const dataMin = results.reduce((min, r) => Math.min(min, r.created_at * 1000), Infinity);
+    if (dataMin > win[0]) win[0] = dataMin;
+  }
+  return win;
+}
+
+// Calendar ticks start at local noon and advance by exact 24-hour units. This
+// keeps their pixel spacing equal, leaves room for centered labels at both
+// edges, and avoids putting a tick on a DST transition.
+function calendarTicks(win, stepDays) {
+  const ticks = [];
+  const start = new Date(win[0]);
+  let tick = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 12).getTime();
+  const step = stepDays * 86400000;
+  if (tick < win[0]) tick += 86400000;
+  while (tick <= win[1]) {
+    ticks.push(tick);
+    tick += step;
+  }
+  // A very young deployment can have less than half a day of data.
+  if (!ticks.length) ticks.push((win[0] + win[1]) / 2);
+  return ticks;
+}
+
+function axisDatePosition(ts, win) {
+  const f = Math.min(1, Math.max(0, (ts - win[0]) / Math.max(1, win[1] - win[0])));
+  return 'left:calc(8px + (100% - 40px) * ' + f.toFixed(4) + ')';
+}
+
+// 7d and 30d use one custom time-axis renderer. Each label owns its tick mark,
+// so text can never drift away from an independently generated ECharts tick.
 function renderDayNav(id, results, overviewWin) {
   const nav = document.getElementById('tcpping-days-' + id);
   if (!nav) return;
@@ -878,32 +904,29 @@ function renderDayNav(id, results, overviewWin) {
   let html = '';
   if (currentTcppingRange === '720h' && overviewWin) {
     const win = overviewWin;
-    const days = Math.max(1, Math.round((win[1] - win[0]) / 86400000));
-    const step = Math.max(1, Math.ceil(days / 6)) * 86400000;
-    for (let t = win[0]; t < win[1] - step / 2; t += step) {
-      const f = Math.min(1, Math.max(0, (t - win[0]) / (win[1] - win[0])));
-      html += '<span class="axis-date" style="left:calc(8px + (100% - 40px) * ' + f.toFixed(4) + ')">'
-        + formatHistoryDay(t) + '</span>';
-    }
+    const days = Math.max(1, (win[1] - win[0]) / 86400000);
+    const stepDays = Math.max(1, Math.ceil(days / 6));
+    html = calendarTicks(win, stepDays).map(t =>
+      '<span class="axis-date" style="' + axisDatePosition(t, win) + '">'
+        + formatHistoryDay(t) + '</span>'
+    ).join('');
   } else if (currentTcppingRange === '168h' && overviewWin) {
     const win = overviewWin;
-    const dayButton = (ts) => { // ts: local midnight of the day
+    const dataDays = new Set((results || []).map(r => localDayKey(r.created_at * 1000)));
+    const dayButton = (ts) => {
       const key = localDayKey(ts);
       const alerts = detailDayAlerts.get(key) || [];
-      const center = (Math.max(ts, win[0]) + Math.min(ts + 86400000, win[1])) / 2;
-      const f = Math.min(1, Math.max(0, (center - win[0]) / (win[1] - win[0])));
-      const title = [key].concat(alerts.length ? alerts : ['No detected anomalies']).join('\n');
-      return '<button type="button" class="' + (alerts.length ? 'has-alert' : '')
-        + '" style="left:calc(8px + (100% - 40px) * ' + f.toFixed(4) + ')"'
-        + ' onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')" title="' + escapeAttr(title) + '">'
+      const hasData = dataDays.has(key);
+      const title = [key].concat(hasData
+        ? (alerts.length ? alerts : ['No detected anomalies'])
+        : ['No TCP Ping data']).join('\n');
+      return '<button type="button" class="' + (alerts.length ? 'has-alert ' : '') + (hasData ? '' : 'no-data')
+        + '" style="' + axisDatePosition(ts, win) + '"'
+        + (hasData ? ' onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')"' : ' disabled')
+        + ' title="' + escapeAttr(title) + '">'
         + formatHistoryDay(ts) + '</button>';
     };
-    const days = new Set();
-    (results || []).forEach(r => days.add(localDayKey(r.created_at * 1000)));
-    html = [...days].sort().slice(-7).map(key => {
-      const p = key.split('-');
-      return dayButton(new Date(+p[0], +p[1] - 1, +p[2]).getTime());
-    }).join('');
+    html = calendarTicks(win, 1).map(dayButton).join('');
   }
 
   nav.innerHTML = html;
@@ -1191,10 +1214,9 @@ function updateDetailCharts(id) {
     return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
     });
     if (tcppingChart) {
-      const now = Date.now();
-      const hours = currentTcppingRange === '720h' ? 720 : currentTcppingRange === '168h' ? 168 : 24;
-      const dataMin = results.reduce((min, r) => Math.min(min, r.created_at * 1000), Infinity);
-      tcppingChart.setOption({ xAxis: { min: Math.max(now - hours * 3600000, dataMin), max: now }, series });
+      const win = chartWindowForResults(results);
+      tcppingChart.setOption({ xAxis: { min: win[0], max: win[1] }, series });
+      renderDayNav(id, results, win);
     }
 
     const rowsEl = document.getElementById('tcpping-rows-' + id);

@@ -464,29 +464,40 @@ header {
   background: hsl(var(--card));
 }
 .tcpping-chart { height: 240px; }
-/* Selector row under the TCPing chart. Buttons are absolutely positioned by
-   the JS under their span of the chart's time axis. */
+/* Shared custom time axis for 7d and 30d. Every label draws its own centered
+   tick, preventing the tick/label drift caused by two independent axes. */
 .tcpping-day-nav {
   position: relative; height: 24px;
 }
 .tcpping-day-nav[hidden] { display: none; }
 .tcpping-day-nav button {
   appearance: none; border: 0; background: transparent; cursor: pointer;
-  position: absolute; top: 3px; transform: translateX(-50%); white-space: nowrap;
-  padding: 3px 6px; border-radius: 4px; color: hsl(var(--muted-foreground));
+  position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+  padding: 7px 6px 3px; border-radius: 4px; color: hsl(var(--muted-foreground));
   font: 600 10px var(--font-mono); transition: color 0.12s, background 0.12s;
 }
-.tcpping-day-nav button.has-alert::before {
+.tcpping-day-nav button::before,
+.tcpping-day-nav .axis-date::before {
+  content: ''; position: absolute; left: 50%; top: 0;
+  width: 1px; height: 4px; background: hsl(var(--border));
+}
+.tcpping-day-nav button.has-alert::after {
   content: ''; display: inline-block; width: 5px; height: 5px;
   margin-right: 4px; border-radius: 50%; background: #ef4444;
   vertical-align: 1px;
 }
+.tcpping-day-nav button.no-data {
+  cursor: default; color: hsl(var(--muted-foreground) / 0.42);
+}
 .tcpping-day-nav button:hover, .tcpping-day-nav button:focus-visible {
   color: hsl(var(--foreground)); background: hsl(var(--accent)); outline: none;
 }
+.tcpping-day-nav button.no-data:hover {
+  color: hsl(var(--muted-foreground) / 0.42); background: transparent;
+}
 /* Non-interactive date marks on the 30d trend view */
 .tcpping-day-nav .axis-date {
-  position: absolute; top: 5px; transform: translateX(-50%);
+  position: absolute; top: 0; transform: translateX(-50%); padding-top: 7px;
   font: 600 10px var(--font-mono); color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
