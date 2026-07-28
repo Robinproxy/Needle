@@ -13,6 +13,7 @@ let detailDayAlerts = new Map();
 let gridCols = 4;
 let refreshInFlight = false;
 let lastRefreshAt = null;
+let dashboardLoadingTimer = null;
 const TCPPING_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 const TCPPING_ORDER = ['CMv4', 'CMv6', 'CUv4', 'CUv6', 'CTv4', 'CTv6'];
 
@@ -177,12 +178,26 @@ function setDashboardState(state, message) {
   if (alertText) alertText.textContent = message || '';
   footer.className = 'footer-status ' + state;
 
+  if (dashboardLoadingTimer) {
+    clearTimeout(dashboardLoadingTimer);
+    dashboardLoadingTimer = null;
+  }
+  if (state !== 'loading') empty.classList.remove('loading');
+
   if (state === 'loading') {
     footer.textContent = '● Connecting...';
     if (!agents.length) {
-      title.textContent = 'Loading nodes...';
-      desc.textContent = 'Fetching the latest monitoring data.';
-      empty.classList.add('visible');
+      // Avoid flashing a large empty-state card during normal fast loads.
+      // Only reveal a compact loading hint when the request is noticeably slow.
+      empty.classList.remove('visible');
+      dashboardLoadingTimer = setTimeout(() => {
+        dashboardLoadingTimer = null;
+        if (!agents.length && refreshInFlight) {
+          title.textContent = 'Loading nodes...';
+          desc.textContent = 'Fetching the latest monitoring data.';
+          empty.classList.add('loading', 'visible');
+        }
+      }, 350);
     }
   } else if (state === 'error') {
     footer.textContent = '● Connection error';
