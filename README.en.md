@@ -1,7 +1,7 @@
 # Needle
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Robinproxy/Needle/main/internal/server/static/favicon.svg" width="72" height="72" alt="Needle">
+  <img src="https://raw.githubusercontent.com/Robinproxy/Needle/main/avatar.png" width="96" height="96" alt="Needle">
 </p>
 
 <p align="center">

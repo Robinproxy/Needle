@@ -4,9 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Needle Dashboard</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="512x512" href="/favicon.png?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=2">
+<link rel="icon" type="image/x-icon" href="/favicon.ico?v=2">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<link rel="manifest" href="/site.webmanifest?v=2">
+<meta name="theme-color" content="#070a12">
 <link rel="stylesheet" href="/vendor/flag-icons.min.css">
 <link rel="stylesheet" href="/style.css">
 <script src="/vendor/echarts.min.js"></script>
@@ -15,14 +20,7 @@
   <header>
     <div class="container header-inner">
       <a class="brand" href="/" onclick="event.preventDefault();goHome()" aria-label="Go to dashboard home" title="Home">
-        <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
-          <path class="brand-ring" d="M7.6 20.4C5.7 18.9 4.5 16.6 4.5 14c0-5.1 5.4-8.9 11.5-8.9S27.5 8.9 27.5 14c0 2.6-1.2 4.9-3.1 6.4"/>
-          <path class="brand-ring-inner" d="M10.1 18.5C9 17.4 8.4 15.9 8.4 14.2c0-3.5 3.4-6.1 7.6-6.1s7.6 2.6 7.6 6.1c0 1.7-.6 3.2-1.7 4.3"/>
-          <path class="brand-mast" d="M16 3.6v21.8M12.3 10.6 16 3.6l3.7 7M11.1 22.3 16 25.4l4.9-3.1"/>
-          <path class="brand-beam" d="M16 7.5 9.2 20.5M16 7.5l6.8 13M6.1 25.9c2.2-1 4.4-1 6.6 0s4.4 1 6.6 0 4.4-1 6.6 0"/>
-          <circle class="brand-core" cx="16" cy="14.2" r="2.4"/>
-          <circle class="brand-spark" cx="16" cy="14.2" r="0.82"/>
-        </svg>
+        <img class="brand-icon" src="/favicon.svg?v=2" width="28" height="28" alt="" aria-hidden="true">
         <div class="brand-text">
           <h1>NEEDLE</h1>
           <p>Server Monitoring</p>
