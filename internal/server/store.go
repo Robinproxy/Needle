@@ -138,6 +138,11 @@ func (s *Store) migrate() error {
 			boundary INTEGER NOT NULL,
 			total_sent INTEGER NOT NULL,
 			total_recv INTEGER NOT NULL,
+			usage_sent INTEGER,
+			usage_recv INTEGER,
+			last_sent INTEGER,
+			last_recv INTEGER,
+			updated_at INTEGER,
 			created_at INTEGER NOT NULL,
 			PRIMARY KEY (agent_id, boundary)
 		)`,
@@ -176,6 +181,14 @@ func (s *Store) migrate() error {
 	// migrate expires_at and billing_period (added in v0.3.5)
 	s.db.Exec("ALTER TABLE agents ADD COLUMN expires_at INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN billing_period TEXT DEFAULT ''")
+	// Persist traffic deltas across kernel counter resets (for example a
+	// reboot). Nullable columns let upgraded databases lazily seed the current
+	// cycle from their existing baseline without changing the displayed usage.
+	s.db.Exec("ALTER TABLE traffic_baselines ADD COLUMN usage_sent INTEGER")
+	s.db.Exec("ALTER TABLE traffic_baselines ADD COLUMN usage_recv INTEGER")
+	s.db.Exec("ALTER TABLE traffic_baselines ADD COLUMN last_sent INTEGER")
+	s.db.Exec("ALTER TABLE traffic_baselines ADD COLUMN last_recv INTEGER")
+	s.db.Exec("ALTER TABLE traffic_baselines ADD COLUMN updated_at INTEGER")
 	if err := s.migrateDropAutoIncrement(); err != nil {
 		return err
 	}
@@ -540,6 +553,11 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 		if err := ensureTrafficBaseline(tx, s.now().Unix(), agentID, *r.BaselineBoundary); err != nil {
 			return 0, err
 		}
+		if r.Metric != nil {
+			if err := accumulateTrafficUsage(tx, s.now().Unix(), agentID, *r.BaselineBoundary, r.Metric.TotalSent, r.Metric.TotalRecv); err != nil {
+				return 0, err
+			}
+		}
 	}
 	for i := range r.TCPings {
 		r.TCPings[i].AgentID = agentID
@@ -725,7 +743,6 @@ func (s *Store) GetTCPingHourly(agentID, since, until int64) ([]TCPingRow, error
 	return results, rows.Err()
 }
 
-
 func (s *Store) GetTCPingResultsWindowSampled(agentID int64, since, until, bucketSeconds int64) ([]TCPingRow, error) {
 	if bucketSeconds > 0 {
 		return s.getTCPingResultsAggregated(agentID, since, until, bucketSeconds)
@@ -842,11 +859,12 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 	boundary := monthlyBoundary(resetDay, s.now())
 	boundaryUnix := boundary.Unix()
 
-	var baseSent, baseRecv sql.NullInt64
+	var baseSent, baseRecv, usageSent, usageRecv sql.NullInt64
 	err = s.db.QueryRow(
-		`SELECT total_sent, total_recv FROM traffic_baselines WHERE agent_id = ? AND boundary = ?`,
+		`SELECT total_sent, total_recv, usage_sent, usage_recv
+		 FROM traffic_baselines WHERE agent_id = ? AND boundary = ?`,
 		agentID, boundaryUnix,
-	).Scan(&baseSent, &baseRecv)
+	).Scan(&baseSent, &baseRecv, &usageSent, &usageRecv)
 	if err == sql.ErrNoRows {
 		// No snapshot yet (pre-baseline install or first report of the cycle
 		// not seen): fall back to the earliest surviving metric of the cycle.
@@ -861,6 +879,12 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if usageSent.Valid && usageRecv.Valid {
+		usage.Sent = usageSent.Int64
+		usage.Recv = usageRecv.Int64
+		usage.HasData = true
+		return usage, nil
 	}
 
 	var latestSent, latestRecv sql.NullInt64
@@ -899,6 +923,66 @@ func ensureTrafficBaseline(x execer, stampedAt, agentID, boundary int64) error {
 		 FROM metrics WHERE agent_id = ? AND created_at >= ?
 		 ORDER BY created_at LIMIT 1`,
 		agentID, boundary, stampedAt, agentID, boundary,
+	)
+	return err
+}
+
+// accumulateTrafficUsage maintains the billing cycle's durable usage from
+// successive kernel counters. Normally it adds the positive delta. When a
+// counter moves backwards (reboot, interface replacement, or counter reset),
+// the new value is traffic since that reset and is added to the usage already
+// recorded for the cycle instead of discarding the pre-reset traffic.
+//
+// Existing installations have NULL accumulator columns. Their first report
+// seeds usage from the old baseline calculation so an upgrade does not make
+// the dashboard jump or reset mid-cycle.
+func accumulateTrafficUsage(x execer, stampedAt, agentID, boundary, currentSent, currentRecv int64) error {
+	var baseSent, baseRecv int64
+	var usageSent, usageRecv, lastSent, lastRecv sql.NullInt64
+	err := x.QueryRow(
+		`SELECT total_sent, total_recv, usage_sent, usage_recv, last_sent, last_recv
+		 FROM traffic_baselines WHERE agent_id = ? AND boundary = ?`,
+		agentID, boundary,
+	).Scan(&baseSent, &baseRecv, &usageSent, &usageRecv, &lastSent, &lastRecv)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	if !usageSent.Valid || !usageRecv.Valid || !lastSent.Valid || !lastRecv.Valid {
+		initialSent := currentSent - baseSent
+		if initialSent < 0 {
+			initialSent = currentSent
+		}
+		initialRecv := currentRecv - baseRecv
+		if initialRecv < 0 {
+			initialRecv = currentRecv
+		}
+		_, err = x.Exec(
+			`UPDATE traffic_baselines
+			 SET usage_sent = ?, usage_recv = ?, last_sent = ?, last_recv = ?, updated_at = ?
+			 WHERE agent_id = ? AND boundary = ?`,
+			initialSent, initialRecv, currentSent, currentRecv, stampedAt, agentID, boundary,
+		)
+		return err
+	}
+
+	deltaSent := currentSent - lastSent.Int64
+	if deltaSent < 0 {
+		deltaSent = currentSent
+	}
+	deltaRecv := currentRecv - lastRecv.Int64
+	if deltaRecv < 0 {
+		deltaRecv = currentRecv
+	}
+	_, err = x.Exec(
+		`UPDATE traffic_baselines
+		 SET usage_sent = usage_sent + ?, usage_recv = usage_recv + ?,
+		     last_sent = ?, last_recv = ?, updated_at = ?
+		 WHERE agent_id = ? AND boundary = ?`,
+		deltaSent, deltaRecv, currentSent, currentRecv, stampedAt, agentID, boundary,
 	)
 	return err
 }

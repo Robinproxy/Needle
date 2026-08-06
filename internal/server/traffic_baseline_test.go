@@ -167,20 +167,123 @@ func TestTrafficUsageNewCycle(t *testing.T) {
 	assertUsage(t, store, agentID, 300, 400)
 }
 
-// A counter reset (reboot) mid-cycle degrades to totals since boot.
-func TestTrafficUsageCounterReset(t *testing.T) {
+// A counter reset (reboot) mid-cycle keeps the pre-reboot usage and adds the
+// new counters reported since boot.
+func TestTrafficUsageSurvivesCounterReset(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.Local)
 	store, agentID := newTrafficTestStore(t, now, 5)
 	boundary := monthlyBoundary(5, now)
+	expiresAt := time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local).Unix()
+	report := func(at time.Time, sent, recv int64) {
+		t.Helper()
+		_, err := store.SaveReport(&ReportWrite{
+			Hostname:         "node-1",
+			Region:           "SG",
+			ExpiresAt:        &expiresAt,
+			BillingPeriod:    "1m",
+			Metric:           &MetricRow{TotalSent: sent, TotalRecv: recv},
+			CreatedAt:        at.Unix(),
+			BaselineBoundary: int64Ptr(boundary.Unix()),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	insertTrafficMetric(t, store, agentID, boundary, 1000, 1000)
+	report(boundary, 1000, 1000)               // cycle baseline
+	report(now.Add(-2*time.Hour), 2500, 3000)  // 1500 / 2000 used
+	report(now.Add(-time.Hour), 300, 400)      // reboot resets counters
+	report(now.Add(-30*time.Minute), 500, 700) // another 200 / 300
+	assertUsage(t, store, agentID, 2000, 2700) // pre- and post-reboot total
+}
+
+// The first report after upgrading from the baseline-only implementation must
+// seed the accumulator with all usage already visible in the current cycle.
+func TestTrafficAccumulatorUpgradeKeepsCurrentUsage(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.Local)
+	store, agentID := newTrafficTestStore(t, now, 5)
+	boundary := monthlyBoundary(5, now)
+	expiresAt := time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local).Unix()
+
+	insertTrafficMetric(t, store, agentID, boundary, 100, 200)
 	if err := store.EnsureTrafficBaseline(agentID, boundary.Unix()); err != nil {
 		t.Fatal(err)
 	}
-	insertTrafficMetric(t, store, agentID, now.Add(-time.Hour), 300, 400)
+	// Simulate the last metric written by the old server version.
+	insertTrafficMetric(t, store, agentID, now.Add(-time.Hour), 600, 900)
+	assertUsage(t, store, agentID, 500, 700)
 
+	_, err := store.SaveReport(&ReportWrite{
+		Hostname:         "node-1",
+		Region:           "SG",
+		ExpiresAt:        &expiresAt,
+		BillingPeriod:    "1m",
+		Metric:           &MetricRow{TotalSent: 800, TotalRecv: 1200},
+		CreatedAt:        now.Unix(),
+		BaselineBoundary: int64Ptr(boundary.Unix()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUsage(t, store, agentID, 700, 1000)
+}
+
+// A new due-day boundary still starts a fresh accumulator even though reboot
+// resets no longer clear traffic inside a cycle.
+func TestTrafficAccumulatorResetsAtDueDay(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.Local)
+	store, agentID := newTrafficTestStore(t, now, 5)
+	expiresAt := time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local).Unix()
+	julyBoundary := monthlyBoundary(5, now)
+
+	for _, sample := range []struct {
+		at         time.Time
+		sent, recv int64
+	}{
+		{julyBoundary, 100, 200},
+		{now, 600, 900},
+	} {
+		_, err := store.SaveReport(&ReportWrite{
+			Hostname:         "node-1",
+			Region:           "SG",
+			ExpiresAt:        &expiresAt,
+			BillingPeriod:    "1m",
+			Metric:           &MetricRow{TotalSent: sample.sent, TotalRecv: sample.recv},
+			CreatedAt:        sample.at.Unix(),
+			BaselineBoundary: int64Ptr(julyBoundary.Unix()),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertUsage(t, store, agentID, 500, 700)
+
+	later := time.Date(2026, 8, 6, 12, 0, 0, 0, time.Local)
+	store.now = func() time.Time { return later }
+	augustBoundary := monthlyBoundary(5, later)
+	for _, sample := range []struct {
+		sent, recv int64
+	}{
+		{7000, 8000}, // first report in the new cycle becomes its baseline
+		{7300, 8400},
+	} {
+		_, err := store.SaveReport(&ReportWrite{
+			Hostname:         "node-1",
+			Region:           "SG",
+			ExpiresAt:        &expiresAt,
+			BillingPeriod:    "1m",
+			Metric:           &MetricRow{TotalSent: sample.sent, TotalRecv: sample.recv},
+			CreatedAt:        later.Unix(),
+			BaselineBoundary: int64Ptr(augustBoundary.Unix()),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	assertUsage(t, store, agentID, 300, 400)
 }
+
+func int64Ptr(v int64) *int64 { return &v }
 
 func TestDeleteAgentRemovesBaselines(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.Local)
