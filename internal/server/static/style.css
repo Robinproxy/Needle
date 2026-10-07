@@ -603,3 +603,5 @@ footer {
   .list-bar-label { width: auto; }
   .list-bar-val { width: auto; min-width: 34px; }
 }
+
+.list-expiry:empty { display: none; }

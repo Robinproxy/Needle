@@ -373,6 +373,7 @@ cmd_install() {
   echo "  2) Quarterly (3m)"
   echo "  3) Semi-annual (6m)"
   echo "  4) Annual (12m)"
+  echo "  5) Permanent (forever; traffic resets monthly on day 1)"
   echo "  0) Skip"
   read_prompt PERIOD_CHOICE "Select billing period [0]: "
 
@@ -383,10 +384,11 @@ cmd_install() {
     2) BILLING_PERIOD="3m";  DEFAULT_EXPIRY=$(date -d "+3 months" +%Y-%m-%d 2>/dev/null || date -v+3m +%Y-%m-%d) ;;
     3) BILLING_PERIOD="6m";  DEFAULT_EXPIRY=$(date -d "+6 months" +%Y-%m-%d 2>/dev/null || date -v+6m +%Y-%m-%d) ;;
     4) BILLING_PERIOD="12m"; DEFAULT_EXPIRY=$(date -d "+1 year" +%Y-%m-%d 2>/dev/null || date -v+1y +%Y-%m-%d) ;;
+    5) BILLING_PERIOD="forever" ;;
     *) BILLING_PERIOD="" ;;
   esac
 
-  if [ -n "$BILLING_PERIOD" ]; then
+  if [ -n "$BILLING_PERIOD" ] && [ "$BILLING_PERIOD" != "forever" ]; then
     read_prompt EXPIRES_AT "Next renewal date [${DEFAULT_EXPIRY}]: "
     EXPIRES_AT="${EXPIRES_AT:-$DEFAULT_EXPIRY}"
   fi

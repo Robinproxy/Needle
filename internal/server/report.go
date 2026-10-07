@@ -55,9 +55,12 @@ func validateReport(req *reportRequest, now time.Time) error {
 	}
 
 	switch req.BillingPeriod {
-	case "", "1m", "3m", "6m", "12m":
+	case "", "1m", "3m", "6m", "12m", "forever":
 	default:
 		return fmt.Errorf("invalid billing period")
+	}
+	if req.BillingPeriod == "forever" {
+		req.ExpiresAt = nil // Permanent nodes have no renewal date.
 	}
 	if req.ExpiresAt != nil {
 		minTime := now.AddDate(-20, 0, 0).Unix()

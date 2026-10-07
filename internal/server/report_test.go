@@ -24,6 +24,7 @@ func TestValidateReport(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "valid", body: `{"hostname":"node-1","billing_period":"1m","cpu":{"percent":50},"memory":{"total":100,"used":50},"disk":{"total":200,"used":100},"network":{"up":10,"down":20,"total_sent":30,"total_recv":40},"load":{"load1":1,"load5":2,"load15":3},"uptime":100,"tcpping":[{"name":"CMv4","target":"example.com:80","latency_ms":12.5,"success":true}]}`},
+		{name: "forever without expiry", body: `{"hostname":"node-1","billing_period":"forever"}`},
 		{name: "trim hostname", body: `{"hostname":" node-1 "}`},
 		{name: "empty hostname", body: `{"hostname":" "}`, wantErr: true},
 		{name: "hostname control", body: `{"hostname":"node\n1"}`, wantErr: true},

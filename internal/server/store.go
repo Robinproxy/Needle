@@ -841,21 +841,26 @@ func (s *Store) GetTraffic(agentID int64) (sent, recv int64, err error) {
 
 func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 	var expiresAt sql.NullInt64
+	var billingPeriod string
 	err := s.db.QueryRow(
-		"SELECT expires_at FROM agents WHERE id = ?", agentID,
-	).Scan(&expiresAt)
+		"SELECT expires_at, billing_period FROM agents WHERE id = ?", agentID,
+	).Scan(&expiresAt, &billingPeriod)
 	if err == sql.ErrNoRows {
 		return &TrafficUsage{Reason: "agent_not_found"}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !expiresAt.Valid {
+	var expiry *int64
+	if expiresAt.Valid {
+		expiry = &expiresAt.Int64
+	}
+	resetDay, configured := trafficResetDay(billingPeriod, expiry)
+	if !configured {
 		return &TrafficUsage{Reason: "billing_not_configured"}, nil
 	}
 
 	usage := &TrafficUsage{Available: true}
-	resetDay := time.Unix(expiresAt.Int64, 0).Day()
 	boundary := monthlyBoundary(resetDay, s.now())
 	boundaryUnix := boundary.Unix()
 
@@ -985,6 +990,17 @@ func accumulateTrafficUsage(x execer, stampedAt, agentID, boundary, currentSent,
 		deltaSent, deltaRecv, currentSent, currentRecv, stampedAt, agentID, boundary,
 	)
 	return err
+}
+
+// Permanent nodes use calendar months; finite nodes keep their renewal day.
+func trafficResetDay(period string, expiresAt *int64) (int, bool) {
+	if period == "forever" {
+		return 1, true
+	}
+	if expiresAt == nil {
+		return 0, false
+	}
+	return time.Unix(*expiresAt, 0).Day(), true
 }
 
 func monthlyBoundary(day int, now time.Time) time.Time {

@@ -163,13 +163,24 @@ Key fields:
 | `server` | Server URL; HTTPS is required for production |
 | `token` | A unique authentication token for this Agent |
 | `region` | Region code shown on the dashboard |
-| `billing_period` | Billing cycle (`1m`/`3m`/`6m`/`12m`) used for the dashboard renewal countdown |
-| `expires_at` | Server renewal date in `YYYY-MM-DD` format; traffic resets monthly on that day of month |
+| `billing_period` | Billing cycle (`1m`/`3m`/`6m`/`12m`); `forever` means permanent and displays ♾️ |
+| `expires_at` | Server renewal date in `YYYY-MM-DD` format; traffic resets monthly on that day of month. Leave empty for `forever`, which resets traffic on day 1 |
 | `interval` | Reporting interval in seconds |
 | `interfaces` | NIC whitelist such as `["eth0"]`; when empty, physical NICs are counted automatically (loopback, docker/veth bridges, and VPN tunnels are excluded) |
 | `tls_skip_verify` | Skips TLS certificate verification; use only for temporary troubleshooting |
 | `allow_plain_http` | Allows a remote plaintext HTTP Server; not recommended |
 | `tcpping` | TCP Ping target list |
+
+### Permanent nodes
+
+Select `5) Permanent` in the Agent installer, or configure:
+
+```yaml
+billing_period: "forever"
+expires_at: ""
+```
+
+The dashboard displays ♾️ with no renewal countdown. Traffic resets on the first day of each month in the Server timezone. Any existing expiry date is ignored in this mode. Upgrade the Server before enabling the new billing period.
 
 After editing the configuration, restart and check the Agent:
 

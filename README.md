@@ -163,13 +163,22 @@ tcpping:
 | `server` | Server 地址，生产环境应使用 HTTPS |
 | `token` | 每台 Agent 独立使用的认证 Token |
 | `region` | 面板显示的地区代码 |
-| `billing_period` | 计费周期（`1m`/`3m`/`6m`/`12m`），用于面板的到期倒计时 |
-| `expires_at` | 服务器到期日期，格式为 `YYYY-MM-DD`；流量每月在该日期的同一天清零 |
+| `billing_period` | 计费周期（`1m`/`3m`/`6m`/`12m`）；`forever` 表示永久，面板显示 ♾️ |
+| `expires_at` | 服务器到期日期，格式为 `YYYY-MM-DD`；流量每月在该日期的同一天清零；`forever` 时留空，流量每月 1 日清零 |
 | `interval` | 上报间隔，单位为秒 |
 | `interfaces` | 网卡白名单，例如 `["eth0"]`；留空时自动统计物理网卡（排除 loopback、docker/veth、VPN 隧道等虚拟接口） |
 | `tls_skip_verify` | 跳过 TLS 证书校验，仅用于临时排障 |
 | `allow_plain_http` | 允许连接远程明文 HTTP Server，不建议启用 |
 | `tcpping` | TCP Ping 目标列表 |
+
+永久节点配置示例（安装脚本中选择 `5) Permanent`）：
+
+```yaml
+billing_period: "forever"
+expires_at: ""
+```
+
+永久节点不计算到期倒计时，卡片显示 ♾️；流量按 Server 时区每月 1 日清零。已有到期日期在 `forever` 模式下会被忽略。启用前需升级 Server，使其支持新的周期值。
 
 修改配置后检查并重启：
 

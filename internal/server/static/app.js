@@ -352,6 +352,20 @@ function trafficHTML(data) {
   return '<span class="traffic-label">TRF</span><span class="traffic-down">\u2193 ' + formatBytes(data.recv) + '</span><span class="traffic-divider">/</span><span class="traffic-up">\u2191 ' + formatBytes(data.sent) + '</span>';
 }
 
+function expiryBadge(a) {
+  if (a.agent.billing_period === 'forever') {
+    return '<span class="expiry-days" title="No expiration" aria-label="No expiration">♾️</span>';
+  }
+  const days = a.expiry_days || 0;
+  if (days <= 0) return '';
+  return '<span class="expiry-days' + (days < 7 ? ' expiry-urgent' : '') + '" title="Due ' + escapeAttr(a.expiry_date || '') + '">' + days + 'd</span>';
+}
+
+function updateExpiryBadge(node, a) {
+  node.querySelector('.expiry-days')?.remove();
+  node.insertAdjacentHTML('beforeend', expiryBadge(a));
+}
+
 function renderCard(a, idx, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
@@ -365,8 +379,6 @@ function renderCard(a, idx, isActive) {
   const downSpeed = m ? formatSpeed(m.network_down) : '—';
   const uptime = m ? formatUptime(m.uptime) : '-';
   const seenTs = lastSeenMs(a);
-  const expiryDays = a.expiry_days || 0;
-  const expiryDate = a.expiry_date || '';
 
   // TCPing card line — selected target or first
   let pingHtml = '';
@@ -381,11 +393,7 @@ function renderCard(a, idx, isActive) {
     pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><button type="button" class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" aria-label="Show next TCP Ping target for ' + escapeAttr(a.agent.hostname) + '">' + escapeHtml(mapCarrier(p.name)) + '</button><span class="ping-lat"><span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + latClr + '">' + latStr + '</span></span><span class="ping-loss"><span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lossClr + '">' + lossStr + '</span></span></div>';
   }
 
-  let expiryHtml = '';
-  if (expiryDays > 0) {
-    const ec = expiryDays < 7 ? ' expiry-urgent' : '';
-    expiryHtml = '<span class="expiry-days' + ec + '" title="Due ' + expiryDate + '">' + expiryDays + 'd</span>';
-  }
+  const expiryHtml = expiryBadge(a);
 
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<div class="card-top">'
@@ -449,6 +457,7 @@ function renderListRow(a, idx, isActive) {
     + pingHtml
     + '<span class="list-net">\u2193' + downSpeed + ' \u2191' + upSpeed + '</span>'
     + '<span class="list-uptime">' + uptime + '</span>'
+    + '<span class="list-expiry">' + (a.agent.billing_period === 'forever' ? expiryBadge(a) : '') + '</span>'
     + '<span class="list-time">' + (seenTs ? relativeTime(seenTs) : '') + '</span>'
   + '</div>';
 }
@@ -1090,6 +1099,10 @@ async function softRefresh() {
       const isOnline = a._online || false;
 
       card.classList.toggle('offline', !isOnline);
+      const listExpiry = card.querySelector('.list-expiry');
+      if (listExpiry) listExpiry.innerHTML = a.agent.billing_period === 'forever' ? expiryBadge(a) : '';
+      const cardSub = card.querySelector('.card-sub');
+      if (cardSub) updateExpiryBadge(cardSub, a);
       const dot = card.querySelector('.status-dot');
       if (dot) {
         dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
@@ -1131,12 +1144,6 @@ async function softRefresh() {
 
         const sub = card.querySelector('.card-sub');
         if (sub) { const u = sub.querySelector('span:first-child'); if (u) u.textContent = formatUptime(m.uptime); }
-        const expiryEl = sub ? sub.querySelector('.expiry-days') : null;
-        if (a.expiry_days > 0 && expiryEl) {
-          expiryEl.textContent = a.expiry_days + 'd';
-          expiryEl.className = 'expiry-days' + (a.expiry_days < 7 ? ' expiry-urgent' : '');
-          expiryEl.title = 'Due ' + (a.expiry_date || '');
-        }
 
         const netDown = card.querySelector('.card-footer-line .net-down');
         const netUp = card.querySelector('.card-footer-line .net-up');

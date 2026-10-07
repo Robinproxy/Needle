@@ -373,8 +373,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.ExpiresAt != nil && req.Network != nil {
-		resetDay := time.Unix(*req.ExpiresAt, 0).Day()
+	if resetDay, configured := trafficResetDay(req.BillingPeriod, req.ExpiresAt); configured && req.Network != nil {
 		boundary := monthlyBoundary(resetDay, now).Unix()
 		write.BaselineBoundary = &boundary
 	}

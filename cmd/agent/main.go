@@ -88,7 +88,7 @@ func main() {
 	log.Printf("Needle Agent - server: %s, interval: %ds", serverURL, cfg.Interval)
 
 	var expiresAtUnix *int64
-	if cfg.ExpiresAt != "" {
+	if cfg.ExpiresAt != "" && cfg.BillingPeriod != "forever" {
 		t, err := time.Parse("2006-01-02", cfg.ExpiresAt)
 		if err != nil {
 			log.Printf("WARNING: invalid expires_at %q (expected YYYY-MM-DD); billing period and due date will not be reported", cfg.ExpiresAt)
