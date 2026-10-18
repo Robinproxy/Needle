@@ -323,30 +323,60 @@ The installer adds `/etc/needle/` to `/etc/sysupgrade.conf`. Firmware upgrades t
 ## Common Paths
 
 <details>
-<summary><strong>Server and Agent file locations</strong></summary>
+<summary><strong>Server — Docker</strong></summary>
 
-| Deployment | Item | Path |
-| --- | --- | --- |
-| Server Docker | Compose file | `~/needle/docker-compose.yml` |
-| Server Docker | Optional Compose environment | `~/needle/.env` |
-| Server Docker | Host database | `~/needle/data/needle.db` |
-| Server Docker | Container database | `/data/needle.db` |
-| Server binary | Executable | `/opt/needle/bin/needle-server` |
-| Server binary | Environment | `/opt/needle/.env` |
-| Server binary | Database | `/opt/needle/data/needle.db` |
-| Server binary | Service | `/etc/systemd/system/needle-server.service` |
-| Agent binary | Executable | `/opt/needle-agent/bin/needle-agent` |
-| Agent binary | Configuration | `/opt/needle-agent/agent.yaml` |
-| Agent binary | Backup before settings reselection | `/opt/needle-agent/agent.yaml.bak` |
-| Agent binary | Service | `/etc/systemd/system/needle-agent.service` |
-| Agent OpenWrt | Executable | `/usr/bin/needle-agent` |
-| Agent OpenWrt | Configuration | `/etc/needle/agent.yaml` |
-| Agent OpenWrt | Backup before settings reselection | `/etc/needle/agent.yaml.bak` |
-| Agent OpenWrt | Installed version | `/etc/needle/version` |
-| Agent OpenWrt | Service | `/etc/init.d/needle-agent` |
-| Agent OpenWrt | Firmware backup list | `/etc/sysupgrade.conf` |
+| Item | Path |
+| --- | --- |
+| Compose file | `~/needle/docker-compose.yml` |
+| Optional Compose environment | `~/needle/.env` |
+| Host database | `~/needle/data/needle.db` |
+| Container database | `/data/needle.db` |
 
-Docker host paths assume the deployment directory used above. Binary paths are the installer defaults.
+Host paths assume the deployment directory used above.
+
+</details>
+
+<details>
+<summary><strong>Server — Binary</strong></summary>
+
+| Item | Path |
+| --- | --- |
+| Executable | `/opt/needle/bin/needle-server` |
+| Environment | `/opt/needle/.env` |
+| Database | `/opt/needle/data/needle.db` |
+| Service | `/etc/systemd/system/needle-server.service` |
+
+Paths are the installer defaults.
+
+</details>
+
+<details>
+<summary><strong>Agent — Binary</strong></summary>
+
+| Item | Path |
+| --- | --- |
+| Executable | `/opt/needle-agent/bin/needle-agent` |
+| Configuration | `/opt/needle-agent/agent.yaml` |
+| Backup before settings reselection | `/opt/needle-agent/agent.yaml.bak` |
+| Service | `/etc/systemd/system/needle-agent.service` |
+
+Paths are the installer defaults.
+
+</details>
+
+<details>
+<summary><strong>Agent — OpenWrt / ImmortalWrt</strong></summary>
+
+| Item | Path |
+| --- | --- |
+| Executable | `/usr/bin/needle-agent` |
+| Configuration | `/etc/needle/agent.yaml` |
+| Backup before settings reselection | `/etc/needle/agent.yaml.bak` |
+| Installed version | `/etc/needle/version` |
+| Service | `/etc/init.d/needle-agent` |
+| Firmware backup list | `/etc/sysupgrade.conf` |
+
+Paths are the installer defaults.
 
 </details>
 
