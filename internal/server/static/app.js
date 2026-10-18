@@ -513,12 +513,6 @@ function dashboardLayoutSignature(list) {
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 
-function tcpingStatusText(a) {
-  if (a?.tcpping_enabled === false) return 'TCP Ping disabled';
-  const count = a?.latest_tcpping?.length || 0;
-  return count ? count + ' target' + (count === 1 ? '' : 's') + ' enabled' : 'No TCP Ping data yet';
-}
-
 function renderCard(a, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
@@ -634,14 +628,7 @@ function renderDetailContent(id) {
   const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
   detailEl.innerHTML = '<div class="detail-header">'
     + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
-    + '<div class="detail-actions">'
-      + '<div class="theme-btn-group detail-range-group" role="group" aria-label="History range">'
-        + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
-        + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
-        + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
-      + '</div>'
-      + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
-    + '</div>'
+    + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
     + '</div>'
     + '<div class="spark-grid">'
       + '<div class="spark-item"><div class="spark-header"><span class="label">CPU</span><span class="value" id="spark-cpu-val">—</span></div><div id="spark-cpu" class="spark-chart"></div></div>'
@@ -649,27 +636,30 @@ function renderDetailContent(id) {
       + '<div class="spark-item"><div class="spark-header"><span class="label">Net In</span><span class="value" id="spark-netin-val">—</span></div><div id="spark-netin" class="spark-chart"></div></div>'
       + '<div class="spark-item"><div class="spark-header"><span class="label">Net Out</span><span class="value" id="spark-netout-val">—</span></div><div id="spark-netout" class="spark-chart"></div></div>'
     + '</div>'
-    + (probesEnabled ? '' : '<div class="tcpping-day-nav metrics-day-nav" id="metrics-days-' + id + '" hidden></div>')
     + '<p class="detail-load-error" id="metrics-error-' + id + '" role="status" hidden></p>'
-    + (probesEnabled ? '<div class="tcpping-section" id="tcpping-section-' + id + '">'
+    + '<div class="tcpping-section" id="tcpping-section-' + id + '">'
       + '<div class="tcpping-header">'
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
+          + '<div class="theme-btn-group detail-range-group" role="group" aria-label="History range">'
+            + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
+            + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
+            + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
+          + '</div>'
         + '</div>'
-        + '<div class="tcpping-controls">'
+        + (probesEnabled ? '<div class="tcpping-controls">'
           + '<div class="theme-btn-group">'
             + '<button class="theme-btn active" onclick="tcppingSelectAll(\'' + id + '\')">Show</button>'
             + '<button class="theme-btn" onclick="tcppingSelectNone(\'' + id + '\')">Hide</button>'
           + '</div>'
-        + '</div>'
+        + '</div>' : '')
       + '</div>'
-      + '<p class="tcpping-status" id="tcpping-status-' + id + '">' + escapeHtml(tcpingStatusText(agent)) + '</p>'
-      + '<p class="detail-load-error" id="tcpping-error-' + id + '" role="status" hidden></p>'
+      + (probesEnabled ? '<p class="detail-load-error" id="tcpping-error-' + id + '" role="status" hidden></p>'
       + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div><div id="tcpping-days-' + id + '" class="tcpping-day-nav"></div></div>'
       + '<div class="tcpping-stats" id="tcpping-stats-' + id + '">'
         + '<div id="tcpping-rows-' + id + '"></div>'
-      + '</div>'
-    + '</div>' : '');
+      + '</div>' : '<div class="tcpping-day-nav metrics-day-nav" id="metrics-days-' + id + '" hidden></div>')
+    + '</div>';
 
   currentTcppingRange = range;
   currentMetricsRange = range;
@@ -938,9 +928,6 @@ function activeTcppingResults(id, results) {
 
 function renderTCPingChart(id, results) {
   results = activeTcppingResults(id, results);
-  const agent = agents.find(a => a.agent.id === Number(id));
-  const status = document.getElementById('tcpping-status-' + id);
-  if (status) status.textContent = tcpingStatusText(agent);
   if (!results || !results.length) {
     if (tcppingChart) { tcppingChart.dispose(); tcppingChart = null; }
     const nav = document.getElementById('tcpping-days-' + id);
