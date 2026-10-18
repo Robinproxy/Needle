@@ -452,8 +452,9 @@ function cardMetricsHTML(a) {
 }
 
 function cardProbesHTML(a) {
+  if (a.tcpping_enabled === false) return '';
   const probes = a.latest_tcpping || [];
-  if (!probes.length) return '<span class="ping-disabled">' + (a.tcpping_enabled === false ? 'TCP Ping disabled' : 'No TCP Ping data') + '</span>';
+  if (!probes.length) return '<span class="ping-disabled">No TCP Ping data</span>';
   const groups = { IPv4: [], IPv6: [], Custom: [] };
   probes.forEach(p => {
     const name = mapCarrier(p.name);
@@ -534,7 +535,8 @@ function renderCard(a, isActive) {
     + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
     + '<div class="card-metrics">' + cardMetricsHTML(a) + '</div>'
     + '<div class="card-speeds" title="' + (seenTs ? 'Last report ' + escapeAttr(relativeTime(seenTs)) : 'No reports yet') + '">' + cardNetworkHTML(a) + '</div>'
-    + '<div class="card-probes">' + cardProbesHTML(a) + '</div>'
+    + (a.tcpping_enabled === false ? '<div class="card-probes-off"><span>TCP Ping · Off</span></div>'
+      : '<div class="card-probes">' + cardProbesHTML(a) + '</div>')
   + '</div>';
 }
 
@@ -552,8 +554,8 @@ function renderListRow(a, idx, isActive) {
   const regionLabel = region && region.length === 2 ? flagEmoji(region) : escapeHtml(region || '');
   const sess = String(idx + 1).padStart(2, '0');
 
-  let pingHtml = a.tcpping_enabled === false ? '<span class="list-ping ping-disabled">Disabled</span>' : '';
-  if (a.latest_tcpping && a.latest_tcpping.length > 0) {
+  let pingHtml = '';
+  if (a.tcpping_enabled !== false && a.latest_tcpping && a.latest_tcpping.length > 0) {
     const p = a.latest_tcpping[0];
     const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
     const lossStr = p.success ? '0%' : '100%';
@@ -628,10 +630,18 @@ function renderDetailContent(id) {
   if (!agent) return;
 
   const range = currentMetricsRange || '24h';
+  const probesEnabled = agent.tcpping_enabled !== false;
   const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
   detailEl.innerHTML = '<div class="detail-header">'
     + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
-    + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
+    + '<div class="detail-actions">'
+      + '<div class="theme-btn-group detail-range-group" role="group" aria-label="History range">'
+        + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
+        + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
+        + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
+      + '</div>'
+      + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
+    + '</div>'
     + '</div>'
     + '<div class="spark-grid">'
       + '<div class="spark-item"><div class="spark-header"><span class="label">CPU</span><span class="value" id="spark-cpu-val">—</span></div><div id="spark-cpu" class="spark-chart"></div></div>'
@@ -639,16 +649,12 @@ function renderDetailContent(id) {
       + '<div class="spark-item"><div class="spark-header"><span class="label">Net In</span><span class="value" id="spark-netin-val">—</span></div><div id="spark-netin" class="spark-chart"></div></div>'
       + '<div class="spark-item"><div class="spark-header"><span class="label">Net Out</span><span class="value" id="spark-netout-val">—</span></div><div id="spark-netout" class="spark-chart"></div></div>'
     + '</div>'
+    + (probesEnabled ? '' : '<div class="tcpping-day-nav metrics-day-nav" id="metrics-days-' + id + '" hidden></div>')
     + '<p class="detail-load-error" id="metrics-error-' + id + '" role="status" hidden></p>'
-    + '<div class="tcpping-section" id="tcpping-section-' + id + '">'
+    + (probesEnabled ? '<div class="tcpping-section" id="tcpping-section-' + id + '">'
       + '<div class="tcpping-header">'
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
-          + '<div class="theme-btn-group detail-range-group">'
-            + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
-            + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
-            + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
-          + '</div>'
         + '</div>'
         + '<div class="tcpping-controls">'
           + '<div class="theme-btn-group">'
@@ -663,7 +669,7 @@ function renderDetailContent(id) {
       + '<div class="tcpping-stats" id="tcpping-stats-' + id + '">'
         + '<div id="tcpping-rows-' + id + '"></div>'
       + '</div>'
-    + '</div>';
+    + '</div>' : '');
 
   currentTcppingRange = range;
   currentMetricsRange = range;
@@ -714,14 +720,15 @@ async function loadDetailData(id, range) {
   const isCurrent = () => detailRequest === request && expandedId === Number(id)
     && document.getElementById('detail-' + id) === request.element;
   detailDayAlerts = new Map();
-  let pingResults;
-  await Promise.all(['metrics', 'tcpping'].map(async kind => {
+  const probesEnabled = agents.find(a => a.agent.id === Number(id))?.tcpping_enabled !== false;
+  let metricResults, pingResults;
+  await Promise.all((probesEnabled ? ['metrics', 'tcpping'] : ['metrics']).map(async kind => {
     let rendering = false;
     try {
       const rows = await fetchRows(detailDataURL(id, kind, range), { signal: request.controller.signal });
       if (!isCurrent()) return;
       rendering = true;
-      if (kind === 'metrics') renderSparklines(id, rows);
+      if (kind === 'metrics') { metricResults = rows; renderSparklines(id, rows); }
       else { pingResults = rows; renderTCPingChart(id, rows); }
       const errorEl = document.getElementById(kind + '-error-' + id);
       if (errorEl) errorEl.hidden = true;
@@ -743,6 +750,9 @@ async function loadDetailData(id, range) {
     try {
       const activeResults = activeTcppingResults(id, pingResults);
       if (activeResults.length && tcppingChart) renderDayNav(id, activeResults, chartWindowForResults(activeResults));
+      if (!probesEnabled && metricResults) {
+        renderDayNav(id, metricResults, metricResults.length ? chartWindowForResults(metricResults) : null, 'metrics');
+      }
     } catch (error) {
       console.error('Detail day navigation render:', error);
     } finally { detailRequest = null; }
@@ -754,8 +764,8 @@ function localDayKey(ts) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// The 7d view gets per-day anomaly detection and the clickable day
-// navigation below the TCPing chart; 30d is a plain trend view.
+// The 7d view gets per-day anomaly detection and clickable day navigation;
+// without probes the navigator sits below the system charts. 30d is a trend view.
 function overviewDays(range) {
   return range === '168h' ? 7 : 0;
 }
@@ -902,7 +912,7 @@ function switchDetailRange(id, range) {
   currentHistoryDay = null;
   currentMetricsRange = range;
   currentTcppingRange = range;
-  const rangeBtns = document.querySelectorAll('#tcpping-section-' + id + ' .detail-range-group .theme-btn');
+  const rangeBtns = document.querySelectorAll('#detail-' + id + ' .detail-range-group .theme-btn');
   rangeBtns.forEach(b => {
     b.classList.toggle('active', b.dataset.range === range);
   });
@@ -921,6 +931,7 @@ function formatRangeAxisLabel(ts) {
 
 function activeTcppingResults(id, results) {
   const agent = agents.find(a => a.agent.id === Number(id));
+  if (agent?.tcpping_enabled === false) return [];
   const activeNames = new Set((agent?.latest_tcpping || []).map(p => p.name));
   return (results || []).filter(r => activeNames.has(r.name));
 }
@@ -934,7 +945,7 @@ function renderTCPingChart(id, results) {
     if (tcppingChart) { tcppingChart.dispose(); tcppingChart = null; }
     const nav = document.getElementById('tcpping-days-' + id);
     if (nav) nav.innerHTML = '';
-    const message = agent?.tcpping_enabled === false ? 'TCP Ping disabled. No recorded data in this range.' : 'No TCP Ping data in this range.';
+    const message = 'No TCP Ping data in this range.';
     const el = document.getElementById('tcpping-chart-' + id);
     if (el) el.innerHTML = '<div style="color:hsl(215,20%,65%);font-size:13px;text-align:center;padding:80px 0">' + message + '</div>';
     const rows = document.getElementById('tcpping-rows-' + id);
@@ -1110,12 +1121,13 @@ function axisDatePosition(ts, win) {
 
 // 7d and 30d use one custom time-axis renderer. Each label owns its tick mark,
 // so text can never drift away from an independently generated ECharts tick.
-function renderDayNav(id, results, overviewWin) {
-  const nav = document.getElementById('tcpping-days-' + id);
+function renderDayNav(id, results, overviewWin, kind = 'tcpping') {
+  const nav = document.getElementById(kind + '-days-' + id);
   if (!nav) return;
 
+  const range = kind === 'metrics' ? currentMetricsRange : currentTcppingRange;
   let html = '';
-  if (currentTcppingRange === '720h' && overviewWin) {
+  if (range === '720h' && overviewWin) {
     const win = overviewWin;
     const days = Math.max(1, (win[1] - win[0]) / 86400000);
     const stepDays = Math.max(1, Math.ceil(days / 6));
@@ -1123,7 +1135,7 @@ function renderDayNav(id, results, overviewWin) {
       '<span class="axis-date" style="' + axisDatePosition(t, win) + '">'
         + formatHistoryDay(t) + '</span>'
     ).join('');
-  } else if (currentTcppingRange === '168h' && overviewWin) {
+  } else if (range === '168h' && overviewWin) {
     const win = overviewWin;
     const dataDays = new Set((results || []).map(r => localDayKey(r.created_at * 1000)));
     const dayButton = (ts) => {
@@ -1132,7 +1144,7 @@ function renderDayNav(id, results, overviewWin) {
       const hasData = dataDays.has(key);
       const title = [key].concat(hasData
         ? (alerts.length ? alerts : ['No detected anomalies'])
-        : ['No TCP Ping data']).join('\n');
+        : [kind === 'metrics' ? 'No metrics data' : 'No TCP Ping data']).join('\n');
       return '<button type="button" class="' + (alerts.length ? 'has-alert ' : '') + (hasData ? '' : 'no-data')
         + '" style="' + axisDatePosition(ts, win) + '"'
         + (hasData ? ' onclick="openHistoricalDay(' + Number(id) + ',' + ts + ')"' : ' disabled')
@@ -1299,7 +1311,8 @@ function updateLiveSummaries(data) {
       if (seenEl && seenTs) seenEl.textContent = relativeTime(seenTs);
       if (card.classList.contains('card')) {
         card.querySelector('.card-metrics').innerHTML = cardMetricsHTML(a);
-        card.querySelector('.card-probes').innerHTML = cardProbesHTML(a);
+        const probes = card.querySelector('.card-probes');
+        if (probes) probes.innerHTML = cardProbesHTML(a);
         card.querySelector('.card-sub span:first-child').textContent = m ? formatUptime(m.uptime) : '-';
         const speeds = card.querySelector('.card-speeds');
         speeds.innerHTML = cardNetworkHTML(a);

@@ -96,6 +96,43 @@ function harness() {
   d.fetch=async()=>response([]);await d.loadDetailData(1,'24h');
   assert.equal(detail.elements.get('tcpping-error-1').hidden,true);
 
+  // Disabling probes must stop history requests while preserving system ranges
+  // and the weekly date drill-down, even with old probe samples still present.
+  const requested=[];
+  const now=Math.floor(Date.now()/1000);
+  d.fixture=[{...node,tcpping_enabled:false,latest_tcpping:[{name:'old',created_at:now}]}];
+  vm.runInContext('agents=fixture;currentMetricsRange="168h";currentTcppingRange="168h";',d);
+  detail.elements.set('metrics-days-1',{innerHTML:'',hidden:true});
+  detail.elements.set('detail-day-btn',{textContent:'1d',classList:{add:()=>{}}});
+  d.fetch=async url=>{requested.push(url);return response([{created_at:now,cpu_usage:20}]);};
+  const beforeDisabled=d.drawn.length;
+  await d.loadDetailData(1,'168h');
+  assert.equal(requested.length,1);
+  assert(requested[0].includes('/metrics?range=168h'));
+  assert.equal(d.drawn.length,beforeDisabled+1);
+  assert.equal(d.drawn.at(-1).kind,'metrics');
+  assert(detail.elements.get('metrics-days-1').innerHTML.includes('openHistoricalDay(1,'));
+  assert(!detail.elements.get('metrics-days-1').hidden);
+  d.openHistoricalDay(1,now*1000);
+  // Fetch starts synchronously; await completion before changing the fixture.
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert(requested.at(-1).includes('/metrics?since='));
+  const ranges=[];
+  d.document.querySelectorAll=selector=>{
+    assert.equal(selector,'#detail-1 .detail-range-group .theme-btn');
+    return ['24h','168h','720h'].map(range=>({dataset:{range},classList:{toggle:(_name,on)=>{if(on)ranges.push(range);}}}));
+  };
+  d.switchDetailRange(1,'720h');
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(ranges.at(-1),'720h');
+  assert(requested.at(-1).includes('/metrics?range=720h'));
+  assert(requested.every(url=>!url.includes('/tcpping')));
+  d.fixture=[node];vm.runInContext('agents=fixture;',d);
+  const beforeEnabled=requested.length;
+  await d.loadDetailData(1,'24h');
+  assert.equal(requested.length,beforeEnabled+2,'re-enabling must restore probe requests');
+  assert(requested.at(-1).includes('/tcpping'));
+
   // Even a transport that delivers after cancellation cannot draw over a newer view.
   const pending=[];
   d.fetch=()=>{const call=deferred();pending.push(call);return call.promise;};
