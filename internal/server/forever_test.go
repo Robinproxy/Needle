@@ -17,10 +17,11 @@ func TestForeverReportsAndMonthlyTraffic(t *testing.T) {
 	if err := store.AllowToken("forever-token"); err != nil {
 		t.Fatal(err)
 	}
+	uptime := int64(10000)
 	report := func(sent, recv int64) {
 		t.Helper()
 		// A stale date from a previous finite configuration must be ignored.
-		body := fmt.Sprintf(`{"hostname":"permanent","billing_period":"forever","expires_at":1,"cpu":{"percent":10},"network":{"total_sent":%d,"total_recv":%d}}`, sent, recv)
+		body := fmt.Sprintf(`{"hostname":"permanent","billing_period":"forever","expires_at":1,"uptime":%d,"cpu":{"percent":10},"network":{"total_sent":%d,"total_recv":%d}}`, uptime, sent, recv)
 		w := sendReport(t, h, "Bearer forever-token", body)
 		if w.Code != http.StatusOK {
 			t.Fatalf("report: %d %s", w.Code, w.Body.String())
@@ -36,6 +37,7 @@ func TestForeverReportsAndMonthlyTraffic(t *testing.T) {
 	report(150, 280)
 	assertUsage(t, store, id, 50, 80)
 	now = now.Add(30 * time.Second)
+	uptime = 10
 	report(10, 20)
 	assertUsage(t, store, id, 60, 100)
 	now = time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)

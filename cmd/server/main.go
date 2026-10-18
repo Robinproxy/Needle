@@ -34,6 +34,11 @@ func main() {
 	args := flag.Args()
 	if len(args) > 0 {
 		switch args[0] {
+		case "repair-traffic":
+			if err := runRepairTraffic(*dbPath, args[1:]); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "list-agents":
 			if err := runListAgents(*dbPath); err != nil {
 				log.Fatal(err)
@@ -69,7 +74,7 @@ func main() {
 			}
 			return
 		default:
-			log.Fatalf("unknown command %q (supported: list-agents, delete-agent, allow-token, list-tokens, revoke-token)", args[0])
+			log.Fatalf("unknown command %q (supported: list-agents, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0])
 		}
 	}
 

@@ -19,9 +19,10 @@ func TestTrafficAllowancePersistsWithoutResettingUsage(t *testing.T) {
 	if err := store.AllowToken("quota-test"); err != nil {
 		t.Fatal(err)
 	}
+	uptime := int64(10000)
 	send := func(limit, sent, recv int64) {
 		t.Helper()
-		body := fmt.Sprintf(`{"hostname":"quota-node","billing_period":"forever","monthly_traffic_limit":%d,"cpu":{"percent":10},"network":{"total_sent":%d,"total_recv":%d}}`, limit, sent, recv)
+		body := fmt.Sprintf(`{"hostname":"quota-node","billing_period":"forever","monthly_traffic_limit":%d,"uptime":%d,"cpu":{"percent":10},"network":{"total_sent":%d,"total_recv":%d}}`, limit, uptime, sent, recv)
 		if w := sendReport(t, h, "Bearer quota-test", body); w.Code != http.StatusOK {
 			t.Fatalf("report: %d %s", w.Code, w.Body.String())
 		}
@@ -59,6 +60,7 @@ func TestTrafficAllowancePersistsWithoutResettingUsage(t *testing.T) {
 		t.Fatal("invalid report changed allowance")
 	}
 	// Counter reset and allowance removal preserve this month's accumulated usage.
+	uptime = 10
 	send(0, 10, 20)
 	assertUsage(t, store, id, 310, 720)
 	rows, _ = store.GetAgents()

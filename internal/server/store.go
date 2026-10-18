@@ -204,7 +204,7 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN last_seen INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN monthly_traffic_limit INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
-	return nil
+	return s.migrateTrafficAccounting()
 }
 
 // migrateDropAutoIncrement rebuilds tables that historically used AUTOINCREMENT.
@@ -491,7 +491,7 @@ func insertMetric(x execer, m *MetricRow, createdAt int64) error {
 	if createdAt <= 0 {
 		createdAt = time.Now().Unix()
 	}
-	_, err := x.Exec(
+	result, err := x.Exec(
 		`INSERT INTO metrics(agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
 			total_sent, total_recv, load1, load5, load15, uptime, created_at)
@@ -500,6 +500,11 @@ func insertMetric(x execer, m *MetricRow, createdAt int64) error {
 		m.DiskTotal, m.DiskUsed, m.NetworkUp, m.NetworkDown,
 		m.TotalSent, m.TotalRecv, m.Load1, m.Load5, m.Load15, m.Uptime, createdAt,
 	)
+	if err != nil {
+		return err
+	}
+	m.ID, err = result.LastInsertId()
+	m.CreatedAt = createdAt
 	return err
 }
 
@@ -560,8 +565,12 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 		return 0, err
 	}
 	if r.Metric != nil {
+		createdAt := r.CreatedAt
+		if createdAt <= 0 {
+			createdAt = s.now().Unix()
+		}
 		r.Metric.AgentID = agentID
-		if err := insertMetric(tx, r.Metric, r.CreatedAt); err != nil {
+		if err := insertMetric(tx, r.Metric, createdAt); err != nil {
 			return 0, err
 		}
 	}
@@ -571,7 +580,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 			return 0, err
 		}
 		if r.Metric != nil {
-			if err := accumulateTrafficUsage(tx, s.now().Unix(), agentID, *r.BaselineBoundary, r.Metric.TotalSent, r.Metric.TotalRecv); err != nil {
+			if err := accumulateTrafficUsage(tx, s.now().Unix(), agentID, *r.BaselineBoundary, r.Metric); err != nil {
 				return 0, err
 			}
 		}
@@ -948,12 +957,8 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 
 	usage.Sent = latestSent.Int64 - baseSent.Int64
 	usage.Recv = latestRecv.Int64 - baseRecv.Int64
-	if usage.Sent < 0 {
-		usage.Sent = latestSent.Int64
-	}
-	if usage.Recv < 0 {
-		usage.Recv = latestRecv.Int64
-	}
+	usage.Sent = max(0, usage.Sent)
+	usage.Recv = max(0, usage.Recv)
 	usage.HasData = true
 	return usage, nil
 }
@@ -968,71 +973,11 @@ func (s *Store) EnsureTrafficBaseline(agentID, boundary int64) error {
 
 func ensureTrafficBaseline(x execer, stampedAt, agentID, boundary int64) error {
 	_, err := x.Exec(
-		`INSERT OR IGNORE INTO traffic_baselines(agent_id, boundary, total_sent, total_recv, created_at)
-		 SELECT ?, ?, total_sent, total_recv, ?
+		`INSERT OR IGNORE INTO traffic_baselines(agent_id, boundary, total_sent, total_recv, created_at, accounting_version)
+		 SELECT ?, ?, total_sent, total_recv, ?, 1
 		 FROM metrics WHERE agent_id = ? AND created_at >= ?
 		 ORDER BY created_at LIMIT 1`,
 		agentID, boundary, stampedAt, agentID, boundary,
-	)
-	return err
-}
-
-// accumulateTrafficUsage maintains the billing cycle's durable usage from
-// successive kernel counters. Normally it adds the positive delta. When a
-// counter moves backwards (reboot, interface replacement, or counter reset),
-// the new value is traffic since that reset and is added to the usage already
-// recorded for the cycle instead of discarding the pre-reset traffic.
-//
-// Existing installations have NULL accumulator columns. Their first report
-// seeds usage from the old baseline calculation so an upgrade does not make
-// the dashboard jump or reset mid-cycle.
-func accumulateTrafficUsage(x execer, stampedAt, agentID, boundary, currentSent, currentRecv int64) error {
-	var baseSent, baseRecv int64
-	var usageSent, usageRecv, lastSent, lastRecv sql.NullInt64
-	err := x.QueryRow(
-		`SELECT total_sent, total_recv, usage_sent, usage_recv, last_sent, last_recv
-		 FROM traffic_baselines WHERE agent_id = ? AND boundary = ?`,
-		agentID, boundary,
-	).Scan(&baseSent, &baseRecv, &usageSent, &usageRecv, &lastSent, &lastRecv)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	if !usageSent.Valid || !usageRecv.Valid || !lastSent.Valid || !lastRecv.Valid {
-		initialSent := currentSent - baseSent
-		if initialSent < 0 {
-			initialSent = currentSent
-		}
-		initialRecv := currentRecv - baseRecv
-		if initialRecv < 0 {
-			initialRecv = currentRecv
-		}
-		_, err = x.Exec(
-			`UPDATE traffic_baselines
-			 SET usage_sent = ?, usage_recv = ?, last_sent = ?, last_recv = ?, updated_at = ?
-			 WHERE agent_id = ? AND boundary = ?`,
-			initialSent, initialRecv, currentSent, currentRecv, stampedAt, agentID, boundary,
-		)
-		return err
-	}
-
-	deltaSent := currentSent - lastSent.Int64
-	if deltaSent < 0 {
-		deltaSent = currentSent
-	}
-	deltaRecv := currentRecv - lastRecv.Int64
-	if deltaRecv < 0 {
-		deltaRecv = currentRecv
-	}
-	_, err = x.Exec(
-		`UPDATE traffic_baselines
-		 SET usage_sent = usage_sent + ?, usage_recv = usage_recv + ?,
-		     last_sent = ?, last_recv = ?, updated_at = ?
-		 WHERE agent_id = ? AND boundary = ?`,
-		deltaSent, deltaRecv, currentSent, currentRecv, stampedAt, agentID, boundary,
 	)
 	return err
 }
@@ -1149,6 +1094,9 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 	if _, err := tx.Exec("DELETE FROM agents WHERE id = ?", id); err != nil {
 		return err
 	}
+	if _, err := tx.Exec("DELETE FROM traffic_accounting_legacy WHERE agent_id = ?", id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec("DELETE FROM traffic_baselines WHERE agent_id = ?", id); err != nil {
 		return err
 	}
@@ -1235,6 +1183,9 @@ func (s *Store) PurgeOldData() {
 	}
 	// Keep the current and previous cycle's baselines (62d covers both).
 	baselineCutoff := s.now().Add(-62 * 24 * time.Hour).Unix()
+	if _, err := s.db.Exec("DELETE FROM traffic_accounting_legacy WHERE boundary < ?", baselineCutoff); err != nil {
+		log.Printf("purge traffic audit snapshots: %v", err)
+	}
 	if _, err := s.db.Exec("DELETE FROM traffic_baselines WHERE boundary < ?", baselineCutoff); err != nil {
 		log.Printf("purge traffic baselines: %v", err)
 	}

@@ -174,14 +174,14 @@ func TestTrafficUsageSurvivesCounterReset(t *testing.T) {
 	store, agentID := newTrafficTestStore(t, now, 5)
 	boundary := monthlyBoundary(5, now)
 	expiresAt := time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local).Unix()
-	report := func(at time.Time, sent, recv int64) {
+	report := func(at time.Time, sent, recv, uptime int64) {
 		t.Helper()
 		_, err := store.SaveReport(&ReportWrite{
 			Hostname:         "node-1",
 			Region:           "SG",
 			ExpiresAt:        &expiresAt,
 			BillingPeriod:    "1m",
-			Metric:           &MetricRow{TotalSent: sent, TotalRecv: recv},
+			Metric:           &MetricRow{TotalSent: sent, TotalRecv: recv, Uptime: uptime},
 			CreatedAt:        at.Unix(),
 			BaselineBoundary: int64Ptr(boundary.Unix()),
 		})
@@ -190,11 +190,11 @@ func TestTrafficUsageSurvivesCounterReset(t *testing.T) {
 		}
 	}
 
-	report(boundary, 1000, 1000)               // cycle baseline
-	report(now.Add(-2*time.Hour), 2500, 3000)  // 1500 / 2000 used
-	report(now.Add(-time.Hour), 300, 400)      // reboot resets counters
-	report(now.Add(-30*time.Minute), 500, 700) // another 200 / 300
-	assertUsage(t, store, agentID, 2000, 2700) // pre- and post-reboot total
+	report(boundary, 1000, 1000, 10000)                // cycle baseline
+	report(now.Add(-2*time.Hour), 2500, 3000, 1400000) // 1500 / 2000 used
+	report(now.Add(-time.Hour), 300, 400, 300)         // reboot resets counters
+	report(now.Add(-30*time.Minute), 500, 700, 2100)   // another 200 / 300
+	assertUsage(t, store, agentID, 2000, 2700)         // pre- and post-reboot total
 }
 
 // The first report after upgrading from the baseline-only implementation must

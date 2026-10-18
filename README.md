@@ -542,6 +542,42 @@ Non-interactive upgrades keep the original configuration. Use `upgrade --keep-co
 </details>
 
 <details>
+<summary><strong>Traffic counter regressions and recovery</strong></summary>
+
+The Server uses reported system uptime to distinguish a confirmed reboot from an ordinary counter decrease. A confirmed reboot retains the previous usage and adds the new boot's counters. With continuous or missing uptime, a decrease is treated conservatively: previous per-direction high watermarks are retained, and a rebound cannot count the same bytes twice. Late samples do not move the live accumulator backwards.
+
+After an interface reset or interface-set change without a machine reboot, totals alone cannot establish the exact traffic lost at the transition. Usage resumes when a counter exceeds its prior high watermark; traffic during catch-up may be undercounted. This avoids treating hundreds of GB of existing counters as new traffic. Specifying a stable `interfaces` whitelist helps keep the counter scope consistent.
+
+Server versions v0.6.4 through v0.7.0 counted any backwards movement as a reset and could inflate monthly usage. The uptime-aware fix requires only a Server upgrade: existing Agents already report uptime. An upgrade prevents new inflation but does not silently rewrite existing monthly totals.
+
+A Server build containing this fix provides `repair-traffic`. It freezes the legacy accumulator on first database migration and compares the original and corrected algorithms over retained raw samples. Preview the current cycle for one node or `all`. Applying requires a trusted `--since` timestamp when the faulty accumulator was known active, such as a confirmed deployment time; the old schema did not retain its activation time. Without this bound, the preview shows candidates only. Corrections cover only supported events in retained history after that time, preserve the unknown prefix before that window, and are applied at most once per cycle. Missing/ambiguous samples or inconsistent totals are reported for manual review; they are never reconstructed from hourly maxima. A simple latest-counter-minus-baseline calculation is not reliable across resets.
+
+Stop the Server before applying corrections. The apply command creates a consistent, mode-600 `needle.db.traffic-backup-TIMESTAMP.db` before changing usage. Tokens, metric history, and Agent configurations are retained. Keep backups outside source control and do not downgrade to the old accounting implementation afterward.
+
+For a binary deployment, using the updated Server binary:
+
+```sh
+sudo systemctl stop needle-server
+# Preview only; inspect each node's reason and before/after values (bytes)
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db repair-traffic all
+# Replace --since with a confirmed deployment time for the faulty accumulator
+# Apply only the supported corrections for the selected node (ID or hostname)
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db repair-traffic --since 2026-10-18T03:17:38Z --apply 7
+sudo systemctl start needle-server
+```
+
+For Docker Compose, from the deployment directory, after pulling an image containing the fix (replace the example `--since` with a trusted deployment timestamp):
+
+```sh
+docker compose stop needle-server
+docker compose run --rm --no-deps needle-server -db /data/needle.db repair-traffic all
+docker compose run --rm --no-deps needle-server -db /data/needle.db repair-traffic --since 2026-10-18T03:17:38Z --apply 7
+docker compose up -d
+```
+
+</details>
+
+<details>
 <summary><strong>History views and retention</strong></summary>
 
 | View | Data | Use |
