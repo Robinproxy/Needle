@@ -490,7 +490,7 @@ Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` t
 tcpping: []
 ```
 
-The dashboard's live card/list summaries follow the latest report. Disabling probes clears old live latency values and shows a disabled state. Previously enabled targets remain in history and are marked `Inactive` in the detail statistics. Chart Show/Hide controls affect display only; they do not change the Agent's configuration. Use Server v0.7.0+ for these live-target and history behaviors.
+The dashboard's live card/list summaries follow the latest report. Disabling probes clears old live latency values and shows a disabled state. Detail charts and statistics show only currently enabled targets. Previously enabled targets are hidden, and their stored data expires under the existing history retention rules. Chart Show/Hide controls affect display only; they do not change the Agent's configuration.
 
 Restart after editing:
 
@@ -521,9 +521,11 @@ The card header shows online status, hostname, region, uptime, and the renewal c
 | TRF | Combined monthly upload + download, allowance, and usage percentage; for example, `396 GB / 1 TB` and `39.6%`. An unlimited allowance displays ♾️ and no percentage |
 | Network, left | Current download and upload rates in bytes per second |
 | Network, right | Separate monthly download and upload totals, aligned with their current rates |
-| Probes | All currently enabled targets, grouped into IPv4 / IPv6 columns; other custom targets use a Custom group |
+| Probes | Currently enabled targets, ordered CM / CU / CT, with v4 fixed on the left and v6 on the right; other custom targets appear below |
 
 Cards no longer cycle through a single selected probe. The list layout summarizes the first target in the latest report. Live latency and loss reflect the latest TCP connection attempt: success shows `0%`, failure shows `100%` and no latency. Detail chart statistics instead summarize the selected history window, so their loss percentages can differ.
+
+Detail probe summaries show average latency, jitter, and loss beside each target. On desktop, IPv4 targets occupy the first row and IPv6 targets the second, centered in three equal columns; narrower screens wrap the summaries. Click a target to show or hide its chart line, or use Show / Hide for all lines. Disabled targets are omitted. The dashboard uses coordinated gray-blue accents in both light and dark themes; warning and error colors remain distinct.
 
 The dashboard refreshes every 30 seconds. Detail chart line selection, Show/Hide controls, historical ranges, and daily drill-down remain available. Agents that have not yet been upgraded still report their existing metrics; their logical core count remains unavailable until they send it.
 

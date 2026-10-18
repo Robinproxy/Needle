@@ -13,7 +13,7 @@ let gridCols = 4;
 let refreshInFlight = false;
 let lastRefreshAt = null;
 let dashboardLoadingTimer = null;
-const TCPPING_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+const TCPPING_COLORS = ['#6485ac', '#85a6c0', '#9282ae', '#b1a1c5', '#679b96', '#91b9ad', '#818bb4'];
 const TCPPING_ORDER = ['CMv4', 'CMv6', 'CUv4', 'CUv6', 'CTv4', 'CTv6'];
 
 function sortTcppingNames(names) {
@@ -57,7 +57,7 @@ function mapCarrier(name) {
 
 function pingLatColor(ms) {
   if (!ms || ms === Infinity) return 'red';
-  if (ms < 80) return 'green';
+  if (ms < 80) return 'gray';
   if (ms < 161) return 'amber';
   return 'red';
 }
@@ -388,13 +388,13 @@ function cardProbesHTML(a) {
       : /v4$/i.test(name) || /^\d+\.\d+\.\d+\.\d+:/.test(p.target) ? 'IPv4' : 'Custom';
     groups[family].push(p);
   });
-  const order = ['CT', 'CU', 'CM'];
+  const order = ['CM', 'CU', 'CT'];
   return Object.entries(groups).filter(([, rows]) => rows.length).map(([family, rows]) => {
     rows.sort((a, b) => {
       const rank = p => { const i = order.indexOf(mapCarrier(p.name).slice(0, 2)); return i < 0 ? 3 : i; };
       return rank(a) - rank(b) || a.name.localeCompare(b.name);
     });
-    return '<div class="probe-family"><div class="probe-family-label">' + family + '</div>' + rows.map(p => {
+    return '<div class="probe-family probe-family-' + family.toLowerCase() + '">' + rows.map(p => {
       const loss = p.success ? 0 : 100;
       return '<div class="probe-row" title="' + escapeAttr(p.target + ' · latest probe result') + '">'
         + '<span class="probe-name">' + escapeHtml(mapCarrier(p.name)) + '</span>'
@@ -440,7 +440,7 @@ function tcpingLayoutSignature(list) {
 }
 
 function tcpingStatusText(a) {
-  if (a?.tcpping_enabled === false) return 'TCP Ping disabled · recorded history remains available';
+  if (a?.tcpping_enabled === false) return 'TCP Ping disabled';
   const count = a?.latest_tcpping?.length || 0;
   return count ? count + ' target' + (count === 1 ? '' : 's') + ' enabled' : 'No TCP Ping data yet';
 }
@@ -586,7 +586,6 @@ function renderDetailContent(id) {
       + '<p class="tcpping-status" id="tcpping-status-' + id + '">' + escapeHtml(tcpingStatusText(agent)) + '</p>'
       + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div><div id="tcpping-days-' + id + '" class="tcpping-day-nav"></div></div>'
       + '<div class="tcpping-stats" id="tcpping-stats-' + id + '">'
-        + '<div class="tcpping-stats-header"><span class="col-dot"></span><span class="col-name">Source</span><span class="col-stat">Avg</span><span class="col-stat">Jitter</span><span class="col-stat">Loss</span></div>'
         + '<div id="tcpping-rows-' + id + '"></div>'
       + '</div>'
     + '</div>';
@@ -678,6 +677,10 @@ function recordDayAlert(ts, message) {
   detailDayAlerts.set(key, alerts);
 }
 
+function sparkValueHTML(current, peak) {
+  return escapeHtml(current) + '<span class="spark-peak">peak ' + escapeHtml(peak) + '</span>';
+}
+
 function renderSparklines(id, metrics) {
   if (!metrics || !metrics.length) return;
 
@@ -695,10 +698,10 @@ function renderSparklines(id, metrics) {
   const netInPeak = peak(metrics.map(m => [m.created_at * 1000, m.network_down_peak || m.network_down]));
   const netOutPeak = peak(metrics.map(m => [m.created_at * 1000, m.network_up_peak || m.network_up]));
 
-  document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + cpuPeak.toFixed(1) + '%' : '—';
-  document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + memPeak.toFixed(1) + '%' : '—';
-  document.getElementById('spark-netin-val').innerHTML = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  <span style="color:#8b5cf6">peak ' + formatSpeed(netInPeak) + '</span>' : '—';
-  document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(netOutPeak) + '</span>' : '—';
+  document.getElementById('spark-cpu-val').innerHTML = cpuData.length ? sparkValueHTML(cpuData[cpuData.length - 1][1].toFixed(1) + '%', cpuPeak.toFixed(1) + '%') : '—';
+  document.getElementById('spark-mem-val').innerHTML = memData.length ? sparkValueHTML(memData[memData.length - 1][1].toFixed(1) + '%', memPeak.toFixed(1) + '%') : '—';
+  document.getElementById('spark-netin-val').innerHTML = netInData.length ? sparkValueHTML(formatSpeed(netInData[netInData.length - 1][1]) + '/s', formatSpeed(netInPeak)) : '—';
+  document.getElementById('spark-netout-val').innerHTML = netOutData.length ? sparkValueHTML(formatSpeed(netOutData[netOutData.length - 1][1]) + '/s', formatSpeed(netOutPeak)) : '—';
 
   const overview = overviewDays(currentMetricsRange);
   if (overview) detailDayAlerts = new Map();
@@ -715,13 +718,29 @@ function renderSparklines(id, metrics) {
   memAlerts.forEach(p => recordDayAlert(p[0], 'Memory peak ' + p[1].toFixed(1) + '%'));
   netInAlerts.forEach(p => recordDayAlert(p[0], 'Net In peak ' + formatSpeed(p[1]) + '/s'));
   netOutAlerts.forEach(p => recordDayAlert(p[0], 'Net Out peak ' + formatSpeed(p[1]) + '/s'));
-  renderSparkline('spark-cpu', cpuData, '#3b82f6', true);
-  renderSparkline('spark-mem', memData, '#22c55e', true);
-  renderSparkline('spark-netin', netInData, '#8b5cf6', false);
-  renderSparkline('spark-netout', netOutData, '#f59e0b', false);
+  renderSparkline('spark-cpu', cpuData, true);
+  renderSparkline('spark-mem', memData, true);
+  renderSparkline('spark-netin', netInData, false);
+  renderSparkline('spark-netout', netOutData, false);
 }
 
-function renderSparkline(elemId, data, color, isPercent) {
+function sparklineColor() {
+  return 'hsl(' + getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() + ')';
+}
+
+function tcpingChartTheme() {
+  const dark = document.documentElement.classList.contains('dark');
+  const text = dark ? '#a1adbd' : '#7b8796';
+  const axis = dark ? '#435268' : '#dce3ec';
+  const grid = dark ? '#303a48' : '#edf1f5';
+  return {
+    xAxis: { axisLine: { lineStyle: { color: axis } }, axisTick: { lineStyle: { color: axis } }, axisLabel: { color: text } },
+    yAxis: { splitLine: { lineStyle: { color: grid, width: 1 } }, axisLabel: { color: text } },
+  };
+}
+
+function renderSparkline(elemId, data, isPercent) {
+  const color = sparklineColor();
   const el = document.getElementById(elemId);
   if (!el) return;
   if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
@@ -754,7 +773,7 @@ function renderSparkline(elemId, data, color, isPercent) {
       name: 'Average',
       type: 'line', data, smooth: true, symbol: 'none', sampling: 'lttb',
       lineStyle: { color, width: 1.5 },
-      areaStyle: { color: color + '30' },
+      areaStyle: { color, opacity: 0.04 },
     }]
   });
   sparkCharts[elemId] = chart;
@@ -783,7 +802,14 @@ function formatRangeAxisLabel(ts) {
   return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
+function activeTcppingResults(id, results) {
+  const agent = agents.find(a => a.agent.id === Number(id));
+  const activeNames = new Set((agent?.latest_tcpping || []).map(p => p.name));
+  return (results || []).filter(r => activeNames.has(r.name));
+}
+
 function renderTCPingChart(id, results) {
+  results = activeTcppingResults(id, results);
   const agent = agents.find(a => a.agent.id === Number(id));
   const status = document.getElementById('tcpping-status-' + id);
   if (status) status.textContent = tcpingStatusText(agent);
@@ -854,14 +880,13 @@ function renderTCPingChart(id, results) {
     xAxis: {
       type: 'time',
       min: chartWin[0], max: chartWin[1],
-      axisLine: { lineStyle: { color: 'hsl(var(--border) / 0.5)' } },
       // Overview views draw one coordinated tick+date row in renderDayNav.
       minInterval: is1d ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
       splitNumber: is1d ? 5 : 7,
       axisTick: { show: is1d },
       axisLabel: {
         show: is1d,
-        color: 'hsl(var(--muted-foreground))', fontSize: 10,
+        fontSize: 10,
         hideOverlap: true,
         formatter: v => formatRangeAxisLabel(v),
       },
@@ -871,11 +896,11 @@ function renderTCPingChart(id, results) {
       type: 'value', position: 'right',
       axisLine: { show: false },
       axisTick: { show: false },
-      splitLine: { lineStyle: { color: 'hsl(var(--border) / 0.2)', width: 1 } },
-      axisLabel: { color: 'hsl(var(--muted-foreground))', fontSize: 10, margin: 0, formatter: v => v + 'ms' },
+      axisLabel: { fontSize: 10, margin: 0, formatter: v => v + 'ms' },
     },
     series,
   });
+  chart.setOption(tcpingChartTheme());
   tcppingChart = chart;
 
   document.getElementById('tcpping-rows-' + id).innerHTML = tcppingStatsHTML(id, results, names);
@@ -886,9 +911,11 @@ function renderTCPingChart(id, results) {
 // success_count and loss by sample_count so aggregated (7d) and raw (24h)
 // rows use the same math, and every render keeps the a11y attributes.
 function tcppingStatsHTML(id, results, names) {
+  results = activeTcppingResults(id, results);
+  const activeNames = new Set(results.map(r => r.name));
   const agent = agents.find(a => a.agent.id === Number(id));
-  const activeNames = new Set((agent?.latest_tcpping || []).map(p => p.name));
-  return names.map((name) => {
+  const groups = { v4: [], v6: [], custom: [] };
+  sortTcppingNames(names).filter(name => activeNames.has(name)).forEach((name) => {
     const targetResults = results.filter(r => r.name === name);
     const successCount = targetResults.reduce((sum, r) => sum + (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0);
     const avg = successCount ? targetResults.reduce((sum, r) => sum + r.latency_ms * (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0) / successCount : 0;
@@ -899,14 +926,26 @@ function tcppingStatsHTML(id, results, names) {
     const color = tcppingColor(name);
 
     const displayName = mapCarrier(name);
-    return '<div class="tcpping-stat-row" role="button" tabindex="0" aria-pressed="true" aria-label="Toggle ' + escapeAttr(displayName) + ' TCP Ping line" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
+    const avgText = avg ? avg.toFixed(1) + 'ms' : '—';
+    const jitterText = jitter ? jitter.toFixed(1) + 'ms' : '—';
+    const lossText = sampleCount > 0 ? lossPct.toFixed(1) + '%' : '—';
+    const summary = 'Avg: ' + avgText + ' · Jitter: ' + jitterText + ' · Loss: ' + lossText;
+    const target = agent?.latest_tcpping?.find(p => p.name === name)?.target || '';
+    const family = /v6$/i.test(displayName) || target.startsWith('[') ? 'v6'
+      : /v4$/i.test(displayName) || /^\d+\.\d+\.\d+\.\d+:/.test(target) ? 'v4' : 'custom';
+    groups[family].push('<div class="tcpping-stat-row" role="button" tabindex="0" aria-pressed="true" title="' + escapeAttr(summary) + ' · Click to show or hide" aria-label="Toggle ' + escapeAttr(displayName + ' TCP Ping line. ' + summary) + '" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
       + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
-      + '<span class="col-name">' + escapeHtml(displayName) + (agent && !activeNames.has(name) ? ' <span class="ping-inactive" title="Recorded history; this target is no longer enabled">Inactive</span>' : '') + '</span>'
-      + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
-      + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
-      + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '">' + (sampleCount > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
-    + '</div>';
-  }).join('');
+      + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
+      + '<span class="col-stat" title="Average latency">' + avgText + '</span>'
+      + '<span class="stat-separator" aria-hidden="true">·</span>'
+      + '<span class="col-stat" title="Jitter">' + jitterText + '</span>'
+      + '<span class="stat-separator" aria-hidden="true">·</span>'
+      + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '" title="Packet loss">' + lossText + '</span>'
+    + '</div>');
+  });
+  return Object.entries(groups).filter(([, rows]) => rows.length).map(([family, rows]) =>
+    '<div class="tcpping-route-family" data-family="' + family + '" role="group" aria-label="' + (family === 'custom' ? 'Custom' : 'IP' + family) + ' probes">' + rows.join('') + '</div>'
+  ).join('');
 }
 
 // chartWindowMs pins the TCPing x-axis to the queried window instead of
@@ -1204,10 +1243,10 @@ function updateDetailCharts(id) {
     const netOutData = metrics.map(m => [m.created_at * 1000, m.network_up]);
 
     const peak2 = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
-    document.getElementById('spark-cpu-val').textContent = cpuData.length ? cpuData[cpuData.length - 1][1].toFixed(1) + '%  peak ' + peak2(cpuData).toFixed(1) + '%' : '—';
-    document.getElementById('spark-mem-val').textContent = memData.length ? memData[memData.length - 1][1].toFixed(1) + '%  peak ' + peak2(memData).toFixed(1) + '%' : '—';
-    document.getElementById('spark-netin-val').innerHTML = netInData.length ? formatSpeed(netInData[netInData.length - 1][1]) + '/s  <span style="color:#8b5cf6">peak ' + formatSpeed(peak2(netInData)) + '</span>' : '—';
-    document.getElementById('spark-netout-val').innerHTML = netOutData.length ? formatSpeed(netOutData[netOutData.length - 1][1]) + '/s  <span style="color:#f59e0b">peak ' + formatSpeed(peak2(netOutData)) + '</span>' : '—';
+    document.getElementById('spark-cpu-val').innerHTML = cpuData.length ? sparkValueHTML(cpuData[cpuData.length - 1][1].toFixed(1) + '%', peak2(cpuData).toFixed(1) + '%') : '—';
+    document.getElementById('spark-mem-val').innerHTML = memData.length ? sparkValueHTML(memData[memData.length - 1][1].toFixed(1) + '%', peak2(memData).toFixed(1) + '%') : '—';
+    document.getElementById('spark-netin-val').innerHTML = netInData.length ? sparkValueHTML(formatSpeed(netInData[netInData.length - 1][1]) + '/s', formatSpeed(peak2(netInData))) : '—';
+    document.getElementById('spark-netout-val').innerHTML = netOutData.length ? sparkValueHTML(formatSpeed(netOutData[netOutData.length - 1][1]) + '/s', formatSpeed(peak2(netOutData))) : '—';
 
     const configs = [
       ['spark-cpu', cpuData], ['spark-mem', memData],
@@ -1220,6 +1259,7 @@ function updateDetailCharts(id) {
   }).catch(() => {});
 
   fetch('/api/agents/' + id + '/tcpping?range=' + tcppingRange).then(r => r.json()).then(results => {
+    results = activeTcppingResults(id, results);
     if (!results || !results.length || !tcppingChart) { renderTCPingChart(id, results); return; }
     const names = sortTcppingNames([...new Set(results.map(r => r.name))]);
     const series = names.map((name) => {
@@ -1249,10 +1289,13 @@ function setThemeMode(mode) {
 
 function applyTheme() {
   const html = document.documentElement;
-  if (themeMode === 'dark') { html.classList.add('dark'); return; }
-  if (themeMode === 'light') { html.classList.remove('dark'); return; }
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  html.classList.toggle('dark', prefersDark);
+  const dark = themeMode === 'dark' || (themeMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  html.classList.toggle('dark', dark);
+  const color = sparklineColor();
+  Object.values(sparkCharts).forEach(chart => {
+    chart.setOption({ series: [{ lineStyle: { color }, areaStyle: { color, opacity: 0.04 } }] });
+  });
+  if (tcppingChart) tcppingChart.setOption(tcpingChartTheme());
 }
 
 (function initTheme() {

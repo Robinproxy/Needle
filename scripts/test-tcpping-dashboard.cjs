@@ -7,7 +7,7 @@ const nodes = new Map();
 const storage = new Map();
 const ctx = {
   localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key,value) => storage.set(key,value) },
-  document: { getElementById: id => nodes.get(id) ?? null, querySelector: () => null, querySelectorAll: () => [] },
+  document: { documentElement: {classList:{contains:()=>false}}, getElementById: id => nodes.get(id) ?? null, querySelector: () => null, querySelectorAll: () => [] },
   console,
 };
 vm.createContext(ctx);
@@ -27,7 +27,10 @@ assert(ctx.renderCard(twoRoutes,false).includes('CMv6'));
 assert(ctx.renderCard(twoRoutes,false).includes('CTv6'));
 const history = [{name:'CMv4',latency_ms:10,success:true},{name:'CMv6',latency_ms:12,success:true}];
 const stats = ctx.tcppingStatsHTML(1,history,['CMv4','CMv6']);
-assert.equal((stats.match(/>Inactive</g)||[]).length,1);
+assert(!stats.includes('Inactive'));
+assert(!stats.includes('data-name="CMv4"'));
+assert(stats.includes('data-name="CMv6"'));
+assert.equal(ctx.activeTcppingResults(1,history).length,1);
 assert(ctx.tcpingStatusText(node).includes('1 target enabled'));
 assert.equal(ctx.tcpingLayoutSignature([node]),ctx.tcpingLayoutSignature([{...node,latest_tcpping:[{...node.latest_tcpping[0],latency_ms:99}]}]));
 const disabled = {...node,tcpping_enabled:false,latest_tcpping:[]};
@@ -39,7 +42,7 @@ ctx.fixture=[disabled];vm.runInContext('agents = fixture',ctx);
 for(const id of ['tcpping-chart-1','tcpping-rows-1','tcpping-days-1','tcpping-status-1'])nodes.set(id,{innerHTML:'old content',textContent:''});
 let disposed=0;
 ctx.fixtureChart={dispose:()=>disposed++};vm.runInContext('tcppingChart = fixtureChart',ctx);
-ctx.renderTCPingChart(1,[]);
+ctx.renderTCPingChart(1,history);
 assert.equal(disposed,1);
 assert.equal(nodes.get('tcpping-days-1').innerHTML,'');
 assert.equal(nodes.get('tcpping-rows-1').innerHTML,'');
@@ -67,10 +70,41 @@ const dual = {...node,latest_tcpping:[
  {name:'custom<script>',target:'example.com:443',success:true,latency_ms:40},
 ]};
 const probes = ctx.cardProbesHTML(dual);
-assert(probes.includes('IPv4'));assert(probes.includes('IPv6'));assert(probes.includes('Custom'));
-assert(probes.indexOf('CTv4') < probes.indexOf('CMv4'));
+assert(!probes.includes('probe-family-label'));
+assert(probes.includes('probe-family-ipv4'));assert(probes.includes('probe-family-ipv6'));assert(probes.includes('probe-family-custom'));
+assert(probes.indexOf('CMv4') < probes.indexOf('CTv4'));
 assert(probes.includes('100%'));assert(probes.includes('custom&lt;script&gt;'));
 assert(!ctx.cardProbesHTML(node).includes('IPv4'));
+assert(ctx.cardProbesHTML(node).includes('probe-family-ipv6'));
+assert(!ctx.cardProbesHTML(node).includes('probe-family-ipv4'));
+const css = fs.readFileSync(path.join(__dirname, '../internal/server/static/style.css'), 'utf8');
+assert.match(css, /\.probe-family-ipv4\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*1;/);
+assert.match(css, /\.probe-family-ipv6\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*1;/);
+// Retained history includes all six routes; detail rows follow the current three.
+ctx.fixture=[{...node,latest_tcpping:['CM','CU','CT'].map(name=>({name:name+'v4'}))}];
+vm.runInContext('agents = fixture',ctx);
+const sixNames=['CMv4','CUv4','CTv4','CMv6','CUv6','CTv6'];
+const sixHistory=sixNames.map(name=>({name,success:true,latency_ms:10}));
+const threeStats=ctx.tcppingStatsHTML(1,sixHistory,sixNames);
+assert.equal((threeStats.match(/class="tcpping-stat-row"/g)||[]).length,3);
+assert(!threeStats.includes('v6'));
+assert.equal(sixHistory.length,6,'display filtering must preserve historical input');
+ctx.fixture=[{...node,latest_tcpping:sixNames.map(name=>({name}))}];
+vm.runInContext('agents = fixture',ctx);
+const sixStats=ctx.tcppingStatsHTML(1,sixHistory,sixNames);
+assert.equal((sixStats.match(/class="tcpping-route-family"/g)||[]).length,2);
+assert(sixStats.indexOf('data-family="v4"')<sixStats.indexOf('data-family="v6"'));
+assert(sixStats.indexOf('data-name="CTv4"')<sixStats.indexOf('data-name="CMv6"'));
+assert(sixStats.includes('title="Average latency"'));
+ctx.fixture=[{...node,latest_tcpping:['CM','CU','CT'].map(name=>({name:name+'v4'}))}];
+vm.runInContext('agents = fixture',ctx);
+let chartOptions={};
+ctx.echarts={init:()=>({setOption:options=>{Object.assign(chartOptions,options);},dispose:()=>{}})};
+ctx.renderTCPingChart(1,sixHistory.map(r=>({...r,created_at:Math.floor(Date.now()/1000)})));
+assert.equal(chartOptions.series.length,3,'detail chart must also omit disabled routes');
+assert(chartOptions.series.every(s=>s.name.endsWith('v4')));
+assert.equal((nodes.get('tcpping-rows-1').innerHTML.match(/class="tcpping-stat-row"/g)||[]).length,3);
+ctx.fixture=[disabled];vm.runInContext('agents = fixture',ctx);
 
 (async()=>{
   let renders=0;
