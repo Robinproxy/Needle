@@ -265,7 +265,7 @@ sh /tmp/needle-agent-openwrt.sh install
 
 Enter the Server HTTPS URL and node details. The default reporting interval is 30 seconds and the default billing period is `forever` (Server v0.6.4+ required). Choose the TCP Ping mode and the monthly upload + download allowance in decimal GB (`1000` = 1 TB, `0` or Enter = no limit). Allow the printed token **on the Server** using the corresponding Server section above.
 
-Confirm the WAN interface suggested by the installer. PPPoE commonly uses `pppoe-wan`; other WANs may use an interface such as `eth1`. The selected interface must exist. Avoid counting both a PPPoE interface and its underlying device, or both LAN and WAN for the same traffic. See the shared Agent settings under **Configuration** for multi-WAN setups.
+Confirm the WAN interface suggested by the installer. PPPoE commonly uses `pppoe-wan`; other WANs may use an interface such as `eth1`. The selected interface must exist. Avoid counting both a PPPoE interface and its underlying device, or both LAN and WAN for the same traffic. See the OpenWrt / ImmortalWrt Agent settings under **Configuration** for multi-WAN setups.
 
 ### Status, logs, and upgrades
 
@@ -455,9 +455,9 @@ The supplied systemd service uses `-l` and `-db`; it does not load TLS paths fro
 </details>
 
 <details>
-<summary><strong>Agent — Shared settings for Linux Binary and OpenWrt</strong></summary>
+<summary><strong>Agent — Linux Binary / systemd</strong></summary>
 
-Both installers use the same YAML format. Edit `/opt/needle-agent/agent.yaml` for Linux/systemd or `/etc/needle/agent.yaml` for OpenWrt/ImmortalWrt. A full example is available in [agent.yaml.example](agent.yaml.example).
+Edit `/opt/needle-agent/agent.yaml`. A full example is available in [agent.yaml.example](agent.yaml.example).
 
 ```yaml
 hostname: ""
@@ -504,6 +504,84 @@ For a Linux server, omit `interfaces` to use automatic filtering, or specify the
 interfaces: ["eth0"]
 ```
 
+The Linux installer offers these TCP Ping choices starting in v0.7.0, with no automatic connectivity detection:
+
+| Mode | Targets |
+| --- | --- |
+| `1) IPv4 only` (default) | CMv4, CUv4, CTv4 |
+| `2) IPv6 only` | CMv6, CUv6, CTv6 |
+| `3) Dual stack` | All six presets |
+| `4) Custom` | Select individual presets and optionally add your own targets |
+| `5) Disabled` | No TCP Ping; system metrics continue reporting |
+
+Custom targets require unique names and `host:port` addresses; bracket literal IPv6 addresses, for example `[2001:db8::1]:443`. Up to 32 targets are supported. Choose according to the node's usable outbound connectivity, including NAT or WARP routes.
+
+The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping and monthly allowance**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance); the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600.
+
+Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance prompt. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
+
+```yaml
+tcpping: []
+```
+
+The dashboard's live card/list summaries follow the latest report. Disabling probes clears old live latency values and shows a disabled state. Detail charts and statistics show only currently enabled targets. Previously enabled targets are hidden, and their stored data expires under the existing history retention rules. Chart Show/Hide controls affect display only; they do not change the Agent's configuration.
+
+Restart after editing:
+
+```sh
+sudo systemctl restart needle-agent
+sudo journalctl -u needle-agent -n 50 --no-pager
+```
+
+Keep the database, environment files, configurations, and tokens out of source control. Use HTTPS for public access; Tunnel or reverse-proxy protection does not replace the Server's token checks.
+
+</details>
+
+<details>
+<summary><strong>Agent — OpenWrt / ImmortalWrt</strong></summary>
+
+Edit `/etc/needle/agent.yaml`. A full example of the YAML format is available in [agent.yaml.example](agent.yaml.example); select the actual WAN device for your router.
+
+```yaml
+hostname: "home-router"
+server: "https://needle.example.com"
+token: "replace-with-unique-agent-token"
+region: CN
+billing_period: "forever"
+expires_at: ""
+monthly_traffic_limit_gb: 1000 # 1000 decimal GB = 1 TB; 0 = no limit
+interval: 30
+interfaces: ["pppoe-wan"]
+tls_skip_verify: false
+allow_plain_http: false
+tcpping:
+  - name: CMv4
+    target: sh-cm-v4.ip.zstaticcdn.com:80
+```
+
+| Field | Meaning |
+| --- | --- |
+| `hostname` | Node name; empty uses the system hostname. Tokens bind to this name after the first successful report |
+| `server` | Server URL; use the public HTTPS address |
+| `token` | Unique allowed token for this Agent; do not reuse across nodes |
+| `region` | Region code shown in the dashboard |
+| `billing_period` | `1m`, `3m`, `6m`, `12m`, or `forever`; empty leaves the billing period unset |
+| `expires_at` | Renewal date in `YYYY-MM-DD`; empty for `forever` |
+| `monthly_traffic_limit_gb` | Monthly upload + download allowance in decimal GB; `1000` = 1 TB, `0` or omitted displays ♾️; display only, does not stop traffic; Server and Agent v0.7.0+ |
+| `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
+| `interfaces` | Exact NIC whitelist; explicitly select the actual WAN device, such as `pppoe-wan` or `eth1`, to avoid counting LAN/WAN traffic twice |
+| `tls_skip_verify` | Disables TLS certificate verification; defaults to false |
+| `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
+| `tcpping` | List of named TCP targets in `host:port` format |
+
+Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
+
+Date-only settings retain their configured calendar date in the Server timezone, including the UTC-noon encoding sent by existing Agents and UTC-midnight date values. Renewal days count calendar days, including across daylight-saving changes; day 29–31 resets clamp to shorter months. When upgrading from the earlier UTC/local-date behavior, an existing active traffic cycle keeps its accumulated usage until the next corrected local reset. Renewing the date or changing the payment period preserves that transition when the monthly reset day stays the same. The original baseline remains available; restarting the Server does not repeat the transition. Keep the Server timezone stable.
+
+`monthly_traffic_limit_gb` controls the traffic allowance independently of expiry. For example, a permanent node can still have a 1 TB monthly allowance. TRF displays combined monthly upload and download usage against this allowance, using decimal units: `1000 GB = 1 TB`. A zero or omitted allowance displays ♾️; exceeding a finite allowance highlights the percentage but does not block traffic. Changing the allowance does not reset accumulated usage.
+
+Usage starts at the first observed counter baseline; Needle cannot recover traffic used before monitoring began or reconcile it with a provider's meter. Upgrade both Server and Agent to v0.7.0+ for allowance reporting and logical CPU counts. Core counts are collected automatically and do not require a configuration option.
+
 For an OpenWrt PPPoE router, choose the actual WAN device explicitly:
 
 ```yaml
@@ -512,7 +590,7 @@ region: CN
 interfaces: ["pppoe-wan"]
 ```
 
-The OpenWrt installer recommends WAN's `l3_device` when available. Multiple WAN interfaces can be listed manually, but do not count multiple layers of the same connection. Both Agent installers offer the same TCP Ping choices starting in v0.7.0, with no automatic connectivity detection:
+The OpenWrt installer recommends WAN's `l3_device` when available. Multiple WAN interfaces can be listed manually, but do not count multiple layers of the same connection. The OpenWrt installer offers these TCP Ping choices starting in v0.7.0, with no automatic connectivity detection:
 
 | Mode | Targets |
 | --- | --- |
@@ -537,10 +615,6 @@ The dashboard's live card/list summaries follow the latest report. Disabling pro
 Restart after editing:
 
 ```sh
-# Linux binary / systemd
-sudo systemctl restart needle-agent
-sudo journalctl -u needle-agent -n 50 --no-pager
-# OpenWrt / ImmortalWrt
 /etc/init.d/needle-agent restart
 logread -e needle-agent
 ```
