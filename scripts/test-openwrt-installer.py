@@ -98,6 +98,49 @@ cat "$TMP_DIR/agent.yaml"
         for value in ["hostname: 'router''s name'", "token: 'secret: #token'", "billing_period: 'forever'", "expires_at: ''", "interfaces: ['pppoe-wan']", 'interval: 30\n', 'allow_plain_http: false', 'monthly_traffic_limit_gb: 1000.000']:
             self.assertIn(value, result.stdout)
 
+    def test_empty_token_uses_kernel_uuid_without_od(self):
+        network = self.root / 'net'
+        (network / 'eth1').mkdir(parents=True)
+        uuid = self.root / 'random-uuid'
+        uuid.write_text('c2c625be-145e-46f2-b616-6409fe41fbdd\n')
+        before = self.config.read_bytes()
+        result = self.run_shell(f'''
+require_interactive() {{ :; }}
+prompt() {{ IFS= read -r ANSWER; }}
+od() {{ echo 'od must not be required' >&2; return 127; }}
+RANDOM_UUID={shlex.quote(str(uuid))}
+NETWORK_DIR={shlex.quote(str(network))}
+TMP_DIR=$(mktemp -d /tmp/needle-agent-test.XXXXXX)
+configure
+cat "$TMP_DIR/agent.yaml"
+''', input_text='router\nhttps://needle.example.com\n\n\n\n\neth1\n5\n0\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("token: 'c2c625be145e46f2b6166409fe41fbdd'", result.stdout)
+        self.assertNotIn('od must not be required', result.stderr)
+        self.assertEqual(before, self.config.read_bytes())
+        self.assertFalse(self.log.exists())
+
+    def test_failed_token_generation_stops_before_remaining_prompts(self):
+        uuid = self.root / 'random-uuid'
+        before = {path: path.read_bytes() for path in [self.config, self.binary, self.service]}
+        for content in [None, '', 'not-a-uuid\n', 'g' * 32 + '\n']:
+            with self.subTest(content=content):
+                if content is not None:
+                    uuid.write_text(content)
+                result = self.run_shell(f'''
+require_interactive() {{ :; }}
+prompt() {{ printf '%s' "$1" >&2; IFS= read -r ANSWER; }}
+RANDOM_UUID={shlex.quote(str(uuid))}
+TMP_DIR=$(mktemp -d /tmp/needle-agent-test.XXXXXX)
+configure
+''', input_text='router\nhttps://needle.example.com\n\n\n')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('enter a unique token manually', result.stderr)
+                self.assertNotIn('Report interval', result.stderr)
+                for path, data in before.items():
+                    self.assertEqual(path.read_bytes(), data)
+                self.assertFalse(self.log.exists())
+
     def test_upgrade_preserves_config_and_restarts(self):
         before = self.config.read_bytes()
         result = self.run_shell('main upgrade\nmain upgrade --version v9.9.9')

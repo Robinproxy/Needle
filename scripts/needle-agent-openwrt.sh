@@ -11,6 +11,7 @@ SERVICE=/etc/init.d/needle-agent
 BACKUP_LIST=/etc/sysupgrade.conf
 NETWORK_DIR=/sys/class/net
 MEMINFO=/proc/meminfo
+RANDOM_UUID=/proc/sys/kernel/random/uuid
 RC_DIR=/etc/rc.d
 LOCK_DIR=/tmp/needle-agent-installer.lock
 LOCK_HELD=false
@@ -354,6 +355,16 @@ choose_upgrade_config() {
 }
 # End of TCP Ping selection.
 
+generate_token() {
+    # OpenWrt's minimal BusyBox may omit od/hexdump. The kernel provides a
+    # fresh random UUID for each read, without installing another package.
+    IFS= read -r GENERATED_UUID < "$RANDOM_UUID" || return 1
+    GENERATED_TOKEN=$(printf '%s' "$GENERATED_UUID" | tr -d '-') || return 1
+    [ "${#GENERATED_TOKEN}" -eq 32 ] || return 1
+    case "$GENERATED_TOKEN" in *[!0-9a-fA-F]*) return 1 ;; esac
+    printf '%s' "$GENERATED_TOKEN"
+}
+
 configure() {
     require_interactive
     prompt 'Hostname (empty = system hostname): '; HOSTNAME=$ANSWER
@@ -368,7 +379,9 @@ configure() {
     esac
     prompt 'Region code [CN]: '; REGION=${ANSWER:-CN}
     prompt 'Agent token (empty = generate): '; TOKEN=$ANSWER
-    if [ -z "$TOKEN" ]; then TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); fi
+    if [ -z "$TOKEN" ]; then
+        TOKEN=$(generate_token) || fail 'Cannot generate an Agent token; run install again and enter a unique token manually.'
+    fi
     prompt 'Report interval in seconds [30]: '; INTERVAL=${ANSWER:-30}
     case "$INTERVAL" in ''|*[!0-9]*) fail 'Interval must be a positive integer.' ;; esac
     [ "$INTERVAL" -gt 0 ] && [ "$INTERVAL" -le 86400 ] || fail 'Interval must be 1–86400 seconds.'
