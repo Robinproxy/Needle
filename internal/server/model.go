@@ -1,13 +1,15 @@
 package server
 
 type AgentRow struct {
-	ID            int64  `json:"id"`
-	Hostname      string `json:"hostname"`
-	Region        string `json:"region"`
-	CreatedAt     int64  `json:"created_at"`
-	ExpiresAt     *int64 `json:"expires_at"`
-	BillingPeriod string `json:"billing_period"`
-	LastSeen      *int64 `json:"last_seen"` // server receipt time of the latest report
+	CPUCores            int    `json:"cpu_cores"`
+	MonthlyTrafficLimit int64  `json:"monthly_traffic_limit"`
+	ID                  int64  `json:"id"`
+	Hostname            string `json:"hostname"`
+	Region              string `json:"region"`
+	CreatedAt           int64  `json:"created_at"`
+	ExpiresAt           *int64 `json:"expires_at"`
+	BillingPeriod       string `json:"billing_period"`
+	LastSeen            *int64 `json:"last_seen"` // server receipt time of the latest report
 }
 
 type MetricRow struct {

@@ -14,17 +14,18 @@ import (
 )
 
 type ReportData struct {
-	Hostname      string                   `json:"hostname"`
-	Region        string                   `json:"region"`
-	ExpiresAt     *int64                   `json:"expires_at,omitempty"`
-	BillingPeriod string                   `json:"billing_period,omitempty"`
-	CPU           *collector.CPUStats      `json:"cpu"`
-	Memory        *collector.MemoryStats   `json:"memory"`
-	Disk          *collector.DiskStats     `json:"disk"`
-	Network       *collector.NetworkStats  `json:"network"`
-	Load          *collector.LoadStats     `json:"load"`
-	Uptime        uint64                   `json:"uptime"`
-	TCPing        []collector.TCPingResult `json:"tcpping,omitempty"`
+	MonthlyTrafficLimit int64                    `json:"monthly_traffic_limit"`
+	Hostname            string                   `json:"hostname"`
+	Region              string                   `json:"region"`
+	ExpiresAt           *int64                   `json:"expires_at,omitempty"`
+	BillingPeriod       string                   `json:"billing_period,omitempty"`
+	CPU                 *collector.CPUStats      `json:"cpu"`
+	Memory              *collector.MemoryStats   `json:"memory"`
+	Disk                *collector.DiskStats     `json:"disk"`
+	Network             *collector.NetworkStats  `json:"network"`
+	Load                *collector.LoadStats     `json:"load"`
+	Uptime              uint64                   `json:"uptime"`
+	TCPing              []collector.TCPingResult `json:"tcpping,omitempty"`
 }
 
 type Reporter struct {

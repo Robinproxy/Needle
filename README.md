@@ -21,12 +21,13 @@ Needle consists of one Server and multiple Agents. Agents make outbound-only con
 
 ## Features
 
-- CPU, memory, disk, load, uptime, network rates, and monthly traffic usage
-- Multi-target TCP Ping with selectable chart lines
+- CPU usage and logical core count, memory, disk, load, uptime, network rates, and monthly traffic usage
+- Explicit IPv4-only, IPv6-only, dual-stack, custom, or disabled TCP Ping; selectable detail chart lines
 - `1d` raw history, a downsampled `7d` overview with daily drill-down, and `30d` hourly trends
 - Seven-day raw retention and 90-day hourly retention
-- Monthly traffic accumulation that survives Agent reboots and counter resets
+- Monthly upload + download usage with an optional allowance; accumulation survives Agent reboots and counter resets
 - Monthly, quarterly, semiannual, annual, and permanent billing periods; permanent nodes display ♾️
+- Node cards with CPU/MEM and DSK/TRF grids, separate live rates and monthly totals, and IPv4/IPv6 probe columns
 - Card and list layouts, region filters, themes, anomaly markers, and automatic refresh
 - Unique Agent tokens bound to a hostname on the first successful report
 - SQLite storage and embedded frontend assets, with no frontend build step
@@ -199,25 +200,32 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 sudo bash /tmp/needle-agent.sh install
 ```
 
-Enter the Server HTTPS URL and node details. Use a unique token per Agent; leaving the token empty generates one. Select `5) Permanent` for no expiry, or choose a finite billing period. Allow the printed token **on the Server** using the command in the matching Server section above. The first successful report binds the token to the hostname.
+Enter the Server HTTPS URL and node details. Use a unique token per Agent; leaving the token empty generates one. Select `5) Permanent` for no expiry, or choose a finite billing period. Choose the TCP Ping mode and enter the monthly upload + download allowance in decimal GB (`1000` = 1 TB, `0` or Enter = no limit). Allow the printed token **on the Server** using the command in the matching Server section above. The first successful report binds the token to the hostname.
 
 ### Status, logs, and upgrades
 
+Download the current installer before upgrading to get the latest configuration prompts. Upgrade the Server to v0.7.0+ first, then upgrade Agents for core-count and monthly-allowance reporting. Existing tokens and hostnames are retained.
+
 ```sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
 sudo bash /tmp/needle-agent.sh status
 sudo systemctl status needle-agent --no-pager
 sudo journalctl -u needle-agent -n 100 --no-pager
 sudo journalctl -u needle-agent -f
 
-# Upgrade, preserving agent.yaml
+# Interactive upgrade: keep existing config (default) or reconfigure TCP Ping and monthly allowance
 sudo bash /tmp/needle-agent.sh upgrade
+# Skip the configuration question
+sudo bash /tmp/needle-agent.sh upgrade --keep-config
+# Reselect TCP Ping and monthly allowance (requires a terminal)
+sudo bash /tmp/needle-agent.sh upgrade --reconfigure
 
 sudo systemctl restart needle-agent
 sudo systemctl stop needle-agent
 sudo systemctl start needle-agent
 ```
 
-Edit `/opt/needle-agent/agent.yaml` as described under **Configuration**, then restart the service. For foreground troubleshooting, stop the service first:
+Running `install` again with an existing Linux Agent configuration uses the upgrade flow, preserving the token and hostname. Edit `/opt/needle-agent/agent.yaml` as described under **Configuration**, then restart the service. For foreground troubleshooting, stop the service first:
 
 ```sh
 sudo systemctl stop needle-agent
@@ -246,7 +254,7 @@ Successful Server unregistration removes node history and the bound token. Allow
 
 Use root SSH access on OpenWrt / ImmortalWrt with procd. The installer uses BusyBox-compatible `sh`; Bash, systemd, and Docker are not required. Supported architectures are `x86_64` (amd64) and `aarch64` (arm64). ARM 32-bit and MIPS are not supported.
 
-You need curl or HTTPS-capable wget, CA certificates, sha256sum, and access to GitHub API and Releases. The selected release must contain `needle-agent-linux-ARCH.tar.gz` and its `.sha256` file. These standalone packages are absent from v0.6.4 and require a subsequent release containing them. Static builds and installer checks pass. Agent reporting and procd lifecycle tests also pass in an isolated OpenWrt 24.10.4 ARM64 userspace with a Linux virtual-machine kernel. This does not replace validation on the target router, especially x86_64 hardware, WAN/PPPoE interfaces, and firmware reboot behavior.
+You need curl or HTTPS-capable wget, CA certificates, sha256sum, and access to GitHub API and Releases. The selected release must contain `needle-agent-linux-ARCH.tar.gz` and its `.sha256` file. These standalone packages are available in v0.6.5 and later. Static builds and installer checks pass. Agent reporting and procd lifecycle tests also pass in an isolated OpenWrt 24.10.4 ARM64 userspace with a Linux virtual-machine kernel. This does not replace validation on the target router, especially x86_64 hardware, WAN/PPPoE interfaces, and firmware reboot behavior.
 
 Download first, then run from an interactive SSH terminal:
 
@@ -255,22 +263,26 @@ wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinprox
 sh /tmp/needle-agent-openwrt.sh install
 ```
 
-Enter the Server HTTPS URL and node details. The default reporting interval is 30 seconds and the default billing period is `forever` (Server v0.6.4+ required). Allow the printed token **on the Server** using the corresponding Server section above.
+Enter the Server HTTPS URL and node details. The default reporting interval is 30 seconds and the default billing period is `forever` (Server v0.6.4+ required). Choose the TCP Ping mode and the monthly upload + download allowance in decimal GB (`1000` = 1 TB, `0` or Enter = no limit). Allow the printed token **on the Server** using the corresponding Server section above.
 
 Confirm the WAN interface suggested by the installer. PPPoE commonly uses `pppoe-wan`; other WANs may use an interface such as `eth1`. The selected interface must exist. Avoid counting both a PPPoE interface and its underlying device, or both LAN and WAN for the same traffic. See the shared Agent settings under **Configuration** for multi-WAN setups.
 
 ### Status, logs, and upgrades
 
-Installation enables the service at boot. Download the installer again if `/tmp` was cleared after reboot.
+Installation enables the service at boot. Download the current installer before each upgrade, including after `/tmp` was cleared on reboot. Upgrade the Server to v0.7.0+ first, then upgrade Agents for core-count and monthly-allowance reporting.
 
 ```sh
+wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh
 sh /tmp/needle-agent-openwrt.sh status
 logread -e needle-agent
 
-# Upgrade, retaining configuration and token
+# Interactive upgrade: keep existing config (default) or reconfigure TCP Ping and monthly allowance
 sh /tmp/needle-agent-openwrt.sh upgrade
-# Replace vX.Y.Z with a release containing standalone Agent packages
-sh /tmp/needle-agent-openwrt.sh upgrade --version vX.Y.Z
+sh /tmp/needle-agent-openwrt.sh upgrade --keep-config
+# Reselect TCP Ping and monthly allowance; preserve token and identity
+sh /tmp/needle-agent-openwrt.sh upgrade --reconfigure
+# Pin this release if needed
+sh /tmp/needle-agent-openwrt.sh upgrade --version v0.7.0
 
 /etc/init.d/needle-agent restart
 /etc/init.d/needle-agent stop
@@ -315,9 +327,11 @@ The installer adds `/etc/needle/` to `/etc/sysupgrade.conf`. Firmware upgrades t
 | Server binary | Service | `/etc/systemd/system/needle-server.service` |
 | Agent binary | Executable | `/opt/needle-agent/bin/needle-agent` |
 | Agent binary | Configuration | `/opt/needle-agent/agent.yaml` |
+| Agent binary | Backup before settings reselection | `/opt/needle-agent/agent.yaml.bak` |
 | Agent binary | Service | `/etc/systemd/system/needle-agent.service` |
 | Agent OpenWrt | Executable | `/usr/bin/needle-agent` |
 | Agent OpenWrt | Configuration | `/etc/needle/agent.yaml` |
+| Agent OpenWrt | Backup before settings reselection | `/etc/needle/agent.yaml.bak` |
 | Agent OpenWrt | Installed version | `/etc/needle/version` |
 | Agent OpenWrt | Service | `/etc/init.d/needle-agent` |
 | Agent OpenWrt | Firmware backup list | `/etc/sysupgrade.conf` |
@@ -412,6 +426,7 @@ token: "replace-with-unique-agent-token"
 region: SG
 billing_period: "forever"
 expires_at: ""
+monthly_traffic_limit_gb: 1000 # 1000 decimal GB = 1 TB; 0 = no limit
 interval: 30
 tls_skip_verify: false
 allow_plain_http: false
@@ -428,13 +443,18 @@ tcpping:
 | `region` | Region code shown in the dashboard |
 | `billing_period` | `1m`, `3m`, `6m`, `12m`, or `forever`; empty leaves the billing period unset |
 | `expires_at` | Renewal date in `YYYY-MM-DD`; empty for `forever` |
+| `monthly_traffic_limit_gb` | Monthly upload + download allowance in decimal GB; `1000` = 1 TB, `0` or omitted displays ♾️; display only, does not stop traffic; Server and Agent v0.7.0+ |
 | `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
 | `interfaces` | Exact NIC whitelist; omitted or empty uses the virtual-interface exclusion filter |
 | `tls_skip_verify` | Disables TLS certificate verification; defaults to false |
 | `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
 | `tcpping` | List of named TCP targets in `host:port` format |
 
-Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
+Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
+
+`monthly_traffic_limit_gb` controls the traffic allowance independently of expiry. For example, a permanent node can still have a 1 TB monthly allowance. TRF displays combined monthly upload and download usage against this allowance, using decimal units: `1000 GB = 1 TB`. A zero or omitted allowance displays ♾️; exceeding a finite allowance highlights the percentage but does not block traffic. Changing the allowance does not reset accumulated usage.
+
+Usage starts at the first observed counter baseline; Needle cannot recover traffic used before monitoring began or reconcile it with a provider's meter. Upgrade both Server and Agent to v0.7.0+ for allowance reporting and logical CPU counts. Core counts are collected automatically and do not require a configuration option.
 
 For a Linux server, omit `interfaces` to use automatic filtering, or specify the actual NIC:
 
@@ -450,7 +470,27 @@ region: CN
 interfaces: ["pppoe-wan"]
 ```
 
-The OpenWrt installer recommends WAN's `l3_device` when available. Multiple WAN interfaces can be listed manually, but do not count multiple layers of the same connection. OpenWrt defaults to three IPv4 TCP Ping targets (CMv4, CUv4, CTv4); the Linux installer offers six IPv4/IPv6 targets. Both can be edited in `tcpping`.
+The OpenWrt installer recommends WAN's `l3_device` when available. Multiple WAN interfaces can be listed manually, but do not count multiple layers of the same connection. Both Agent installers offer the same TCP Ping choices starting in v0.7.0, with no automatic connectivity detection:
+
+| Mode | Targets |
+| --- | --- |
+| `1) IPv4 only` (default) | CMv4, CUv4, CTv4 |
+| `2) IPv6 only` | CMv6, CUv6, CTv6 |
+| `3) Dual stack` | All six presets |
+| `4) Custom` | Select individual presets and optionally add your own targets |
+| `5) Disabled` | No TCP Ping; system metrics continue reporting |
+
+Custom targets require unique names and `host:port` addresses; bracket literal IPv6 addresses, for example `[2001:db8::1]:443`. Up to 32 targets are supported. Choose according to the node's usable outbound connectivity, including NAT or WARP routes.
+
+The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping and monthly allowance**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance); the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600. OpenWrt installation failures restore the original configuration along with the old binary and service.
+
+Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance prompt. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
+
+```yaml
+tcpping: []
+```
+
+The dashboard's live card/list summaries follow the latest report. Disabling probes clears old live latency values and shows a disabled state. Previously enabled targets remain in history and are marked `Inactive` in the detail statistics. Chart Show/Hide controls affect display only; they do not change the Agent's configuration. Use Server v0.7.0+ for these live-target and history behaviors.
 
 Restart after editing:
 
@@ -468,6 +508,38 @@ Keep the database, environment files, configurations, and tokens out of source c
 </details>
 
 ## Reference
+
+<details>
+<summary><strong>Node cards and live probe results</strong></summary>
+
+The card header shows online status, hostname, region, uptime, and the renewal countdown; permanent nodes show ♾️ for expiry.
+
+| Card area | Display |
+| --- | --- |
+| CPU | Utilization, logical core count (`4C` = four logical CPUs / vCPUs), and the one-minute load average (`Load 0.14`, not 14% CPU utilization) |
+| MEM / DSK | Utilization bars and used / total capacity |
+| TRF | Combined monthly upload + download, allowance, and usage percentage; for example, `396 GB / 1 TB` and `39.6%`. An unlimited allowance displays ♾️ and no percentage |
+| Network, left | Current download and upload rates in bytes per second |
+| Network, right | Separate monthly download and upload totals, aligned with their current rates |
+| Probes | All currently enabled targets, grouped into IPv4 / IPv6 columns; other custom targets use a Custom group |
+
+Cards no longer cycle through a single selected probe. The list layout summarizes the first target in the latest report. Live latency and loss reflect the latest TCP connection attempt: success shows `0%`, failure shows `100%` and no latency. Detail chart statistics instead summarize the selected history window, so their loss percentages can differ.
+
+The dashboard refreshes every 30 seconds. Detail chart line selection, Show/Hide controls, historical ranges, and daily drill-down remain available. Agents that have not yet been upgraded still report their existing metrics; their logical core count remains unavailable until they send it.
+
+</details>
+
+<details>
+<summary><strong>Upgrading to v0.7.0</strong></summary>
+
+1. Upgrade the Server using its Docker or binary section above. SQLite columns are migrated automatically and existing history is retained.
+2. Download the latest Agent installer for each machine and run `upgrade` from an interactive terminal.
+3. Choose **Keep existing configuration** (default) to preserve the file unchanged, or **Reconfigure TCP Ping and monthly allowance** to select the desired probes and optional allowance. Press Enter at the allowance prompt to retain its current value; enter `0` to remove a limit.
+4. Existing tokens, hostnames, Server URLs, and interfaces are preserved. No token registration is needed again. Restart after manual YAML edits.
+
+Non-interactive upgrades keep the original configuration. Use `upgrade --keep-config` for an explicit unchanged configuration, or `upgrade --reconfigure` to enter the configuration flow directly (requires a terminal). Upgrading does not automatically change an existing six-target configuration to IPv4-only; choose a new mode explicitly if needed.
+
+</details>
 
 <details>
 <summary><strong>History views and retention</strong></summary>

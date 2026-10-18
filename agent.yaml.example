@@ -4,21 +4,19 @@ token: replace-with-unique-agent-token   # unique per agent; allow on Server wit
 region: SG
 billing_period: "1m"        # 1m/3m/6m/12m/forever; forever displays ♾️ and resets traffic on day 1
 expires_at: "2026-08-15"    # YYYY-MM-DD, optional; leave empty for forever
+monthly_traffic_limit_gb: 1000 # Upload + download per month; decimal GB (1000 GB = 1 TB); 0 = no limit
 interval: 30
 # interfaces: ["eth0"]      # optional NIC whitelist; default counts physical NICs only
                             # (loopback, docker/veth bridges, VPN tunnels excluded)
 tls_skip_verify: false       # true only for HTTPS with an untrusted/self-signed certificate
 allow_plain_http: false      # required for HTTP to a non-loopback host (token is exposed in transit)
+# Installer modes: IPv4 (default), IPv6, dual stack, custom, or disabled.
+# Edit this list to choose targets. Use tcpping: [] to disable probes.
+# Target names must be unique; IPv6 literals use [address]:port.
 tcpping:
   - name: "CMv4"
     target: "sh-cm-v4.ip.zstaticcdn.com:80"
-  - name: "CMv6"
-    target: "sh-cm-v6.ip.zstaticcdn.com:80"
   - name: "CUv4"
     target: "sh-cu-v4.ip.zstaticcdn.com:80"
-  - name: "CUv6"
-    target: "sh-cu-v6.ip.zstaticcdn.com:80"
   - name: "CTv4"
     target: "sh-ct-v4.ip.zstaticcdn.com:80"
-  - name: "CTv6"
-    target: "sh-ct-v6.ip.zstaticcdn.com:80"

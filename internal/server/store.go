@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -122,6 +123,10 @@ func (s *Store) migrate() error {
 			success INTEGER DEFAULT 1,
 			created_at INTEGER DEFAULT (strftime('%s','now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS agent_tcpping_current (
+			agent_id INTEGER PRIMARY KEY,
+			results_json TEXT NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_metrics_agent_time ON metrics(agent_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_tcpping_agent_time ON tcpping_results(agent_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS agent_tokens (
@@ -197,6 +202,8 @@ func (s *Store) migrate() error {
 	// last_seen (v0.6.3): report receipt time, survives metric purge.
 	// After the autoincrement rebuild so the rebuild cannot drop it.
 	s.db.Exec("ALTER TABLE agents ADD COLUMN last_seen INTEGER")
+	s.db.Exec("ALTER TABLE agents ADD COLUMN monthly_traffic_limit INTEGER NOT NULL DEFAULT 0")
+	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
 	return nil
 }
 
@@ -508,24 +515,31 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 	if t.Success {
 		suc = 1
 	}
-	_, err := x.Exec(
+	result, err := x.Exec(
 		`INSERT INTO tcpping_results(agent_id, name, target, latency_ms, success, created_at)
 		 VALUES(?, ?, ?, ?, ?, ?)`,
 		t.AgentID, t.Name, t.Target, t.LatencyMs, suc, createdAt,
 	)
+	if err != nil {
+		return err
+	}
+	t.ID, err = result.LastInsertId()
+	t.CreatedAt = createdAt
 	return err
 }
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
-	Hostname         string
-	Region           string
-	ExpiresAt        *int64
-	BillingPeriod    string
-	Metric           *MetricRow  // nil when the report carries no metric
-	TCPings          []TCPingRow // AgentID is filled in by SaveReport
-	CreatedAt        int64
-	BaselineBoundary *int64 // billing-cycle boundary to snapshot, nil to skip
+	CPUCores            int
+	MonthlyTrafficLimit int64
+	Hostname            string
+	Region              string
+	ExpiresAt           *int64
+	BillingPeriod       string
+	Metric              *MetricRow  // nil when the report carries no metric
+	TCPings             []TCPingRow // AgentID is filled in by SaveReport
+	CreatedAt           int64
+	BaselineBoundary    *int64 // billing-cycle boundary to snapshot, nil to skip
 }
 
 // SaveReport writes the agent upsert, metric, traffic baseline, and TCPing
@@ -540,6 +554,9 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 
 	agentID, err := upsertAgent(tx, r.Hostname, r.Region, r.ExpiresAt, r.BillingPeriod, s.now().Unix())
 	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec("UPDATE agents SET monthly_traffic_limit = ?, cpu_cores = ? WHERE id = ?", r.MonthlyTrafficLimit, r.CPUCores, agentID); err != nil {
 		return 0, err
 	}
 	if r.Metric != nil {
@@ -565,6 +582,20 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 			return 0, err
 		}
 	}
+	// Keep the current report independent of history timestamps. Empty results
+	// explicitly disable probing, even when two reports arrive in one second.
+	current := r.TCPings
+	if current == nil {
+		current = []TCPingRow{}
+	}
+	encoded, err := json.Marshal(current)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`INSERT INTO agent_tcpping_current(agent_id, results_json) VALUES(?, ?)
+		ON CONFLICT(agent_id) DO UPDATE SET results_json = excluded.results_json`, agentID, string(encoded)); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -572,7 +603,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 }
 
 func (s *Store) GetAgents() ([]AgentRow, error) {
-	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen FROM agents ORDER BY id")
+	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores FROM agents ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +612,7 @@ func (s *Store) GetAgents() ([]AgentRow, error) {
 	var agents []AgentRow
 	for rows.Next() {
 		var a AgentRow
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen); err != nil {
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -806,6 +837,20 @@ type ServerStats struct {
 }
 
 func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
+	var encoded string
+	err := s.db.QueryRow("SELECT results_json FROM agent_tcpping_current WHERE agent_id = ?", agentID).Scan(&encoded)
+	if err == nil {
+		var current []TCPingRow
+		if err := json.Unmarshal([]byte(encoded), &current); err != nil {
+			return nil, err
+		}
+		return current, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	// Existing databases retain their last raw batch until the next Agent report.
+
 	rows, err := s.db.Query(
 		`SELECT id, agent_id, name, target, latency_ms, success, created_at
 		 FROM tcpping_results WHERE agent_id = ? AND created_at = (
@@ -1114,6 +1159,9 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM tcpping_hourly WHERE agent_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM agent_tcpping_current WHERE agent_id = ?", id); err != nil {
 		return err
 	}
 	if hostname != "" {

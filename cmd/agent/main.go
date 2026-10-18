@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,22 +20,32 @@ import (
 )
 
 type Config struct {
-	Hostname       string                   `yaml:"hostname"`
-	Server         string                   `yaml:"server"`
-	Token          string                   `yaml:"token"`
-	Region         string                   `yaml:"region"`
-	ExpiresAt      string                   `yaml:"expires_at"`
-	BillingPeriod  string                   `yaml:"billing_period"`
-	Interval       int                      `yaml:"interval"`
-	TLSSkipVerify  bool                     `yaml:"tls_skip_verify"`
-	AllowPlainHTTP bool                     `yaml:"allow_plain_http"`
-	Insecure       *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
-	Interfaces     []string                 `yaml:"interfaces"`
-	TCPing         []collector.TCPingTarget `yaml:"tcpping"`
+	MonthlyTrafficLimitGB float64                  `yaml:"monthly_traffic_limit_gb"`
+	Hostname              string                   `yaml:"hostname"`
+	Server                string                   `yaml:"server"`
+	Token                 string                   `yaml:"token"`
+	Region                string                   `yaml:"region"`
+	ExpiresAt             string                   `yaml:"expires_at"`
+	BillingPeriod         string                   `yaml:"billing_period"`
+	Interval              int                      `yaml:"interval"`
+	TLSSkipVerify         bool                     `yaml:"tls_skip_verify"`
+	AllowPlainHTTP        bool                     `yaml:"allow_plain_http"`
+	Insecure              *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
+	Interfaces            []string                 `yaml:"interfaces"`
+	TCPing                []collector.TCPingTarget `yaml:"tcpping"`
 }
 
 func (c Config) effectiveTLSSkipVerify() bool {
 	return c.TLSSkipVerify || (c.Insecure != nil && *c.Insecure)
+}
+
+// Quotas use decimal GB, matching providers' traffic allowances. Zero is unset.
+func (c Config) monthlyTrafficLimitBytes() (int64, error) {
+	v := c.MonthlyTrafficLimitGB
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 9_000_000 {
+		return 0, fmt.Errorf("monthly_traffic_limit_gb must be between 0 and 9000000")
+	}
+	return int64(math.Round(v * 1_000_000_000)), nil
 }
 
 func main() {
@@ -100,6 +112,10 @@ func main() {
 		}
 	}
 
+	monthlyLimit, err := cfg.monthlyTrafficLimitBytes()
+	if err != nil {
+		log.Fatalf("invalid traffic configuration: %v", err)
+	}
 	netCollector := collector.NewNetworkCollector(cfg.Interfaces)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -155,17 +171,18 @@ func main() {
 		tcpping := collector.TCPing(cfg.TCPing)
 
 		data := &agentpkg.ReportData{
-			Hostname:      hostname,
-			Region:        cfg.Region,
-			ExpiresAt:     expiresAtUnix,
-			BillingPeriod: cfg.BillingPeriod,
-			CPU:           cpu,
-			Memory:        mem,
-			Disk:          diskStat,
-			Network:       netStat,
-			Load:          load,
-			Uptime:        uptime,
-			TCPing:        tcpping,
+			Hostname:            hostname,
+			Region:              cfg.Region,
+			ExpiresAt:           expiresAtUnix,
+			BillingPeriod:       cfg.BillingPeriod,
+			MonthlyTrafficLimit: monthlyLimit,
+			CPU:                 cpu,
+			Memory:              mem,
+			Disk:                diskStat,
+			Network:             netStat,
+			Load:                load,
+			Uptime:              uptime,
+			TCPing:              tcpping,
 		}
 
 		if err := reporter.Send(ctx, data); err != nil {

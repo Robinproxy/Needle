@@ -16,6 +16,7 @@ YES=false
 PURGE=false
 UNREGISTER=false
 INSTALL_PENDING=false
+UPGRADE_CONFIG_MODE=ask
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() {
@@ -31,11 +32,14 @@ usage() {
     cat <<'HELP'
 Needle Agent for OpenWrt / ImmortalWrt (x86_64 and aarch64)
 Usage: sh needle-agent-openwrt.sh [install|upgrade|status|uninstall] [options]
+  --keep-config    Upgrade without changing configuration or prompting
+  --reconfigure    Upgrade and reselect TCP Ping and monthly allowance; preserve token
   --version vX.Y.Z  Install a specific release (default: latest stable)
   --unregister     With uninstall: remove the node from the Server first
   --purge          With uninstall: also delete local configuration
   -y, --yes        Skip uninstall confirmation
-Installation requires an interactive terminal. Upgrade preserves agent.yaml.
+Installation requires an interactive terminal. Interactive upgrades offer a config choice;
+non-interactive upgrades keep agent.yaml.
 HELP
 }
 
@@ -98,6 +102,161 @@ require_interactive() {
     [ -t 0 ] || fail 'Download the script, then run: sh /tmp/needle-agent-openwrt.sh install'
 }
 
+tcping_prompt() { prompt "$1"; TCPING_ANSWER=$ANSWER; }
+
+# TCP Ping selection is deliberately explicit; no connectivity auto-detection.
+tcping_yaml_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
+tcping_add_target() {
+    TCPING_NAME=$1
+    TCPING_TARGET=$2
+    [ -n "$TCPING_NAME" ] && [ "${#TCPING_NAME}" -le 64 ] || { echo 'Invalid TCP Ping name (1–64 characters).' >&2; return 1; }
+    if grep -Fxq -e "$TCPING_NAME" "$TMP_DIR/tcpping-names"; then
+        echo "Duplicate TCP Ping name: $TCPING_NAME" >&2; return 1
+    fi
+    [ "${#TCPING_TARGET}" -le 256 ] || { echo 'TCP Ping target is too long.' >&2; return 1; }
+    TCPING_PORT=${TCPING_TARGET##*:}
+    TCPING_HOST=${TCPING_TARGET%:*}
+    case "$TCPING_TARGET" in *:*) ;; *) echo 'Use host:port or [IPv6]:port for TCP Ping.' >&2; return 1 ;; esac
+    case "$TCPING_HOST" in '') echo 'TCP Ping host is required.' >&2; return 1 ;; \[*\]) ;; *:*) echo 'Enclose IPv6 addresses in brackets.' >&2; return 1 ;; esac
+    case "$TCPING_PORT" in ''|*[!0-9]*) echo 'TCP Ping port must be 1–65535.' >&2; return 1 ;; esac
+    [ "$TCPING_PORT" -ge 1 ] && [ "$TCPING_PORT" -le 65535 ] || { echo 'TCP Ping port must be 1–65535.' >&2; return 1; }
+    [ "$TCPING_COUNT" -lt 32 ] || { echo 'At most 32 TCP Ping targets are supported.' >&2; return 1; }
+    printf '%s\n' "$TCPING_NAME" >> "$TMP_DIR/tcpping-names"
+    {
+        printf '  - name: '; tcping_yaml_quote "$TCPING_NAME"
+        printf '\n    target: '; tcping_yaml_quote "$TCPING_TARGET"; printf '\n'
+    } >> "$TMP_DIR/tcpping-entries"
+    TCPING_COUNT=$((TCPING_COUNT + 1))
+}
+
+tcping_add_preset() {
+    case "$1" in
+        1) tcping_add_target CMv4 sh-cm-v4.ip.zstaticcdn.com:80 ;;
+        2) tcping_add_target CMv6 sh-cm-v6.ip.zstaticcdn.com:80 ;;
+        3) tcping_add_target CUv4 sh-cu-v4.ip.zstaticcdn.com:80 ;;
+        4) tcping_add_target CUv6 sh-cu-v6.ip.zstaticcdn.com:80 ;;
+        5) tcping_add_target CTv4 sh-ct-v4.ip.zstaticcdn.com:80 ;;
+        6) tcping_add_target CTv6 sh-ct-v6.ip.zstaticcdn.com:80 ;;
+        *) echo 'Invalid TCP Ping preset.' >&2; return 1 ;;
+    esac
+}
+
+configure_tcping() {
+    TCPING_COUNT=0
+    : > "$TMP_DIR/tcpping-names"
+    : > "$TMP_DIR/tcpping-entries"
+    echo 'TCP Ping: 1) IPv4 only  2) IPv6 only  3) Dual stack  4) Custom  5) Disabled'
+    tcping_prompt 'TCP Ping mode [1]: '
+    case "${TCPING_ANSWER:-1}" in
+        1) for TCPING_PRESET in 1 3 5; do tcping_add_preset "$TCPING_PRESET"; done ;;
+        2) for TCPING_PRESET in 2 4 6; do tcping_add_preset "$TCPING_PRESET"; done ;;
+        3) for TCPING_PRESET in 1 2 3 4 5 6; do tcping_add_preset "$TCPING_PRESET"; done ;;
+        4)
+            echo 'Presets: 1) CMv4  2) CMv6  3) CUv4  4) CUv6  5) CTv4  6) CTv6'
+            tcping_prompt 'Preset numbers separated by spaces (empty = none): '
+            case "$TCPING_ANSWER" in *[!1-6\ ]*) echo 'Use preset numbers 1–6 separated by spaces.' >&2; return 1 ;; esac
+            # Intentional splitting: input above accepts only preset digits and spaces.
+            for TCPING_PRESET in $TCPING_ANSWER; do tcping_add_preset "$TCPING_PRESET"; done
+            tcping_prompt 'Number of additional custom targets [0]: '
+            TCPING_EXTRA=${TCPING_ANSWER:-0}
+            case "$TCPING_EXTRA" in *[!0-9]*) echo 'Target count must be a non-negative integer.' >&2; return 1 ;; esac
+            [ "$TCPING_EXTRA" -le "$((32 - TCPING_COUNT))" ] || { echo 'At most 32 TCP Ping targets are supported.' >&2; return 1; }
+            TCPING_INDEX=1
+            while [ "$TCPING_INDEX" -le "$TCPING_EXTRA" ]; do
+                tcping_prompt "Custom target $TCPING_INDEX name: "; TCPING_CUSTOM_NAME=$TCPING_ANSWER
+                tcping_prompt "Custom target $TCPING_INDEX address (host:port or [IPv6]:port): "
+                tcping_add_target "$TCPING_CUSTOM_NAME" "$TCPING_ANSWER"
+                TCPING_INDEX=$((TCPING_INDEX + 1))
+            done
+            ;;
+        5) ;;
+        *) echo 'Select TCP Ping mode 1–5.' >&2; return 1 ;;
+    esac
+    if [ "$TCPING_COUNT" -eq 0 ]; then
+        printf 'tcpping: []\n' > "$TMP_DIR/tcpping.yaml"
+    else
+        { printf 'tcpping:\n'; cat "$TMP_DIR/tcpping-entries"; } > "$TMP_DIR/tcpping.yaml"
+    fi
+}
+
+configure_monthly_traffic() {
+    rm -f "$TMP_DIR/traffic.yaml"
+    if [ "${1:-install}" = upgrade ]; then
+        tcping_prompt 'Monthly upload + download allowance in GB (1000 = 1 TB; 0 = no limit; Enter = keep existing): '
+        [ -n "$TCPING_ANSWER" ] || return 0
+    else
+        tcping_prompt 'Monthly upload + download allowance in GB (1000 = 1 TB; 0 = no limit) [0]: '
+    fi
+    TRAFFIC_LIMIT_GB=${TCPING_ANSWER:-0}
+    TRAFFIC_LIMIT_GB=$(printf '%s\n' "$TRAFFIC_LIMIT_GB" | LC_ALL=C awk '
+        /^[0-9]+([.][0-9][0-9]?[0-9]?)?$/ { if ($0 + 0 <= 9000000) { printf "%.3f", $0 + 0; ok = 1 } }
+        END { if (!ok) exit 1 }
+    ') || { echo 'Traffic allowance must be 0–9000000 GB, with up to 3 decimal places.' >&2; return 1; }
+    printf 'monthly_traffic_limit_gb: %s\n' "$TRAFFIC_LIMIT_GB" > "$TMP_DIR/traffic.yaml"
+}
+
+upgrade_interactive() { [ -t 0 ]; }
+
+stage_tcping_config() {
+    # Change the top-level tcpping section and, if requested, the quota.
+    # Credentials and other settings are copied verbatim, including multiline values.
+    # Reject layouts we cannot safely edit instead of regenerating an identity.
+    REPLACE_QUOTA=0
+    [ ! -f "$TMP_DIR/traffic.yaml" ] || REPLACE_QUOTA=1
+    awk -v quota="$REPLACE_QUOTA" '
+        BEGIN { skip = 0; token = 0; documents = 0; sections = 0; quotas = 0; unsafe = 0 }
+        /^---([ \t]*#.*)?[ \t]*$/ { documents++; if (documents > 1) exit 1; print; next }
+        /^\.\.\.([ \t]*#.*)?[ \t]*$/ { next }
+        /^(token|"token"|\047token\047)[ \t]*:/ { token = 1 }
+        /^(tcpping|"tcpping"|\047tcpping\047)[ \t]*:/ { skip = 1; sections++; if ($0 ~ /[&*]/) unsafe = 1; next }
+        quota && /^(monthly_traffic_limit_gb|"monthly_traffic_limit_gb"|\047monthly_traffic_limit_gb\047)[ \t]*:/ { skip = 1; quotas++; if ($0 ~ /[&*]/) unsafe = 1; next }
+        skip && /^[^ \t#][^:]*:/ { skip = 0 }
+        skip && /[&*]/ { unsafe = 1 }
+        !skip { print }
+        END { if (!token || documents > 1 || sections > 1 || quotas > 1 || unsafe) exit 1 }
+    ' "$1" > "$TMP_DIR/agent.yaml" || {
+        rm -f "$TMP_DIR/agent.yaml"
+        echo 'Cannot safely update this YAML layout; original configuration is unchanged. Edit the Agent settings manually.' >&2
+        return 1
+    }
+    cat "$TMP_DIR/tcpping.yaml" >> "$TMP_DIR/agent.yaml"
+    if [ -f "$TMP_DIR/traffic.yaml" ]; then cat "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"; fi
+}
+
+choose_upgrade_config() {
+    UPGRADE_RECONFIGURE=false
+    case "${UPGRADE_CONFIG_MODE:-ask}" in
+        keep) ;;
+        reconfigure)
+            upgrade_interactive || { echo 'Reconfiguration requires an interactive terminal.' >&2; return 1; }
+            UPGRADE_RECONFIGURE=true
+            ;;
+        ask)
+            if upgrade_interactive; then
+                echo 'Upgrade configuration:'
+                echo '  1) Keep existing configuration (default)'
+                echo '  2) Reconfigure TCP Ping and monthly allowance; preserve token and identity'
+                tcping_prompt 'Configuration choice [1]: '
+                case "${TCPING_ANSWER:-1}" in
+                    1) ;;
+                    2) UPGRADE_RECONFIGURE=true ;;
+                    *) echo 'Select configuration choice 1 or 2.' >&2; return 1 ;;
+                esac
+            fi
+            ;;
+        *) echo 'Invalid upgrade configuration mode.' >&2; return 1 ;;
+    esac
+    if [ "$UPGRADE_RECONFIGURE" = true ]; then
+        configure_tcping
+        configure_monthly_traffic upgrade
+        stage_tcping_config "$1"
+    fi
+}
+# End of TCP Ping selection.
+
 configure() {
     require_interactive
     prompt 'Hostname (empty = system hostname): '; HOSTNAME=$ANSWER
@@ -138,16 +297,16 @@ configure() {
     prompt "Traffic interface [${DEFAULT_IFACE:-required}]: "; IFACE=${ANSWER:-$DEFAULT_IFACE}
     case "$IFACE" in ''|lo|*[!a-zA-Z0-9_.:-]*) fail 'Select a valid WAN interface.' ;; esac
     [ -d "$NETWORK_DIR/$IFACE" ] || fail "Interface $IFACE does not exist; connect WAN before installation."
+    configure_tcping
+    configure_monthly_traffic
     {
         printf 'hostname: '; yaml_quote "$HOSTNAME"; printf '\nserver: '; yaml_quote "$SERVER_URL"
         printf '\ntoken: '; yaml_quote "$TOKEN"; printf '\nregion: '; yaml_quote "$REGION"
         printf '\nbilling_period: '; yaml_quote "$PERIOD"; printf '\nexpires_at: '; yaml_quote "$EXPIRY"
         printf '\ninterval: %s\ntls_skip_verify: false\nallow_plain_http: %s\ninterfaces: [' "$INTERVAL" "$ALLOW_HTTP"
-        yaml_quote "$IFACE"; printf ']\ntcpping:\n'
-        for CARRIER in cm cu ct; do
-            case "$CARRIER" in cm) NAME=CMv4 ;; cu) NAME=CUv4 ;; ct) NAME=CTv4 ;; esac
-            printf '  - name: "%s"\n    target: "sh-%s-v4.ip.zstaticcdn.com:80"\n' "$NAME" "$CARRIER"
-        done
+        yaml_quote "$IFACE"; printf ']\n'
+        cat "$TMP_DIR/tcpping.yaml"
+        cat "$TMP_DIR/traffic.yaml"
     } > "$TMP_DIR/agent.yaml"
 }
 
@@ -237,13 +396,17 @@ rollback_install() {
 
 install_agent() {
     if [ -f "$CONFIG" ]; then
-        echo 'Existing configuration found; preserving it.'
+        echo 'Existing configuration found.'
     else
         [ "$ACTION" = install ] || fail 'Not installed; run install first.'
         require_interactive
     fi
     download
-    if [ ! -f "$CONFIG" ]; then configure; fi
+    if [ ! -f "$CONFIG" ]; then
+        configure
+    elif [ "$ACTION" = upgrade ]; then
+        choose_upgrade_config "$CONFIG"
+    fi
     backup_install
     mkdir -p "$CONFIG_DIR"
     chmod 700 "$CONFIG_DIR"
@@ -251,6 +414,10 @@ install_agent() {
     cp "$TMP_DIR/needle-agent" "$BINARY.new"
     chmod 755 "$BINARY.new"
     INSTALL_PENDING=true
+    if [ "${UPGRADE_RECONFIGURE:-false}" = true ]; then
+        cp -p "$CONFIG" "$CONFIG.bak"
+        chmod 600 "$CONFIG.bak"
+    fi
     if [ -x "$SERVICE" ]; then "$SERVICE" stop; fi
     mv -f "$BINARY.new" "$BINARY"
     if [ -f "$TMP_DIR/agent.yaml" ]; then mv "$TMP_DIR/agent.yaml" "$CONFIG"; fi
@@ -266,6 +433,9 @@ install_agent() {
     printf '%s\n' "$VERSION" > "$CONFIG_DIR/version"
     INSTALL_PENDING=false
     echo "Installed $VERSION. Configuration: $CONFIG"
+    if [ "${UPGRADE_RECONFIGURE:-false}" = true ]; then
+        echo "TCP Ping and allowance settings updated; token and identity preserved. Backup: $CONFIG.bak"
+    fi
     if [ -n "${TOKEN:-}" ]; then
         echo 'Allow this unique token on the Server (upgrade Server to v0.6.4+ for forever):'
         printf '  needle-server -db /path/to/needle.db allow-token %s\n' "$TOKEN"
@@ -290,7 +460,7 @@ uninstall_agent() {
     if [ -x "$SERVICE" ]; then "$SERVICE" stop; "$SERVICE" disable; fi
     rm -f "$SERVICE" "$BINARY" "$BINARY.new" "$CONFIG_DIR/version"
     if [ "$PURGE" = true ]; then
-        rm -f "$CONFIG"
+        rm -f "$CONFIG" "$CONFIG.bak"
         rmdir "$CONFIG_DIR" 2>/dev/null || true
         if [ -f "$BACKUP_LIST" ]; then
             sed '\|^/etc/needle/$|d' "$BACKUP_LIST" > "$BACKUP_LIST.needle.tmp"
@@ -302,11 +472,16 @@ uninstall_agent() {
 }
 
 main() {
+    UPGRADE_CONFIG_MODE=ask
     ACTION=${1:-install}
     [ "$#" -eq 0 ] || shift
     case "$ACTION" in help|-h|--help) usage; return ;; install|upgrade|status|uninstall) ;; *) usage; exit 1 ;; esac
     while [ "$#" -gt 0 ]; do
         case "$1" in
+            --keep-config|--reconfigure)
+                [ "$UPGRADE_CONFIG_MODE" = ask ] || fail 'Choose only one configuration option.'
+                if [ "$1" = --keep-config ]; then UPGRADE_CONFIG_MODE=keep; else UPGRADE_CONFIG_MODE=reconfigure; fi
+                ;;
             --version) [ "$#" -ge 2 ] || fail '--version needs a value.'; VERSION=$2; shift ;;
             -y|--yes) YES=true ;;
             --purge) PURGE=true ;;
@@ -317,6 +492,9 @@ main() {
     done
     if [ "$ACTION" != uninstall ] && { [ "$PURGE" = true ] || [ "$UNREGISTER" = true ] || [ "$YES" = true ]; }; then
         fail '--purge, --unregister and --yes are only valid with uninstall.'
+    fi
+    if [ "$UPGRADE_CONFIG_MODE" != ask ] && [ "$ACTION" != upgrade ]; then
+        fail '--keep-config and --reconfigure are only valid with upgrade.'
     fi
     require_system
     case "$ACTION" in

@@ -82,9 +82,9 @@ TMP_DIR=$(mktemp -d /tmp/needle-agent-test.XXXXXX)
 configure
 cat "$TMP_DIR/agent.yaml"
 """
-        result = self.run_shell(commands, input_text="router's name\nhttps://needle.example.com\n\nsecret: #token\n\n\npppoe-wan\n")
+        result = self.run_shell(commands, input_text="router's name\nhttps://needle.example.com\n\nsecret: #token\n\n\npppoe-wan\n\n1000\n")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for value in ["hostname: 'router''s name'", "token: 'secret: #token'", "billing_period: 'forever'", "expires_at: ''", "interfaces: ['pppoe-wan']", 'allow_plain_http: false']:
+        for value in ["hostname: 'router''s name'", "token: 'secret: #token'", "billing_period: 'forever'", "expires_at: ''", "interfaces: ['pppoe-wan']", 'allow_plain_http: false', 'monthly_traffic_limit_gb: 1000.000']:
             self.assertIn(value, result.stdout)
 
     def test_upgrade_preserves_config_and_restarts(self):
@@ -96,6 +96,38 @@ cat "$TMP_DIR/agent.yaml"
         self.assertEqual([line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')], ['stop','enable','start'] * 2)
         self.assertEqual(self.backup.read_text().splitlines(), [str(self.config_dir) + '/'])
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
+
+    def test_reconfigure_upgrade_preserves_token_and_other_settings(self):
+        old = "hostname: 'home-router'\ntoken: 'keep:# token with ''quotes'''\nserver: https://needle.example.com\ntcpping: []\ninterval: 60\ninterfaces: [pppoe-wan]\n"
+        self.config.write_text(old)
+        result = self.run_shell("""
+upgrade_interactive() { true; }
+tcping_prompt() { IFS= read -r TCPING_ANSWER; }
+main upgrade --reconfigure --version v9.9.9
+""", input_text='2\n\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        actual = self.config.read_text()
+        for line in old.splitlines():
+            if not line.startswith('tcpping:'): self.assertIn(line+'\n',actual)
+        self.assertIn("name: 'CMv6'",actual)
+        self.assertNotIn('v4.ip.',actual)
+        self.assertEqual(Path(str(self.config)+'.bak').read_text(),old)
+        self.assertEqual(Path(str(self.config)+'.bak').stat().st_mode & 0o777,0o600)
+        result = self.run_shell('main uninstall --yes --purge')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertFalse(Path(str(self.config)+'.bak').exists())
+
+    def test_failed_reconfigure_upgrade_restores_original_configuration(self):
+        old=self.config.read_bytes()
+        self.service.write_text(f'#!/bin/sh\nif [ "$1" = start ] && grep -q "new agent" {shlex.quote(str(self.binary))}; then exit 1; fi\nexit 0\n')
+        self.service.chmod(0o755)
+        result=self.run_shell("""
+upgrade_interactive() { true; }
+tcping_prompt() { IFS= read -r TCPING_ANSWER; }
+main upgrade --reconfigure
+""",input_text='5\n\n')
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual(self.config.read_bytes(),old)
 
     def test_failed_start_restores_previous_installation(self):
         self.service.write_text(f'#!/bin/sh\nif [ "$1" = start ] && grep -q "new agent" {shlex.quote(str(self.binary))}; then exit 1; fi\necho "$1" >> {shlex.quote(str(self.log))}\n')

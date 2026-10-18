@@ -9,12 +9,14 @@ import (
 )
 
 type reportRequest struct {
-	Hostname      string `json:"hostname"`
-	Region        string `json:"region"`
-	ExpiresAt     *int64 `json:"expires_at"`
-	BillingPeriod string `json:"billing_period"`
-	CPU           *struct {
+	MonthlyTrafficLimit int64  `json:"monthly_traffic_limit"`
+	Hostname            string `json:"hostname"`
+	Region              string `json:"region"`
+	ExpiresAt           *int64 `json:"expires_at"`
+	BillingPeriod       string `json:"billing_period"`
+	CPU                 *struct {
 		Percent float64 `json:"percent"`
+		Cores   int     `json:"cores"`
 	} `json:"cpu"`
 	Memory *struct {
 		Total uint64 `json:"total"`
@@ -54,6 +56,9 @@ func validateReport(req *reportRequest, now time.Time) error {
 		return fmt.Errorf("invalid hostname")
 	}
 
+	if req.MonthlyTrafficLimit < 0 || req.MonthlyTrafficLimit > 9_000_000_000_000_000 {
+		return fmt.Errorf("invalid monthly traffic limit")
+	}
 	switch req.BillingPeriod {
 	case "", "1m", "3m", "6m", "12m", "forever":
 	default:
@@ -70,6 +75,9 @@ func validateReport(req *reportRequest, now time.Time) error {
 		}
 	}
 
+	if req.CPU != nil && (req.CPU.Cores < 0 || req.CPU.Cores > 65536) {
+		return fmt.Errorf("invalid CPU core count")
+	}
 	if req.CPU != nil && (!finite(req.CPU.Percent) || req.CPU.Percent < 0 || req.CPU.Percent > 100) {
 		return fmt.Errorf("invalid CPU percent")
 	}
@@ -97,10 +105,16 @@ func validateReport(req *reportRequest, now time.Time) error {
 	if len(req.TCPing) > maxTCPingPerReport {
 		return fmt.Errorf("too many TCPing results")
 	}
+	names := make(map[string]bool, len(req.TCPing))
 	for _, result := range req.TCPing {
 		if sanitizeTCPingName(result.Name) == "" || sanitizeTCPingTarget(result.Target) == "" {
 			return fmt.Errorf("invalid TCPing name or target")
 		}
+		name := sanitizeTCPingName(result.Name)
+		if names[name] {
+			return fmt.Errorf("duplicate TCPing name")
+		}
+		names[name] = true
 		if !finite(result.LatencyMs) || result.LatencyMs < 0 || result.LatencyMs > 60_000 {
 			return fmt.Errorf("invalid TCPing latency")
 		}

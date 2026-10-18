@@ -12,10 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check OpenWrt installer
+      - name: Check installers and dashboard
         run: |
           sh -n scripts/needle-agent-openwrt.sh
+          bash -n scripts/needle-agent.sh
           python3 scripts/test-openwrt-installer.py
+          python3 scripts/test-tcpping-selection.py
+          python3 scripts/test-agent-upgrade-config.py
+          node scripts/test-tcpping-dashboard.cjs
 
   build:
     needs: installer-check
@@ -40,7 +44,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '1'
           CC: ${{ matrix.goarch == 'arm64' && 'aarch64-linux-gnu-gcc' || '' }}
-        run: go build -o release/needle-server ./cmd/server
+        run: go build -trimpath -ldflags="-s -w -X needle/internal/server.Version=${{ github.ref_name }}" -o release/needle-server ./cmd/server
 
       - name: Build agent
         env:

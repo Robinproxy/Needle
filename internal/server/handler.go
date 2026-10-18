@@ -326,14 +326,16 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	write := &ReportWrite{
-		Hostname:      req.Hostname,
-		Region:        sanitizeRegion(req.Region),
-		ExpiresAt:     req.ExpiresAt,
-		BillingPeriod: req.BillingPeriod,
-		CreatedAt:     createdAt,
+		Hostname:            req.Hostname,
+		Region:              sanitizeRegion(req.Region),
+		ExpiresAt:           req.ExpiresAt,
+		BillingPeriod:       req.BillingPeriod,
+		MonthlyTrafficLimit: req.MonthlyTrafficLimit,
+		CreatedAt:           createdAt,
 	}
 
 	if req.CPU != nil {
+		write.CPUCores = req.CPU.Cores
 		var memTotal, memUsed, diskTotal, diskUsed int64
 		if req.Memory != nil {
 			memTotal = int64(req.Memory.Total)
@@ -413,12 +415,13 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type agentWithMetric struct {
-		Agent        AgentRow      `json:"agent"`
-		Metric       *MetricRow    `json:"latest_metric,omitempty"`
-		LatestTCPing []TCPingRow   `json:"latest_tcpping,omitempty"`
-		Traffic      *TrafficUsage `json:"traffic,omitempty"`
-		ExpiryDays   int           `json:"expiry_days"`
-		ExpiryDate   string        `json:"expiry_date"`
+		Agent         AgentRow      `json:"agent"`
+		Metric        *MetricRow    `json:"latest_metric,omitempty"`
+		LatestTCPing  []TCPingRow   `json:"latest_tcpping,omitempty"`
+		TCPingEnabled bool          `json:"tcpping_enabled"`
+		Traffic       *TrafficUsage `json:"traffic,omitempty"`
+		ExpiryDays    int           `json:"expiry_days"`
+		ExpiryDate    string        `json:"expiry_date"`
 	}
 
 	now := h.now()
@@ -435,7 +438,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		if a.ExpiresAt != nil && a.BillingPeriod != "" {
 			expiryDays, expiryDate = calcNextReset(*a.ExpiresAt, a.BillingPeriod, now)
 		}
-		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, Traffic: traffic, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
+		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, TCPingEnabled: len(t) > 0, Traffic: traffic, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

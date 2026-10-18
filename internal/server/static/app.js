@@ -6,7 +6,6 @@ let filterRegion = '';
 let cardFormat = localStorage.getItem('cardFormat') || 'card';
 let infoData = null;
 let currentTcppingRange = '24h';
-let currentTcppingId = null;
 let currentMetricsRange = '24h';
 let currentHistoryDay = null;
 let detailDayAlerts = new Map();
@@ -320,7 +319,7 @@ function renderAll(scrollToDetail) {
         html += '<div class="inline-detail" id="detail-' + a.agent.id + '"></div>';
       }
     } else {
-      html += renderCard(a, idx, isActive);
+      html += renderCard(a, isActive);
       if (idx === slotIdx && expandedId) {
         html += '<div class="inline-detail" id="detail-' + expandedId + '"></div>';
       }
@@ -342,14 +341,83 @@ function renderAll(scrollToDetail) {
   }
 }
 
-function trafficHTML(data) {
-  if (!data || !data.available) {
-    return '<span class="traffic-label">TRF</span><span class="traffic-unavailable">Not configured</span>';
-  }
-  if (!data.has_data) {
-    return '<span class="traffic-label">TRF</span><span class="traffic-unavailable">No data</span>';
-  }
-  return '<span class="traffic-label">TRF</span><span class="traffic-down">\u2193 ' + formatBytes(data.recv) + '</span><span class="traffic-divider">/</span><span class="traffic-up">\u2191 ' + formatBytes(data.sent) + '</span>';
+function formatTrafficBytes(bytes) {
+  if (!bytes || bytes < 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1000)));
+  return Number((bytes / (1000 ** i)).toFixed(2)) + ' ' + units[i];
+}
+
+function metricHTML(label, value, sub, title = '') {
+  const width = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return '<div class="metric"' + (title ? ' title="' + escapeAttr(title) + '"' : '') + '>'
+    + '<div class="metric-header"><span class="label">' + label + '</span><span class="value ' + metricColor(value) + '">' + pct(value) + '</span></div>'
+    + '<div class="metric-bar"><div class="metric-fill ' + metricColor(value) + '" style="width:' + width.toFixed(1) + '%"></div></div>'
+    + '<div class="metric-sub">' + escapeHtml(sub) + '</div></div>';
+}
+
+function trafficHTML(data, limit = 0) {
+  const ready = data?.available && data?.has_data;
+  const used = ready ? data.sent + data.recv : null;
+  const value = used != null && limit > 0 ? used / limit * 100 : null;
+  const usedText = used != null ? formatTrafficBytes(used) : (data?.available ? 'No data' : 'Not configured');
+  const text = usedText + ' / ' + (limit > 0 ? formatTrafficBytes(limit) : '♾️');
+  return metricHTML('TRF', value, text, 'Monthly upload + download; decimal GB/TB. Observed usage since monitoring began, not provider billing data.');
+}
+
+function cardMetricsHTML(a) {
+  const m = a.latest_metric;
+  const cores = a.agent.cpu_cores > 0 ? a.agent.cpu_cores : null;
+  const cpuSub = m ? (cores ? cores + 'C · ' : '') + 'Load ' + (m.load1 || 0).toFixed(2) : 'No data';
+  const cpuTitle = (cores ? cores + ' logical CPU' + (cores === 1 ? '' : 's') + '; ' : '') + 'Load is the 1-minute system load average';
+  return metricHTML('CPU', m ? m.cpu_usage : null, cpuSub, cpuTitle)
+    + metricHTML('MEM', m && m.memory_total > 0 ? m.memory_used / m.memory_total * 100 : null,
+      m ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : 'No data')
+    + metricHTML('DSK', m && m.disk_total > 0 ? m.disk_used / m.disk_total * 100 : null,
+      m ? formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total) : 'No data')
+    + trafficHTML(a.traffic, a.agent.monthly_traffic_limit);
+}
+
+function cardProbesHTML(a) {
+  const probes = a.latest_tcpping || [];
+  if (!probes.length) return '<span class="ping-disabled">' + (a.tcpping_enabled === false ? 'TCP Ping disabled' : 'No TCP Ping data') + '</span>';
+  const groups = { IPv4: [], IPv6: [], Custom: [] };
+  probes.forEach(p => {
+    const name = mapCarrier(p.name);
+    const family = /v6$/i.test(name) || p.target.startsWith('[') ? 'IPv6'
+      : /v4$/i.test(name) || /^\d+\.\d+\.\d+\.\d+:/.test(p.target) ? 'IPv4' : 'Custom';
+    groups[family].push(p);
+  });
+  const order = ['CT', 'CU', 'CM'];
+  return Object.entries(groups).filter(([, rows]) => rows.length).map(([family, rows]) => {
+    rows.sort((a, b) => {
+      const rank = p => { const i = order.indexOf(mapCarrier(p.name).slice(0, 2)); return i < 0 ? 3 : i; };
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    });
+    return '<div class="probe-family"><div class="probe-family-label">' + family + '</div>' + rows.map(p => {
+      const loss = p.success ? 0 : 100;
+      return '<div class="probe-row" title="' + escapeAttr(p.target + ' · latest probe result') + '">'
+        + '<span class="probe-name">' + escapeHtml(mapCarrier(p.name)) + '</span>'
+        + '<span class="probe-lat" style="color:' + valCss(p.success ? pingLatColor(p.latency_ms) : 'gray') + '">' + (p.success ? p.latency_ms.toFixed(0) + 'ms' : '—') + '</span>'
+        + '<span class="probe-loss" style="color:' + valCss(pingLossColor(loss)) + '">' + Number(loss.toFixed(1)) + '%</span></div>';
+    }).join('') + '</div>';
+  }).join('');
+}
+
+function formatCardSpeed(bytes) {
+  return bytes == null ? '—' : formatTrafficBytes(bytes) + '/s';
+}
+
+function cardNetworkHTML(a) {
+  const m = a.latest_metric;
+  const traffic = a.traffic;
+  const ready = traffic?.available && traffic?.has_data;
+  return '<div class="net-rates" aria-label="Current network rates">'
+    + '<span class="net-down" title="Current download rate">↓ ' + formatCardSpeed(m?.network_down) + '</span>'
+    + '<span class="net-up" title="Current upload rate">↑ ' + formatCardSpeed(m?.network_up) + '</span></div>'
+    + '<div class="net-totals" aria-label="Monthly network usage">'
+    + '<span class="net-down" title="Monthly download usage">↓ ' + (ready ? formatTrafficBytes(traffic.recv) : '—') + '</span>'
+    + '<span class="net-up" title="Monthly upload usage">↑ ' + (ready ? formatTrafficBytes(traffic.sent) : '—') + '</span></div>';
 }
 
 function expiryBadge(a) {
@@ -366,33 +434,22 @@ function updateExpiryBadge(node, a) {
   node.insertAdjacentHTML('beforeend', expiryBadge(a));
 }
 
-function renderCard(a, idx, isActive) {
+function tcpingLayoutSignature(list) {
+  return JSON.stringify(list.map(a => [a.agent.id, a.tcpping_enabled,
+    (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
+}
+
+function tcpingStatusText(a) {
+  if (a?.tcpping_enabled === false) return 'TCP Ping disabled · recorded history remains available';
+  const count = a?.latest_tcpping?.length || 0;
+  return count ? count + ' target' + (count === 1 ? '' : 's') + ' enabled' : 'No TCP Ping data yet';
+}
+
+function renderCard(a, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
-  // null (not 0) when there is no data: pct() renders it as an em dash.
-  const cpu = m ? m.cpu_usage : null;
-  const memPct = m && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
-  const memStr = m ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : '';
-  const diskPct = m && m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : null;
-  const diskStr = m ? formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total) : '';
-  const upSpeed = m ? formatSpeed(m.network_up) : '—';
-  const downSpeed = m ? formatSpeed(m.network_down) : '—';
   const uptime = m ? formatUptime(m.uptime) : '-';
   const seenTs = lastSeenMs(a);
-
-  // TCPing card line — selected target or first
-  let pingHtml = '';
-  if (a.latest_tcpping && a.latest_tcpping.length > 0) {
-    const saved = getCardTcpping(a.agent.id);
-    const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
-    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
-    const lossStr = p.success ? '0%' : '-';
-    const dotBg = tcppingColor(p.name);
-    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
-    const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
-    pingHtml = '<div class="card-ping"><span class="ping-dot" style="background:' + dotBg + '"></span><button type="button" class="ping-label" onclick="event.stopPropagation();cycleCardTcpping(' + a.agent.id + ')" aria-label="Show next TCP Ping target for ' + escapeAttr(a.agent.hostname) + '">' + escapeHtml(mapCarrier(p.name)) + '</button><span class="ping-lat"><span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + latClr + '">' + latStr + '</span></span><span class="ping-loss"><span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lossClr + '">' + lossStr + '</span></span></div>';
-  }
-
   const expiryHtml = expiryBadge(a);
 
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
@@ -402,14 +459,9 @@ function renderCard(a, idx, isActive) {
       + '<span class="card-session">' + flagEmoji(a.agent.region) + '</span>'
     + '</div>'
     + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
-    + '<div class="card-metrics">'
-      + '<div class="metric"><div class="metric-header"><span class="label">CPU</span><span class="value ' + metricColor(cpu) + '">' + pct(cpu) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(cpu) + '" style="width:' + (cpu || 0).toFixed(0) + '%"></div></div></div>'
-      + '<div class="metric"><div class="metric-header"><span class="label">MEM</span><span class="value ' + metricColor(memPct) + '">' + pct(memPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(memPct) + '" style="width:' + (memPct || 0).toFixed(0) + '%"></div></div><div class="metric-sub">' + memStr + '</div></div>'
-      + '<div class="metric"><div class="metric-header"><span class="label">DSK</span><span class="value ' + metricColor(diskPct) + '">' + pct(diskPct) + '</span></div><div class="metric-bar"><div class="metric-fill ' + metricColor(diskPct) + '" style="width:' + (diskPct || 0).toFixed(0) + '%"></div></div><div class="metric-sub">' + diskStr + '</div></div>'
-    + '</div>'
-    + '<div class="card-traffic" data-traffic-id="' + a.agent.id + '">' + trafficHTML(a.traffic) + '</div>'
-    + pingHtml
-    + '<div class="card-footer-line"><div class="net"><span class="net-down">\u2193 ' + downSpeed + '</span><span class="net-up">\u2191 ' + upSpeed + '</span></div><span>' + (seenTs ? relativeTime(seenTs) : '') + '</span></div>'
+    + '<div class="card-metrics">' + cardMetricsHTML(a) + '</div>'
+    + '<div class="card-speeds" title="' + (seenTs ? 'Last report ' + escapeAttr(relativeTime(seenTs)) : 'No reports yet') + '">' + cardNetworkHTML(a) + '</div>'
+    + '<div class="card-probes">' + cardProbesHTML(a) + '</div>'
   + '</div>';
 }
 
@@ -427,12 +479,11 @@ function renderListRow(a, idx, isActive) {
   const regionLabel = region && region.length === 2 ? flagEmoji(region) : escapeHtml(region || '');
   const sess = String(idx + 1).padStart(2, '0');
 
-  let pingHtml = '';
+  let pingHtml = a.tcpping_enabled === false ? '<span class="list-ping ping-disabled">Disabled</span>' : '';
   if (a.latest_tcpping && a.latest_tcpping.length > 0) {
-    const saved = getCardTcpping(a.agent.id);
-    const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
+    const p = a.latest_tcpping[0];
     const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
-    const lossStr = p.success ? '0%' : '-';
+    const lossStr = p.success ? '0%' : '100%';
     const dotBg = tcppingColor(p.name);
     const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
     const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
@@ -490,32 +541,6 @@ function toggleExpand(id) {
   }
 }
 
-function cycleCardTcpping(id) {
-  const agent = agents.find(a => a.agent.id === id);
-  if (!agent || !agent.latest_tcpping || !agent.latest_tcpping.length) return;
-  const names = sortTcppingNames(agent.latest_tcpping.map(t => t.name));
-  const current = getCardTcpping(id);
-  const idx = current ? names.indexOf(current) : -1;
-  const next = (idx + 1) % names.length;
-  setCardTcpping(id, names[next]);
-  renderAll();
-}
-
-function getCardTcpping(id) {
-  return localStorage.getItem('cardTcpping_' + id) || '';
-}
-
-function setCardTcpping(id, name) {
-  localStorage.setItem('cardTcpping_' + id, name);
-}
-
-
-
-function updateTrafficDisplay(id, data) {
-  const el = document.querySelector('[data-traffic-id="' + id + '"]');
-  if (el) el.innerHTML = trafficHTML(data);
-}
-
 function destroyDetailCharts() {
   Object.values(sparkCharts).forEach(c => { try { c.dispose(); } catch(e) {} });
   sparkCharts = {};
@@ -558,15 +583,14 @@ function renderDetailContent(id) {
           + '</div>'
         + '</div>'
       + '</div>'
+      + '<p class="tcpping-status" id="tcpping-status-' + id + '">' + escapeHtml(tcpingStatusText(agent)) + '</p>'
       + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div><div id="tcpping-days-' + id + '" class="tcpping-day-nav"></div></div>'
       + '<div class="tcpping-stats" id="tcpping-stats-' + id + '">'
         + '<div class="tcpping-stats-header"><span class="col-dot"></span><span class="col-name">Source</span><span class="col-stat">Avg</span><span class="col-stat">Jitter</span><span class="col-stat">Loss</span></div>'
         + '<div id="tcpping-rows-' + id + '"></div>'
       + '</div>'
-    + '</div>'
     + '</div>';
 
-  currentTcppingId = id;
   currentTcppingRange = range;
   currentMetricsRange = range;
   loadDetailData(id, range);
@@ -760,9 +784,16 @@ function formatRangeAxisLabel(ts) {
 }
 
 function renderTCPingChart(id, results) {
+  const agent = agents.find(a => a.agent.id === Number(id));
+  const status = document.getElementById('tcpping-status-' + id);
+  if (status) status.textContent = tcpingStatusText(agent);
   if (!results || !results.length) {
+    if (tcppingChart) { tcppingChart.dispose(); tcppingChart = null; }
+    const nav = document.getElementById('tcpping-days-' + id);
+    if (nav) nav.innerHTML = '';
+    const message = agent?.tcpping_enabled === false ? 'TCP Ping disabled. No recorded data in this range.' : 'No TCP Ping data in this range.';
     const el = document.getElementById('tcpping-chart-' + id);
-    if (el) el.innerHTML = '<div style="color:hsl(215,20%,65%);font-size:13px;text-align:center;padding:80px 0">No TCPing data</div>';
+    if (el) el.innerHTML = '<div style="color:hsl(215,20%,65%);font-size:13px;text-align:center;padding:80px 0">' + message + '</div>';
     const rows = document.getElementById('tcpping-rows-' + id);
     if (rows) rows.innerHTML = '';
     return;
@@ -855,6 +886,8 @@ function renderTCPingChart(id, results) {
 // success_count and loss by sample_count so aggregated (7d) and raw (24h)
 // rows use the same math, and every render keeps the a11y attributes.
 function tcppingStatsHTML(id, results, names) {
+  const agent = agents.find(a => a.agent.id === Number(id));
+  const activeNames = new Set((agent?.latest_tcpping || []).map(p => p.name));
   return names.map((name) => {
     const targetResults = results.filter(r => r.name === name);
     const successCount = targetResults.reduce((sum, r) => sum + (r.success_count != null ? r.success_count : (r.success ? 1 : 0)), 0);
@@ -868,7 +901,7 @@ function tcppingStatsHTML(id, results, names) {
     const displayName = mapCarrier(name);
     return '<div class="tcpping-stat-row" role="button" tabindex="0" aria-pressed="true" aria-label="Toggle ' + escapeAttr(displayName) + ' TCP Ping line" data-agent-id="' + Number(id) + '" data-name="' + escapeAttr(name) + '">'
       + '<span class="col-dot"><span style="background:' + color + '"></span></span>'
-      + '<span class="col-name">' + escapeHtml(displayName) + '</span>'
+      + '<span class="col-name">' + escapeHtml(displayName) + (agent && !activeNames.has(name) ? ' <span class="ping-inactive" title="Recorded history; this target is no longer enabled">Inactive</span>' : '') + '</span>'
       + '<span class="col-stat">' + (avg ? avg.toFixed(1) + 'ms' : '—') + '</span>'
       + '<span class="col-stat">' + (jitter ? jitter.toFixed(1) + 'ms' : '—') + '</span>'
       + '<span class="col-stat ' + (lossPct >= 5 && sampleCount > 0 ? 'high-loss' : '') + '">' + (sampleCount > 0 ? lossPct.toFixed(1) + '%' : '-') + '</span>'
@@ -1082,7 +1115,7 @@ async function softRefresh() {
   refreshInFlight = true;
   try {
     const [data, info] = await Promise.all([fetchJSON('/api/agents'), fetchJSON('/api/info')]);
-    const previousIDs = agents.map(a => a.agent.id).join(',');
+    const previousLayout = tcpingLayoutSignature(agents);
     agents = data;
     agents.forEach(a => {
       const seen = lastSeenMs(a);
@@ -1090,7 +1123,7 @@ async function softRefresh() {
     });
     infoData = info;
     renderInfoBar();
-    if (previousIDs !== agents.map(a => a.agent.id).join(',')) renderAll();
+    if (previousLayout !== tcpingLayoutSignature(agents)) renderAll();
 
     data.forEach(a => {
       const card = document.querySelector('[data-id="' + a.agent.id + '"]');
@@ -1110,82 +1143,40 @@ async function softRefresh() {
       }
 
       const seenTs = lastSeenMs(a);
-      const seenEl = card.querySelector(card.classList.contains('card') ? '.card-footer-line > span:last-child' : '.list-time');
+      const seenEl = card.querySelector('.list-time');
       if (seenEl && seenTs) seenEl.textContent = relativeTime(seenTs);
+      if (card.classList.contains('card')) {
+        card.querySelector('.card-metrics').innerHTML = cardMetricsHTML(a);
+        card.querySelector('.card-probes').innerHTML = cardProbesHTML(a);
+        card.querySelector('.card-sub span:first-child').textContent = m ? formatUptime(m.uptime) : '-';
+        const speeds = card.querySelector('.card-speeds');
+        speeds.innerHTML = cardNetworkHTML(a);
+        speeds.title = seenTs ? 'Last report ' + relativeTime(seenTs) : 'No reports yet';
+        return;
+      }
 
       if (!m) return;
       const cpu = m.cpu_usage;
       const memPct = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
       const diskPct = m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : 0;
 
-      const isCard = card.classList.contains('card');
-      if (isCard) {
-        const metrics = card.querySelectorAll('.metric');
-        if (metrics.length >= 3) {
-          const cpuFill = metrics[0].querySelector('.metric-fill');
-          if (cpuFill) { cpuFill.style.width = cpu.toFixed(0) + '%'; cpuFill.className = 'metric-fill ' + metricColor(cpu); }
-          const cpuVal = metrics[0].querySelector('.value');
-          if (cpuVal) cpuVal.textContent = pct(cpu);
-
-          const memFill = metrics[1].querySelector('.metric-fill');
-          if (memFill) { memFill.style.width = memPct.toFixed(0) + '%'; memFill.className = 'metric-fill ' + metricColor(memPct); }
-          const memVal = metrics[1].querySelector('.value');
-          if (memVal) memVal.textContent = pct(memPct);
-          const memSub = metrics[1].querySelector('.metric-sub');
-          if (memSub) memSub.textContent = formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total);
-
-          const diskFill = metrics[2].querySelector('.metric-fill');
-          if (diskFill) { diskFill.style.width = diskPct.toFixed(0) + '%'; diskFill.className = 'metric-fill ' + metricColor(diskPct); }
-          const diskVal = metrics[2].querySelector('.value');
-          if (diskVal) diskVal.textContent = pct(diskPct);
-          const diskSub = metrics[2].querySelector('.metric-sub');
-          if (diskSub) diskSub.textContent = formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total);
-        }
-
-        const sub = card.querySelector('.card-sub');
-        if (sub) { const u = sub.querySelector('span:first-child'); if (u) u.textContent = formatUptime(m.uptime); }
-
-        const netDown = card.querySelector('.card-footer-line .net-down');
-        const netUp = card.querySelector('.card-footer-line .net-up');
-        if (netDown) netDown.textContent = '\u2193 ' + formatSpeed(m.network_down);
-        if (netUp) netUp.textContent = '\u2191 ' + formatSpeed(m.network_up);
-
-        const pingLabel = card.querySelector('.ping-label');
-        const pingLat = card.querySelector('.ping-lat');
-        const pingLoss = card.querySelector('.ping-loss');
-        if (a.latest_tcpping && a.latest_tcpping.length > 0 && pingLabel) {
-          const saved = getCardTcpping(a.agent.id);
-          const p = (saved && a.latest_tcpping.find(t => t.name === saved)) || a.latest_tcpping[0];
-          pingLabel.textContent = mapCarrier(p.name);
-          const pingDot = card.querySelector('.ping-dot');
-          if (pingDot) {
-            pingDot.style.background = tcppingColor(p.name);
-          }
-          if (pingLat) {
-            const lv = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
-            const lc = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
-            pingLat.innerHTML = '<span class="ping-tag">Lat</span> <span class="ping-val" style="color:' + lc + '">' + lv + '</span>';
-          }
-          if (pingLoss) {
-            const lv = p.success ? '0%' : '-';
-            const lc = valCss(pingLossColor(p.success ? 0 : 100));
-            pingLoss.innerHTML = '<span class="ping-tag">Loss</span> <span class="ping-val" style="color:' + lc + '">' + lv + '</span>';
-          }
-        }
-      } else {
-        const bars = card.querySelectorAll('.list-bar');
-        if (bars.length >= 3) {
-          const upd = (i, v) => { const f = bars[i].querySelector('.metric-fill'); if (f) { f.style.width = v.toFixed(0) + '%'; f.className = 'metric-fill ' + metricColor(v); } const l = bars[i].querySelector('.list-bar-val'); if (l) l.textContent = pct(v); };
-          upd(0, cpu); upd(1, memPct); upd(2, diskPct);
-        }
-        const netEl = card.querySelector('.list-net');
-        if (netEl) netEl.textContent = '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up);
-        const uptimeEl = card.querySelector('.list-uptime');
-        if (uptimeEl) uptimeEl.textContent = formatUptime(m.uptime);
+      const bars = card.querySelectorAll('.list-bar');
+      if (bars.length >= 3) {
+        const upd = (i, v) => { const f = bars[i].querySelector('.metric-fill'); if (f) { f.style.width = v.toFixed(0) + '%'; f.className = 'metric-fill ' + metricColor(v); } const l = bars[i].querySelector('.list-bar-val'); if (l) l.textContent = pct(v); };
+        upd(0, cpu); upd(1, memPct); upd(2, diskPct);
       }
+      const ping = a.latest_tcpping?.[0];
+      if (ping) {
+        const lat = card.querySelector('.list-ping-lat');
+        const loss = card.querySelector('.list-ping-loss');
+        if (lat) { lat.textContent = ping.success ? ping.latency_ms.toFixed(1) + 'ms' : '-'; lat.style.color = valCss(ping.success ? pingLatColor(ping.latency_ms) : 'gray'); }
+        if (loss) { loss.textContent = ping.success ? '0%' : '100%'; loss.style.color = valCss(pingLossColor(ping.success ? 0 : 100)); }
+      }
+      const netEl = card.querySelector('.list-net');
+      if (netEl) netEl.textContent = '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up);
+      const uptimeEl = card.querySelector('.list-uptime');
+      if (uptimeEl) uptimeEl.textContent = formatUptime(m.uptime);
     });
-
-    data.forEach(a => updateTrafficDisplay(a.agent.id, a.traffic));
     if (expandedId) updateDetailCharts(expandedId);
     lastRefreshAt = new Date();
     setDashboardState('ready');
@@ -1229,7 +1220,7 @@ function updateDetailCharts(id) {
   }).catch(() => {});
 
   fetch('/api/agents/' + id + '/tcpping?range=' + tcppingRange).then(r => r.json()).then(results => {
-    if (!results || !results.length) return;
+    if (!results || !results.length || !tcppingChart) { renderTCPingChart(id, results); return; }
     const names = sortTcppingNames([...new Set(results.map(r => r.name))]);
     const series = names.map((name) => {
     const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
@@ -1237,7 +1228,7 @@ function updateDetailCharts(id) {
     });
     if (tcppingChart) {
       const win = chartWindowForResults(results);
-      tcppingChart.setOption({ xAxis: { min: win[0], max: win[1] }, series });
+      tcppingChart.setOption({ legend: { data: names }, xAxis: { min: win[0], max: win[1] }, series }, { replaceMerge: ['series'] });
       renderDayNav(id, results, win);
     }
 
