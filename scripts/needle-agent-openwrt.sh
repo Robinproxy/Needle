@@ -588,8 +588,14 @@ install_agent() {
         echo "TCP Ping and allowance settings updated; token and identity preserved. Backup: $CONFIG.bak"
     fi
     if [ -n "${TOKEN:-}" ]; then
-        echo 'Allow this unique token on the Server (upgrade Server to v0.6.4+ for forever):'
-        printf '  needle-server -db /path/to/needle.db allow-token %s\n' "$TOKEN"
+        # Quote the current installation's token for safe command copying.
+        REGISTRATION_TOKEN=$(printf '%s' "$TOKEN" | sed "s/'/'\"'\"'/g")
+        echo 'Run ONE of these commands on the Server host to allow this Agent:'
+        echo '  Docker Compose Server (run from its Compose directory):'
+        printf "    docker compose exec needle-server needle-server -db /data/needle.db allow-token '%s'\n" "$REGISTRATION_TOKEN"
+        echo '  Binary Server (default installation paths):'
+        printf "    sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token '%s'\n" "$REGISTRATION_TOKEN"
+        echo '  Hostname binds automatically on the first successful report.'
     fi
     echo 'Logs: logread -e needle-agent'
     echo 'Firmware sysupgrade preserves configuration when keeping settings; reinstall the Agent afterward.'
