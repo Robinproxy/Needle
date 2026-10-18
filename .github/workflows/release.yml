@@ -8,7 +8,17 @@ permissions:
   contents: write
 
 jobs:
+  installer-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check OpenWrt installer
+        run: |
+          sh -n scripts/needle-agent-openwrt.sh
+          python3 scripts/test-openwrt-installer.py
+
   build:
+    needs: installer-check
     strategy:
       matrix:
         goarch: [amd64, arm64]
@@ -36,7 +46,8 @@ jobs:
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
-        run: go build -o release/needle-agent ./cmd/agent
+          CGO_ENABLED: '0'
+        run: go build -trimpath -ldflags="-s -w" -o release/needle-agent ./cmd/agent
 
       - name: Package
         run: |
@@ -44,20 +55,38 @@ jobs:
           cp ../scripts/needle-server.sh .
           cp ../scripts/needle-agent.sh .
           cp ../agent.yaml.example .
+          cp ../scripts/needle-agent-openwrt.sh .
           tar czf ../needle-linux-${{ matrix.goarch }}.tar.gz \
             needle-server needle-agent \
             needle-server.sh needle-agent.sh agent.yaml.example
+          tar czf ../needle-agent-linux-${{ matrix.goarch }}.tar.gz \
+            needle-agent needle-agent-openwrt.sh agent.yaml.example
           cd ..
 
       - name: Generate checksums
         run: |
-          sha256sum needle-*.tar.gz > checksums.txt
+          sha256sum needle-*.tar.gz > checksums-${{ matrix.goarch }}.txt
           for f in needle-*.tar.gz; do sha256sum "$f" > "$f.sha256"; done
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            needle-linux-*.tar.gz
-            needle-linux-*.tar.gz.sha256
-            checksums.txt
+            needle-*.tar.gz
+            needle-*.tar.gz.sha256
+            checksums-${{ matrix.goarch }}.txt
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download per-architecture checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern 'checksums-*.txt'
+      - name: Merge checksums
+        run: cat checksums-amd64.txt checksums-arm64.txt > checksums.txt
+      - name: Upload complete checksum list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" checksums.txt --repo "${{ github.repository }}" --clobber

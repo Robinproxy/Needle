@@ -5,11 +5,10 @@
 </p>
 
 <p align="center">
-  轻量、单文件、面向个人服务器的流量与状态监控工具
+  A lightweight, single-binary traffic and system monitor for personal servers
 </p>
 
 <p align="center">
-  <a href="README.en.md">English</a> ·
   <a href="https://github.com/Robinproxy/Needle/releases">Releases</a> ·
   <a href="https://github.com/Robinproxy/Needle/pkgs/container/needle">Container</a>
 </p>
@@ -18,22 +17,22 @@
   <a href="https://github.com/Robinproxy/Needle/actions/workflows/docker.yml"><img src="https://github.com/Robinproxy/Needle/actions/workflows/docker.yml/badge.svg?branch=main" alt="Docker build"></a>
 </p>
 
-Needle 由一个 Server 和多个 Agent 组成。Agent 只向外连接 Server，采集 CPU、内存、网络流量和 TCP Ping；Server 将数据保存在 SQLite 中，并提供只读 Web 面板。
+Needle consists of one Server and multiple Agents. Agents make outbound-only connections to collect CPU, memory, network traffic, and TCP Ping metrics. The Server stores them in SQLite and serves a read-only web dashboard.
 
-## 功能
+## Features
 
-- CPU、内存、实时上下行速率与计费周期流量（仅统计物理网卡，自动排除 loopback/容器/VPN 虚拟接口）
-- TCP Ping 多线路延迟监控，可按线路显示或隐藏
-- `1d` 原始数据、`7d` 降采样概览与 `30d` 小时级趋势视图；原始数据保留 7 天，小时聚合保留 90 天
-- 月度流量按 `expires_at` 的同一天自动清零；机器重启或网卡计数器重置后继续累计，周期用量不丢失
-- 点击 7 天图表下方的日期，可同步查看当天 CPU、内存、流量和 TCP Ping 原始数据
-- 异常日期使用小红点提示，悬停可查看摘要；异常标记不会遮挡曲线
-- 页面自动刷新，并区分加载中、暂无数据、数据过期和请求失败
-- 每个 Agent 使用独立 Token，首次成功上报后绑定节点
-- 单二进制部署，SQLite 存储，无前端构建依赖
-- 支持 HTTPS、Cloudflare Tunnel、Docker Compose 和 systemd
+- CPU, memory, disk, load, uptime, network rates, and monthly traffic usage
+- Multi-target TCP Ping with selectable chart lines
+- `1d` raw history, a downsampled `7d` overview with daily drill-down, and `30d` hourly trends
+- Seven-day raw retention and 90-day hourly retention
+- Monthly traffic accumulation that survives Agent reboots and counter resets
+- Monthly, quarterly, semiannual, annual, and permanent billing periods; permanent nodes display ♾️
+- Card and list layouts, region filters, themes, anomaly markers, and automatic refresh
+- Unique Agent tokens bound to a hostname on the first successful report
+- SQLite storage and embedded frontend assets, with no frontend build step
+- Docker or binary Server deployment; systemd and OpenWrt / ImmortalWrt Agent installers
 
-## 架构
+## Architecture
 
 ```text
 Agent A ─┐
@@ -42,454 +41,474 @@ Agent C ─┘                   │
                              └── Web Dashboard
 ```
 
-Agent 无需开放入站端口。生产环境建议让 Agent 通过 HTTPS 域名连接 Server，例如 Cloudflare Tunnel 或反向代理。
+Agents collect metrics and make outbound connections to the Server; no inbound Agent port is required. The Server stores reports and serves a read-only dashboard. The published Docker image contains the Server; Agents run separately on the machines being monitored.
+
+## Deployment & Operations
+
+Deploy one Server, then install an Agent on each monitored machine. Use the matching section below for installation, upgrades, logs, and removal. Configuration examples are collected under **Configuration** after **Common Paths**.
 
 <details>
-<summary><strong>快速部署</strong></summary>
+<summary><strong>1. Server — Docker Compose</strong></summary>
 
-<br>
+### Install
 
-### 1. 部署 Server（推荐 Docker Compose）
+Requires Docker Engine and Docker Compose.
 
-```bash
+```sh
 mkdir -p ~/needle/data
 cd ~/needle
 curl -fsSLO https://raw.githubusercontent.com/Robinproxy/Needle/main/docker-compose.yml
 docker compose up -d
 ```
 
-默认只监听宿主机 `127.0.0.1:8008`，数据库保存在 `~/needle/data/needle.db`。
+The default host binding is `127.0.0.1:8008`; data persists in `~/needle/data`. Put an HTTPS reverse proxy or Cloudflare Tunnel in front of the Server. If cloudflared runs on the host, use `http://127.0.0.1:8008` as its origin; if it shares the container network, use `http://needle-server:8008`. Agents connect to the public HTTPS hostname.
 
-查看运行状态：
+### Status, logs, and upgrades
 
-```bash
-docker compose ps
-docker compose logs --tail=100 needle-server
-curl -fsS http://127.0.0.1:8008/api/health
-```
+Run these commands from `~/needle`:
 
-### 2. 配置 HTTPS
-
-以 Cloudflare Tunnel 为例：
-
-- cloudflared 运行在宿主机：源服务填写 `http://127.0.0.1:8008`
-- cloudflared 与 Needle 在同一个 Docker 网络：可填写 `http://needle-server:8008`
-- Agent 配置中填写公开 HTTPS 地址，例如 `https://needle.example.com`
-
-Tunnel 到本机服务之间使用 HTTP 是正常的；Agent 到公开域名之间仍然是 HTTPS。
-
-### 3. 安装 Agent
-
-在每台被监控服务器上执行：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
-sudo bash /tmp/needle-agent.sh install
-```
-
-安装程序会生成独立 Token，并写入 `/opt/needle-agent/agent.yaml`。将其中的 `server` 改为 Server 的 HTTPS 地址，然后在 Server 上放行该 Token。
-
-Docker Server：
-
-```bash
-cd ~/needle
-docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
-```
-
-二进制或 systemd Server：
-
-```bash
-sudo /opt/needle/bin/needle-server \
-  -db /opt/needle/data/needle.db \
-  allow-token YOUR_TOKEN
-```
-
-最后重启 Agent：
-
-```bash
-sudo systemctl restart needle-agent
-sudo systemctl status needle-agent --no-pager
-```
-
-打开 `https://needle.example.com` 即可查看面板。
-
-</details>
-
-<details>
-<summary><strong>历史数据说明</strong></summary>
-
-<br>
-
-| 视图 | 数据方式 | 适合用途 |
-| --- | --- | --- |
-| `1d` | 原始采样数据 | 排查最近 24 小时的具体变化 |
-| `7d` | 15 分钟时间桶降采样 | 快速观察一周趋势，降低加载和绘制压力 |
-| 日期视图 | 指定自然日的原始数据 | 从 7 天概览进入某一天详细排查 |
-
-在 `7d` 视图中点击 TCP Ping 下方的日期，所有图表会同步切换到当天数据。日期上的红点表示当天存在异常提示；点击 `7d` 可返回一周概览。
-
-</details>
-
-<details>
-<summary><strong>Agent 配置</strong></summary>
-
-<br>
-
-配置文件：`/opt/needle-agent/agent.yaml`
-
-```yaml
-hostname: ""
-server: https://needle.example.com
-token: replace-with-unique-agent-token
-region: SG
-
-billing_period: "1m"
-expires_at: "2026-08-15"
-interval: 30
-
-tls_skip_verify: false
-allow_plain_http: false
-
-tcpping:
-  - name: CMv4
-    target: sh-cm-v4.ip.zstaticcdn.com:80
-```
-
-主要字段：
-
-| 字段 | 说明 |
-| --- | --- |
-| `hostname` | 留空时使用系统主机名 |
-| `server` | Server 地址，生产环境应使用 HTTPS |
-| `token` | 每台 Agent 独立使用的认证 Token |
-| `region` | 面板显示的地区代码 |
-| `billing_period` | 计费周期（`1m`/`3m`/`6m`/`12m`）；`forever` 表示永久，面板显示 ♾️ |
-| `expires_at` | 服务器到期日期，格式为 `YYYY-MM-DD`；流量每月在该日期的同一天清零；`forever` 时留空，流量每月 1 日清零 |
-| `interval` | 上报间隔，单位为秒 |
-| `interfaces` | 网卡白名单，例如 `["eth0"]`；留空时自动统计物理网卡（排除 loopback、docker/veth、VPN 隧道等虚拟接口） |
-| `tls_skip_verify` | 跳过 TLS 证书校验，仅用于临时排障 |
-| `allow_plain_http` | 允许连接远程明文 HTTP Server，不建议启用 |
-| `tcpping` | TCP Ping 目标列表 |
-
-永久节点配置示例（安装脚本中选择 `5) Permanent`）：
-
-```yaml
-billing_period: "forever"
-expires_at: ""
-```
-
-永久节点不计算到期倒计时，卡片显示 ♾️；流量按 Server 时区每月 1 日清零。已有到期日期在 `forever` 模式下会被忽略。启用前需升级 Server，使其支持新的周期值。
-
-修改配置后检查并重启：
-
-```bash
-sudo nano /opt/needle-agent/agent.yaml
-sudo systemctl restart needle-agent
-sudo journalctl -u needle-agent -n 100 --no-pager
-```
-
-远程 HTTP 默认会被 Agent 拒绝；`http://127.0.0.1` 等回环地址不受影响。不要为绕过证书问题长期启用 `tls_skip_verify` 或 `allow_plain_http`。
-
-</details>
-
-## 日常运维
-
-<details>
-<summary><strong>Docker Server</strong></summary>
-
-<br>
-
-查看状态和实时日志：
-
-```bash
-cd ~/needle
+```sh
 docker compose ps
 docker compose logs -f --tail=100 needle-server
-```
+curl -fsS http://127.0.0.1:8008/api/health
 
-升级镜像：
-
-```bash
-cd ~/needle
+# Upgrade the Server; database and Agent configurations are retained
 docker compose pull
 docker compose up -d
-docker image prune -f
-```
 
-重启或停止：
-
-```bash
+# Service control
 docker compose restart needle-server
 docker compose stop needle-server
 docker compose start needle-server
 ```
 
-管理 Agent 和 Token：
+### Agents and tokens
 
-```bash
-# 查看已登记节点
+After installing an Agent, allow its unique token on the Server:
+
+```sh
+docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
 docker compose exec needle-server needle-server -db /data/needle.db list-agents
-
-# 查看允许接入的 Token
 docker compose exec needle-server needle-server -db /data/needle.db list-tokens
 
-# 新增 Token
-docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
-
-# 撤销 Token，并删除与其绑定的节点数据
+# Revoke a credential and delete its bound node and history
 docker compose exec needle-server needle-server -db /data/needle.db revoke-token YOUR_TOKEN
-
-# 按节点 ID 或主机名删除节点数据
+# Delete a node, its history, and its bound token by ID or hostname
 docker compose exec needle-server needle-server -db /data/needle.db delete-agent HOSTNAME_OR_ID
 ```
 
-`delete-agent` 只删除 Server 中的数据；如果 Agent 仍在运行并继续上报，节点会再次出现。永久移除节点时应先在 Agent 端执行 `uninstall --unregister`，或撤销其 Token。
+Deleting a registered node also removes its bound token. Allow the token again if you want that Agent to reconnect.
 
-#### 备份与恢复
+### Backup, restore, and removal
 
-SQLite 正在写入时不建议直接复制单个数据库文件。最稳妥的方式是短暂停止 Server，备份整个数据目录：
+Stop the Server and copy the entire data directory for a consistent SQLite backup:
 
-```bash
-cd ~/needle
+```sh
 docker compose stop needle-server
 cp -a data "data.backup.$(date +%Y%m%d-%H%M%S)"
 docker compose start needle-server
 ```
 
-恢复前先停止服务，并保留当前数据：
+To restore, replace the placeholder backup name with your actual backup:
 
-```bash
-cd ~/needle
+```sh
 docker compose down
-mv data "data.failed.$(date +%Y%m%d-%H%M%S)"
+mv data "data.before-restore.$(date +%Y%m%d-%H%M%S)"
 cp -a data.backup.YYYYMMDD-HHMMSS data
 docker compose up -d
 ```
 
-确认恢复正常后，再手动清理不需要的旧目录。
+`docker compose down` removes the containers and network while retaining the bind-mounted `data` directory.
 
 </details>
 
 <details>
-<summary><strong>systemd Server</strong></summary>
+<summary><strong>2. Server — Linux Binary / systemd</strong></summary>
 
-<br>
+### Install
 
-安装：
+The installer supports Linux amd64 and arm64 with Bash and systemd. It downloads a release binary and creates the service:
 
-```bash
+```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh
 sudo bash /tmp/needle-server.sh install
 ```
 
-升级、检查和日志：
+For a local reverse proxy or Tunnel, choose `127.0.0.1:8008` when asked for the listen address. Configure the public HTTPS hostname before connecting Agents.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh \
-  | sudo bash -s -- upgrade
+### Status, logs, and upgrades
+
+Download the script again if it is no longer present in `/tmp`.
+
+```sh
+sudo bash /tmp/needle-server.sh status
 sudo systemctl status needle-server --no-pager
 sudo journalctl -u needle-server -f
+curl -fsS http://127.0.0.1:8008/api/health
+
+# Upgrade, preserving .env and data/
+sudo bash /tmp/needle-server.sh upgrade
+
+sudo systemctl restart needle-server
+sudo systemctl stop needle-server
+sudo systemctl start needle-server
 ```
 
-备份数据库：
+### Agents and tokens
 
-```bash
+Run on the Server machine:
+
+```sh
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token YOUR_TOKEN
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db revoke-token YOUR_TOKEN
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent HOSTNAME_OR_ID
+```
+
+Revoking a token deletes its bound node data. Deleting a node also removes its bound token; allow the token again before reconnecting the Agent.
+
+### Backup, restore, and removal
+
+```sh
 sudo systemctl stop needle-server
 sudo cp -a /opt/needle/data "/opt/needle/data.backup.$(date +%Y%m%d-%H%M%S)"
 sudo systemctl start needle-server
 ```
 
-卸载程序但保留数据和配置：
+To restore, stop the service, move the current data directory aside, copy a backup back to `/opt/needle/data`, then start the service. Preserve ownership and permissions with `cp -a`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh
+```sh
+# Remove service and binary; keep .env and data/
 sudo bash /tmp/needle-server.sh uninstall
-```
-
-彻底删除程序、配置和数据：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-server.sh -o /tmp/needle-server.sh
+# Also delete configuration and database
 sudo bash /tmp/needle-server.sh uninstall --purge
 ```
 
 </details>
 
 <details>
-<summary><strong>Agent 二进制运维</strong></summary>
+<summary><strong>3. Agent — Linux Binary / systemd</strong></summary>
 
-<br>
+### Install and connect
 
-安装脚本部署的是 Agent 二进制，并由 systemd 管理。先下载运维脚本，后续可使用它查看状态、升级或卸载：
+Run on each monitored Linux amd64 or arm64 machine using Bash and systemd:
 
-```bash
+```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
-```
-
-安装 Agent：
-
-```bash
 sudo bash /tmp/needle-agent.sh install
 ```
 
-查看本机 Agent Token：
+Enter the Server HTTPS URL and node details. Use a unique token per Agent; leaving the token empty generates one. Select `5) Permanent` for no expiry, or choose a finite billing period. Allow the printed token **on the Server** using the command in the matching Server section above. The first successful report binds the token to the hostname.
 
-```bash
-sudo sed -n 's/^token:[[:space:]]*//p' /opt/needle-agent/agent.yaml
-```
+### Status, logs, and upgrades
 
-复制上一步显示的 Token，然后在 Server 上放行。Docker Server：
-
-```bash
-cd ~/needle
-docker compose exec needle-server needle-server -db /data/needle.db allow-token YOUR_TOKEN
-```
-
-二进制或 systemd Server：
-
-```bash
-sudo /opt/needle/bin/needle-server \
-  -db /opt/needle/data/needle.db \
-  allow-token YOUR_TOKEN
-```
-
-Agent 首次成功上报后，Server 会自动将该 Token 绑定到 Agent 主机名，无需额外注册命令。
-
-查看安装信息、服务状态和最近日志：
-
-```bash
+```sh
 sudo bash /tmp/needle-agent.sh status
 sudo systemctl status needle-agent --no-pager
 sudo journalctl -u needle-agent -n 100 --no-pager
-```
-
-持续查看实时日志：
-
-```bash
 sudo journalctl -u needle-agent -f
-```
 
-启动、停止或重启 Agent：
-
-```bash
-sudo systemctl start needle-agent
-sudo systemctl stop needle-agent
-sudo systemctl restart needle-agent
-```
-
-修改配置后重启，并通过日志确认连接是否成功：
-
-```bash
-sudo nano /opt/needle-agent/agent.yaml
-sudo systemctl restart needle-agent
-sudo journalctl -u needle-agent -n 50 --no-pager
-```
-
-升级二进制；现有 `/opt/needle-agent/agent.yaml` 不会被覆盖：
-
-```bash
+# Upgrade, preserving agent.yaml
 sudo bash /tmp/needle-agent.sh upgrade
-sudo systemctl status needle-agent --no-pager
+
+sudo systemctl restart needle-agent
+sudo systemctl stop needle-agent
+sudo systemctl start needle-agent
 ```
 
-需要在前台排查时，先停止 systemd 服务，避免同一个 Agent 重复上报：
+Edit `/opt/needle-agent/agent.yaml` as described under **Configuration**, then restart the service. For foreground troubleshooting, stop the service first:
 
-```bash
+```sh
 sudo systemctl stop needle-agent
 sudo /opt/needle-agent/bin/needle-agent /opt/needle-agent/agent.yaml
-# 按 Ctrl+C 退出后恢复服务
+# Press Ctrl+C, then start the service again
 sudo systemctl start needle-agent
 ```
 
-仅卸载本机二进制和 systemd 服务，Server 上的历史数据会保留：
+### Uninstall
 
-```bash
+```sh
+# Remove local installation; retain Server history
 sudo bash /tmp/needle-agent.sh uninstall
-```
-
-通知 Server 删除节点数据后再卸载：
-
-```bash
+# Request removal of the Server node before local uninstall
 sudo bash /tmp/needle-agent.sh uninstall --unregister
 ```
 
+Successful Server unregistration removes node history and the bound token. Allow a token on the Server before reconnecting a reinstalled Agent.
+
 </details>
 
 <details>
-<summary><strong>常用路径</strong></summary>
+<summary><strong>4. Agent — OpenWrt / ImmortalWrt</strong></summary>
 
-<br>
+### Requirements and installation
 
-| 内容 | 路径 |
+Use root SSH access on OpenWrt / ImmortalWrt with procd. The installer uses BusyBox-compatible `sh`; Bash, systemd, and Docker are not required. Supported architectures are `x86_64` (amd64) and `aarch64` (arm64). ARM 32-bit and MIPS are not supported.
+
+You need curl or HTTPS-capable wget, CA certificates, sha256sum, and access to GitHub API and Releases. The selected release must contain `needle-agent-linux-ARCH.tar.gz` and its `.sha256` file. These standalone packages are absent from v0.6.4 and require a subsequent release containing them. Static builds and installer checks pass. Agent reporting and procd lifecycle tests also pass in an isolated OpenWrt 24.10.4 ARM64 userspace with a Linux virtual-machine kernel. This does not replace validation on the target router, especially x86_64 hardware, WAN/PPPoE interfaces, and firmware reboot behavior.
+
+Download first, then run from an interactive SSH terminal:
+
+```sh
+wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh
+sh /tmp/needle-agent-openwrt.sh install
+```
+
+Enter the Server HTTPS URL and node details. The default reporting interval is 30 seconds and the default billing period is `forever` (Server v0.6.4+ required). Allow the printed token **on the Server** using the corresponding Server section above.
+
+Confirm the WAN interface suggested by the installer. PPPoE commonly uses `pppoe-wan`; other WANs may use an interface such as `eth1`. The selected interface must exist. Avoid counting both a PPPoE interface and its underlying device, or both LAN and WAN for the same traffic. See the shared Agent settings under **Configuration** for multi-WAN setups.
+
+### Status, logs, and upgrades
+
+Installation enables the service at boot. Download the installer again if `/tmp` was cleared after reboot.
+
+```sh
+sh /tmp/needle-agent-openwrt.sh status
+logread -e needle-agent
+
+# Upgrade, retaining configuration and token
+sh /tmp/needle-agent-openwrt.sh upgrade
+# Replace vX.Y.Z with a release containing standalone Agent packages
+sh /tmp/needle-agent-openwrt.sh upgrade --version vX.Y.Z
+
+/etc/init.d/needle-agent restart
+/etc/init.d/needle-agent stop
+/etc/init.d/needle-agent start
+/etc/init.d/needle-agent enable
+/etc/init.d/needle-agent disable
+```
+
+Edit `/etc/needle/agent.yaml`, then restart. Missing checksums, checksum mismatches, or a binary that cannot execute abort installation before replacing the running Agent. The installer also checks that the process stays running after startup; failed installations restore the previous binary, configuration, service, version, and boot/running state. This startup check does not verify successful reports to the Server. For `unauthorized` reports, check the token allowed on the Server.
+
+### Uninstall and firmware upgrades
+
+```sh
+# Keep local configuration and Server history
+sh /tmp/needle-agent-openwrt.sh uninstall
+# Also delete local configuration; retain Server history
+sh /tmp/needle-agent-openwrt.sh uninstall --purge
+# Delete the Server node and its bound token, then remove local files
+sh /tmp/needle-agent-openwrt.sh uninstall --unregister --purge
+```
+
+Add `--yes` to skip uninstall confirmation. If unregistration fails, the installation is retained and the script attempts to restart the service.
+
+The installer adds `/etc/needle/` to `/etc/sysupgrade.conf`. Firmware upgrades that keep settings can retain configuration; reinstall the Agent binary and service afterward. Reinstallation preserves existing configuration. `uninstall --purge` also removes the backup entry.
+
+</details>
+
+## Common Paths
+
+<details>
+<summary><strong>Server and Agent file locations</strong></summary>
+
+| Deployment | Item | Path |
+| --- | --- | --- |
+| Server Docker | Compose file | `~/needle/docker-compose.yml` |
+| Server Docker | Optional Compose environment | `~/needle/.env` |
+| Server Docker | Host database | `~/needle/data/needle.db` |
+| Server Docker | Container database | `/data/needle.db` |
+| Server binary | Executable | `/opt/needle/bin/needle-server` |
+| Server binary | Environment | `/opt/needle/.env` |
+| Server binary | Database | `/opt/needle/data/needle.db` |
+| Server binary | Service | `/etc/systemd/system/needle-server.service` |
+| Agent binary | Executable | `/opt/needle-agent/bin/needle-agent` |
+| Agent binary | Configuration | `/opt/needle-agent/agent.yaml` |
+| Agent binary | Service | `/etc/systemd/system/needle-agent.service` |
+| Agent OpenWrt | Executable | `/usr/bin/needle-agent` |
+| Agent OpenWrt | Configuration | `/etc/needle/agent.yaml` |
+| Agent OpenWrt | Installed version | `/etc/needle/version` |
+| Agent OpenWrt | Service | `/etc/init.d/needle-agent` |
+| Agent OpenWrt | Firmware backup list | `/etc/sysupgrade.conf` |
+
+Docker host paths assume the deployment directory used above. Binary paths are the installer defaults.
+
+</details>
+
+## Configuration
+
+<details>
+<summary><strong>Server — Docker Compose settings</strong></summary>
+
+Edit `~/needle/docker-compose.yml`. The repository provides this configuration:
+
+```yaml
+services:
+  needle-server:
+    image: ghcr.io/robinproxy/needle:latest
+    ports:
+      - "127.0.0.1:${NEEDLE_PORT:-8008}:8008"
+    environment:
+      NEEDLE_LISTEN: ":8008"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8008/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+```
+
+| Setting | Purpose |
 | --- | --- |
-| Server 二进制 | `/opt/needle/bin/needle-server` |
-| Server 环境配置 | `/opt/needle/.env` |
-| Server 数据库 | `/opt/needle/data/needle.db` |
-| Agent 二进制 | `/opt/needle-agent/bin/needle-agent` |
-| Agent 配置 | `/opt/needle-agent/agent.yaml` |
-| systemd 服务 | `/etc/systemd/system/needle-server.service`、`needle-agent.service` |
+| `image` | `latest` tracks the latest published image; use a published version tag to pin a release |
+| `ports` | Publishes container port 8008 on the host loopback address |
+| `NEEDLE_PORT` | Compose substitution for the host port; defaults to 8008 |
+| `NEEDLE_LISTEN` | Listen address inside the container; keep `:8008` for the supplied port mapping and health check |
+| `volumes` | Persists the SQLite database from `/data` into the host's `./data` directory |
+| `restart` | Restarts the container unless explicitly stopped |
+
+For example, put `NEEDLE_PORT=8088` in `~/needle/.env` to change the host port, then run `docker compose up -d` from `~/needle`. Point the host reverse proxy or Tunnel to `http://127.0.0.1:8088`. This optional Compose `.env` is separate from the binary Server's environment file.
 
 </details>
 
 <details>
-<summary><strong>升级说明</strong></summary>
+<summary><strong>Server — Binary environment and flags</strong></summary>
 
-<br>
+The systemd installer writes `/opt/needle/.env`:
 
-- Web 面板和 Server API 的新功能只需要升级 Server。
-- Agent 采集、安全策略或本地配置能力发生变化时，才需要升级 Agent。
-- Server 升级脚本保留数据库和 `.env`；Agent 升级脚本保留 `agent.yaml`。
-- 升级前建议先备份 Server 数据目录，并阅读对应版本的 Release Notes。
+```dotenv
+NEEDLE_LISTEN=127.0.0.1:8008
+```
+
+The service uses that address and `/opt/needle/data/needle.db`. Restart after editing:
+
+```sh
+sudo systemctl restart needle-server
+sudo journalctl -u needle-server -n 50 --no-pager
+```
+
+For manual binary execution, the supported flags are:
+
+| Flag / variable | Purpose |
+| --- | --- |
+| `-l` / `NEEDLE_LISTEN` | Listen address; `-l` takes precedence, default `:8008` |
+| `-db` | Database path; default `./data/needle.db` |
+| `-cert` and `-key` | Certificate and private key for native HTTPS; supply both |
+| `-y` | Skip confirmation for `delete-agent` and `revoke-token` |
+
+Example with native TLS:
+
+```sh
+./needle-server -l :8443 -db ./data/needle.db -cert /path/to/fullchain.pem -key /path/to/privkey.pem
+```
+
+The supplied systemd service uses `-l` and `-db`; it does not load TLS paths from `.env`. Use a reverse proxy/Tunnel with that service, or adapt its unit for native TLS. For manual runs, `.env` is not automatically read by the binary. Stop the existing service before running another Server against the same port.
 
 </details>
 
 <details>
-<summary><strong>安全建议</strong></summary>
+<summary><strong>Agent — Shared settings for Linux Binary and OpenWrt</strong></summary>
 
-<br>
+Both installers use the same YAML format. Edit `/opt/needle-agent/agent.yaml` for Linux/systemd or `/etc/needle/agent.yaml` for OpenWrt/ImmortalWrt. A full example is available in [agent.yaml.example](agent.yaml.example).
 
-- 对外访问必须使用 HTTPS，Server 端口只绑定回环地址或内网地址。
-- 每台 Agent 使用独立 Token，不要在多台机器之间复用。
-- Token 泄露后立即执行 `revoke-token`，再为节点生成新 Token。
-- 不要将数据库、`.env`、`agent.yaml` 或 Token 提交到代码仓库。
-- Cloudflare Tunnel 或反向代理不能替代 Server 自身的 Token 校验。
+```yaml
+hostname: ""
+server: "https://needle.example.com"
+token: "replace-with-unique-agent-token"
+region: SG
+billing_period: "forever"
+expires_at: ""
+interval: 30
+tls_skip_verify: false
+allow_plain_http: false
+tcpping:
+  - name: CMv4
+    target: sh-cm-v4.ip.zstaticcdn.com:80
+```
+
+| Field | Meaning |
+| --- | --- |
+| `hostname` | Node name; empty uses the system hostname. Tokens bind to this name after the first successful report |
+| `server` | Server URL; use the public HTTPS address |
+| `token` | Unique allowed token for this Agent; do not reuse across nodes |
+| `region` | Region code shown in the dashboard |
+| `billing_period` | `1m`, `3m`, `6m`, `12m`, or `forever`; empty leaves the billing period unset |
+| `expires_at` | Renewal date in `YYYY-MM-DD`; empty for `forever` |
+| `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
+| `interfaces` | Exact NIC whitelist; omitted or empty uses the virtual-interface exclusion filter |
+| `tls_skip_verify` | Disables TLS certificate verification; defaults to false |
+| `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
+| `tcpping` | List of named TCP targets in `host:port` format |
+
+Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
+
+For a Linux server, omit `interfaces` to use automatic filtering, or specify the actual NIC:
+
+```yaml
+interfaces: ["eth0"]
+```
+
+For an OpenWrt PPPoE router, choose the actual WAN device explicitly:
+
+```yaml
+hostname: "home-router"
+region: CN
+interfaces: ["pppoe-wan"]
+```
+
+The OpenWrt installer recommends WAN's `l3_device` when available. Multiple WAN interfaces can be listed manually, but do not count multiple layers of the same connection. OpenWrt defaults to three IPv4 TCP Ping targets (CMv4, CUv4, CTv4); the Linux installer offers six IPv4/IPv6 targets. Both can be edited in `tcpping`.
+
+Restart after editing:
+
+```sh
+# Linux binary / systemd
+sudo systemctl restart needle-agent
+sudo journalctl -u needle-agent -n 50 --no-pager
+# OpenWrt / ImmortalWrt
+/etc/init.d/needle-agent restart
+logread -e needle-agent
+```
+
+Keep the database, environment files, configurations, and tokens out of source control. Use HTTPS for public access; Tunnel or reverse-proxy protection does not replace the Server's token checks.
+
+</details>
+
+## Reference
+
+<details>
+<summary><strong>History views and retention</strong></summary>
+
+| View | Data | Use |
+| --- | --- | --- |
+| `1d` | Raw samples | Inspect the last 24 hours |
+| `7d` | 15-minute downsampled buckets | Review weekly trends |
+| Date view | Raw samples for a selected recent calendar day | Drill down from the weekly overview |
+| `30d` | Hourly rollups | Review monthly trends |
+
+Click a date below the seven-day TCP Ping chart to switch all detail charts to that day. Red dots indicate anomaly summaries. Click `7d` to return. Raw data is kept for seven days; hourly data is kept for 90 days. Older date windows use hourly data.
 
 </details>
 
 <details>
-<summary><strong>从源码构建</strong></summary>
+<summary><strong>Build from source and upgrade scope</strong></summary>
 
-<br>
+Use the Go version declared in [go.mod](go.mod) (currently 1.26.4), plus a C compiler for the SQLite Server:
 
-需要 Go 1.24 或更高版本：
-
-```bash
+```sh
 git clone https://github.com/Robinproxy/Needle.git
 cd Needle
 go test ./...
 go build -o needle-server ./cmd/server
-go build -o needle-agent ./cmd/agent
+CGO_ENABLED=0 go build -o needle-agent ./cmd/agent
 ```
 
-Server 参数：
+Release workflows build Linux amd64 and arm64. The Server uses CGO for SQLite; standalone Agent packages use static builds with `CGO_ENABLED=0`.
 
-```text
--l       监听地址，也可使用 NEEDLE_LISTEN
--db      SQLite 数据库路径
--cert    TLS 证书路径
--key     TLS 私钥路径
--y       跳过删除或撤销操作的确认
-```
+Dashboard and API changes usually require only a Server upgrade. Upgrade Agents for collector, transport, or local configuration changes. Read release notes and back up Server data before upgrades. All installer scripts are in [scripts/](scripts/).
 
 </details>
 
-## 感谢
+## Credits
 
-- 感谢 [akiasprin](https://github.com/akiasprin) 开源的 [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2)，为 Needle 的仪表盘设计提供了参考与灵感。
-- 感谢 [zstaticcdn](https://lf3-ips.zstaticcdn.com/) 提供 TCP Ping 探测节点。
-- 感谢 [OpenCode](https://opencode.ai/)、[DeepSeek](https://deepseek.com/)、[Grok](https://x.ai/)、[GLM](https://zhipuai.cn/) 和 [OpenAI Codex](https://openai.com/codex/) 在项目开发与代码审查过程中提供辅助。
-- 感谢所有开源项目作者、贡献者和使用 Needle 并提供反馈的朋友。
+- Thanks to [akiasprin](https://github.com/akiasprin) for open-sourcing [NodeGet-StatusShowR2](https://github.com/akiasprin/NodeGet-StatusShowR2), which inspired parts of Needle's dashboard design.
+- Thanks to [zstaticcdn](https://lf3-ips.zstaticcdn.com/) for providing TCP Ping endpoints.
+- Thanks to [OpenCode](https://opencode.ai/), [DeepSeek](https://deepseek.com/), [Grok](https://x.ai/), [GLM](https://zhipuai.cn/), and [OpenAI Codex](https://openai.com/codex/) for development and code-review assistance.
+- Thanks to every open-source author, contributor, and Needle user who has shared feedback.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://opensource.org/license/mit)
