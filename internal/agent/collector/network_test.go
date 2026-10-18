@@ -1,6 +1,12 @@
 package collector
 
-import "testing"
+import (
+	"math"
+	"testing"
+	"time"
+
+	"github.com/shirou/gopsutil/v4/net"
+)
 
 func TestNetworkInterfaceFilter(t *testing.T) {
 	def := NewNetworkCollector(nil)
@@ -30,5 +36,37 @@ func TestNetworkInterfaceFilter(t *testing.T) {
 	blank := NewNetworkCollector([]string{" ", ""})
 	if !blank.counted("eth0") || blank.counted("lo") {
 		t.Error("blank whitelist should behave like the default filter")
+	}
+}
+
+func TestNetworkMissingInterfacesAreNotZeroCounters(t *testing.T) {
+	c := NewNetworkCollector([]string{"eth0"})
+	now := time.Unix(1700000000, 0)
+	if _, err := c.collect([]net.IOCountersStat{{Name: "lo", BytesSent: 100}}, now); err == nil || !c.first {
+		t.Fatal("missing first interface must not create a zero baseline")
+	}
+	first, err := c.collect([]net.IOCountersStat{{Name: "eth0", BytesSent: 0, BytesRecv: 0}}, now)
+	if err != nil || first.TotalSent != 0 || c.first {
+		t.Fatalf("real zero counters must be accepted: %+v %v", first, err)
+	}
+	if _, err := c.collect(nil, now.Add(10*time.Second)); err == nil {
+		t.Fatal("empty snapshot should be unavailable")
+	}
+	second, err := c.collect([]net.IOCountersStat{{Name: "eth0", BytesSent: 100, BytesRecv: 200}}, now.Add(20*time.Second))
+	if err != nil || second.Up != 5 || second.Down != 10 {
+		t.Fatalf("missing snapshot changed the rate baseline: %+v %v", second, err)
+	}
+}
+
+func TestNetworkCounterOverflowDoesNotCorruptCollector(t *testing.T) {
+	c := NewNetworkCollector(nil)
+	now := time.Unix(1700000000, 0)
+	for _, snapshot := range [][]net.IOCountersStat{
+		{{Name: "eth0", BytesSent: math.MaxUint64}},
+		{{Name: "eth0", BytesSent: math.MaxInt64}, {Name: "eth1", BytesSent: 1}},
+	} {
+		if _, err := c.collect(snapshot, now); err == nil || !c.first {
+			t.Fatal("overflow must not establish a baseline")
+		}
 	}
 }

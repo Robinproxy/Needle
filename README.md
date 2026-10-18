@@ -269,7 +269,7 @@ Confirm the WAN interface suggested by the installer. PPPoE commonly uses `pppoe
 
 ### Status, logs, and upgrades
 
-Installation enables the service at boot. Download the current installer before each upgrade, including after `/tmp` was cleared on reboot. Upgrade the Server to v0.7.0+ first, then upgrade Agents for core-count and monthly-allowance reporting.
+A first installation starts the service and enables it at boot. Upgrades and reinstalls preserve its existing running and autostart states, including a deliberately stopped or disabled service. Download the current installer before each upgrade, including after `/tmp` was cleared on reboot. Upgrade the Server to v0.7.0+ first, then upgrade Agents for core-count and monthly-allowance reporting.
 
 ```sh
 wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh
@@ -291,7 +291,15 @@ sh /tmp/needle-agent-openwrt.sh upgrade --version v0.7.0
 /etc/init.d/needle-agent disable
 ```
 
-Edit `/etc/needle/agent.yaml`, then restart. Missing checksums, checksum mismatches, or a binary that cannot execute abort installation before replacing the running Agent. The installer also checks that the process stays running after startup; failed installations restore the previous binary, configuration, service, version, and boot/running state. This startup check does not verify successful reports to the Server. For `unauthorized` reports, check the token allowed on the Server.
+Edit `/etc/needle/agent.yaml`, then restart. Before downloading, the installer requires at least 64 MiB of available memory and 32 MiB free in `/tmp` for downloads and recovery snapshots. Missing checksums, checksum mismatches, or a binary that cannot execute abort installation before replacing the running Agent. The installer also checks free installation space, keeping a 4 MiB reserve after staging the binary. Agents supporting `-check-config` validate the configuration offline before the old service is stopped; this check performs no probes or reports. To check an edited configuration manually with a supporting Agent:
+
+```sh
+/usr/bin/needle-agent -check-config /etc/needle/agent.yaml
+```
+
+Installation, upgrades, and uninstall operations are locked against concurrent execution. Upgrades wait for the old process to exit before replacing it. When starting a service, the installer checks that it stays running; failures restore the previous binary, configuration, configuration backup, service, version, and boot/running state. If recovery itself fails, the installer prints and retains the temporary recovery directory. A startup check does not verify successful reports to the Server. For `unauthorized` reports, check the token allowed on the Server.
+
+The Agent reads system counters and sends outbound reports and the configured TCP probes. It does not change network, firewall, DHCP, DNS, or routing settings; install packages; add cron jobs; open a listening port; or write local metric history. Router CPU, memory, and a small amount of outbound traffic are still used. The procd service runs at nice level 10 with one Go execution core, a 32 MiB **soft Go memory target** (not an RSS cap), no core dumps, and a 128-file descriptor limit. Repeated immediate crashes stop respawning after five retries. Use the default 30-second interval or longer on a busy router, and select only the WAN interface and probes you need.
 
 ### Uninstall and firmware upgrades
 
@@ -304,7 +312,9 @@ sh /tmp/needle-agent-openwrt.sh uninstall --purge
 sh /tmp/needle-agent-openwrt.sh uninstall --unregister --purge
 ```
 
-Add `--yes` to skip uninstall confirmation. If unregistration fails, the installation is retained and the script attempts to restart the service.
+Add `--yes` to skip uninstall confirmation. If unregistration fails or is interrupted, local files are retained and the script restores the prior running state. Uninstall waits for the Agent to stop before deleting files. `--unregister` deletes the Server node, history, and bound token; omit it to keep those records.
+
+Ordinary uninstall removes the binary, init service, autostart links, and version file, while retaining `agent.yaml`, its `.bak` backup, and the firmware-backup entry. `--purge` additionally deletes those configuration files and Needle's staging/recovery files and removes its exact entry from `/etc/sysupgrade.conf`. Other backup entries and unrelated files in `/etc/needle/` are kept; the directory is removed only when empty. Successful operations remove their temporary downloads, snapshots, and installer lock. Unexpected symlinks or existing staging files make an upgrade stop before overwriting them.
 
 The installer adds `/etc/needle/` to `/etc/sysupgrade.conf`. Firmware upgrades that keep settings can retain configuration; reinstall the Agent binary and service afterward. Reinstallation preserves existing configuration. `uninstall --purge` also removes the backup entry.
 
@@ -452,6 +462,8 @@ tcpping:
 
 Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
 
+Date-only settings retain their configured calendar date in the Server timezone, including the UTC-noon encoding sent by existing Agents and UTC-midnight date values. Renewal days count calendar days, including across daylight-saving changes; day 29–31 resets clamp to shorter months. When upgrading from the earlier UTC/local-date behavior, an existing active traffic cycle keeps its accumulated usage until the next corrected local reset. Renewing the date or changing the payment period preserves that transition when the monthly reset day stays the same. The original baseline remains available; restarting the Server does not repeat the transition. Keep the Server timezone stable.
+
 `monthly_traffic_limit_gb` controls the traffic allowance independently of expiry. For example, a permanent node can still have a 1 TB monthly allowance. TRF displays combined monthly upload and download usage against this allowance, using decimal units: `1000 GB = 1 TB`. A zero or omitted allowance displays ♾️; exceeding a finite allowance highlights the percentage but does not block traffic. Changing the allowance does not reset accumulated usage.
 
 Usage starts at the first observed counter baseline; Needle cannot recover traffic used before monitoring began or reconcile it with a provider's meter. Upgrade both Server and Agent to v0.7.0+ for allowance reporting and logical CPU counts. Core counts are collected automatically and do not require a configuration option.
@@ -544,9 +556,26 @@ Non-interactive upgrades keep the original configuration. Use `upgrade --keep-co
 </details>
 
 <details>
+<summary><strong>Dashboard refresh troubleshooting</strong></summary>
+
+The dashboard refreshes node data every 30 seconds. Requests time out after 15 seconds, so an unresponsive connection cannot leave future refreshes permanently blocked. The version/Server info request is independent: its failure is logged in the browser console without marking successfully updated nodes as stale.
+
+If the node request fails, the dashboard retains the previous view and identifies a connection failure, timeout, HTTP error, or invalid response. A display error is reported separately. Retry forces a fresh render; periodic refreshes also recover automatically. Browser console errors include the failing endpoint. The Server logs database failures from `/api/agents` with the affected query and Agent ID, without exposing database details in the HTTP response.
+
+Metrics and TCP Ping history refresh independently and show an error with a Retry button beside the affected section. Switching nodes or ranges cancels pending detail requests and ignores late responses. Closing or rebuilding a detail view disposes its charts. Existing chart-line selections remain saved locally.
+
+</details>
+
+<details>
 <summary><strong>Traffic counter regressions and recovery</strong></summary>
 
 The Server uses reported system uptime to distinguish a confirmed reboot from an ordinary counter decrease. A confirmed reboot retains the previous usage and adds the new boot's counters. With continuous or missing uptime, a decrease is treated conservatively: previous per-direction high watermarks are retained, and a rebound cannot count the same bytes twice. Late samples do not move the live accumulator backwards.
+
+Network accounting does not depend on CPU collection succeeding. Reports without network counters do not seed or update usage; a measured zero remains valid. Missing collectors appear as unavailable values and chart gaps, and do not dilute new averages. Legacy zero placeholders without proof of network collection are skipped when selecting a new baseline. Delayed reports belong to their sampled month; a slightly fast Agent clock cannot reset usage before the Server's local boundary. The first observed network counter in each cycle establishes the baseline, so traffic between the boundary and that observation is not recoverable.
+
+Updated Agents send the sample timestamp before probing and transport, and report successful collectors even if another collector fails. A delayed report can add history without overwriting current billing settings, traffic allowance, region, CPU core count, or enabled probes. Older Agents continue to use Server receipt time. When initializing a baseline-only legacy accumulator, the Server preserves its previously visible usage from retained samples before processing the arriving report, including a delayed sample or a confirmed reboot. Baseline selection and initialization are bounded to the relevant cycle.
+
+The updated Agent treats an empty or unmatched network-interface snapshot as a collection failure, retaining its previous rate baseline for recovery. This collector-side check requires an Agent upgrade; the Server-side accounting fixes work with existing Agents.
 
 After an interface reset or interface-set change without a machine reboot, totals alone cannot establish the exact traffic lost at the transition. Usage resumes when a counter exceeds its prior high watermark; traffic during catch-up may be undercounted. This avoids treating hundreds of GB of existing counters as new traffic. Specifying a stable `interfaces` whitelist helps keep the counter scope consistent.
 
@@ -590,6 +619,10 @@ docker compose up -d
 | `30d` | Hourly rollups | Review monthly trends |
 
 Click a date below the seven-day TCP Ping chart to switch all detail charts to that day. Red dots indicate anomaly summaries. Click `7d` to return. Raw data is kept for seven days; hourly data is kept for 90 days. Older date windows use hourly data.
+
+The purge keeps complete raw boundary hours (up to one extra hour). Hourly summaries merge each newly ingested row once, including late reports and reports retained through Server downtime. Metrics use per-collector sample counts; TCP Ping latency averages use successful samples, while loss uses all attempts. Aggregation, progress checkpoints, and deletion commit together; a storage error retains raw data for a later retry. Restarting or repeating maintenance does not duplicate counts.
+
+On upgrade, recent complete hours are rebuilt from retained raw data. Older overlapping raw/hourly data can be ambiguous because earlier versions did not record which rows were aggregated. Such hourly summaries are preserved, with both sources copied into `*_rollup_legacy` evidence tables under the same 90-day retention. Missing history is not invented or silently recomputed. Deleting a node removes its raw history, summaries, traffic baselines, and migration evidence before its ID can be reused. After upgrading, avoid downgrading to versions that do not understand these checkpoints and missing-collector values.
 
 </details>
 

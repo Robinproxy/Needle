@@ -252,7 +252,7 @@ header {
 }
 .metric-header .label { color: hsl(var(--muted-foreground)); font-weight: 600; }
 .metric-header .value { font-family: var(--font-mono); font-weight: 500; }
-.metric-header .value.blue, .metric-header .value.green { color: hsl(var(--foreground)); }
+.metric-header .value.blue { color: hsl(var(--foreground)); }
 .metric-header .value.amber { color: hsl(var(--warning)); }
 .metric-header .value.red { color: hsl(var(--destructive)); }
 .metric-bar {
@@ -266,7 +266,6 @@ header {
   transition: width 0.4s;
 }
 .metric-fill.blue { background: hsl(var(--primary)); }
-.metric-fill.green { background: hsl(var(--primary)); }
 .metric-fill.amber { background: hsl(var(--warning)); }
 .metric-fill.red { background: hsl(var(--destructive)); }
 .metric-sub {
@@ -550,3 +549,5 @@ footer {
 
 .tcpping-status { margin: 0 0 10px; color: hsl(var(--muted-foreground)); font-size: 11px; }
 .ping-disabled { color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 400; }
+.detail-load-error { margin: 8px 0; color: hsl(var(--warning)); font-size: 11px; }
+.chart-empty { height: 100%; display: grid; place-items: center; color: hsl(var(--muted-foreground)); font-size: 11px; }

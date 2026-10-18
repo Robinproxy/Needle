@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
+	"time"
+
+	agentpkg "needle/internal/agent"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,6 +32,60 @@ func TestEffectiveTLSSkipVerify(t *testing.T) {
 			}
 			if got := cfg.effectiveTLSSkipVerify(); got != tt.want {
 				t.Fatalf("effectiveTLSSkipVerify() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpiryDateWireContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, wantDate string
+		invalid                bool
+	}{
+		{"quoted date", "expires_at: '2026-11-06'\nbilling_period: 1m\n", "2026-11-06", false},
+		{"unquoted date", "expires_at: 2026-11-06\nbilling_period: 3m\n", "2026-11-06", false},
+		{"leap date", "expires_at: 2028-02-29\nbilling_period: 12m\n", "2028-02-29", false},
+		{"empty", "expires_at: ''\nbilling_period: 1m\n", "", false},
+		{"absent", "billing_period: 1m\n", "", false},
+		{"invalid", "expires_at: 2026-02-29\nbilling_period: 1m\n", "", true},
+		{"forever", "expires_at: 2026-11-06\nbilling_period: forever\n", "", false},
+		{"forever ignores invalid", "expires_at: invalid\nbilling_period: forever\n", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg Config
+			if err := yaml.Unmarshal([]byte(tc.config), &cfg); err != nil {
+				t.Fatal(err)
+			}
+			expiry, err := cfg.expiryUnix()
+			if (err != nil) != tc.invalid {
+				t.Fatalf("expiryUnix()=%v,%v invalid=%v", expiry, err, tc.invalid)
+			}
+			encoded, err := json.Marshal(&agentpkg.ReportData{ExpiresAt: expiry, BillingPeriod: cfg.BillingPeriod})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire struct {
+				Expiry *int64 `json:"expires_at"`
+				Period string `json:"billing_period"`
+			}
+			if err := json.Unmarshal(encoded, &wire); err != nil {
+				t.Fatal(err)
+			}
+			if wire.Period != cfg.BillingPeriod {
+				t.Fatalf("billing period changed: %s", encoded)
+			}
+			if tc.wantDate == "" {
+				if wire.Expiry != nil {
+					t.Fatalf("unconfigured date must be omitted: %s", encoded)
+				}
+				return
+			}
+			want, err := time.Parse(time.RFC3339, tc.wantDate+"T12:00:00Z")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wire.Expiry == nil || *wire.Expiry != want.Unix() {
+				t.Fatalf("date wire timestamp=%s, want UTC noon %d", encoded, want.Unix())
 			}
 		})
 	}

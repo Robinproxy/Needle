@@ -6,6 +6,7 @@ const path = require('node:path');
 const nodes = new Map();
 const storage = new Map();
 const ctx = {
+  AbortController, setTimeout, clearTimeout,
   localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key,value) => storage.set(key,value) },
   document: { documentElement: {classList:{contains:()=>false}}, getElementById: id => nodes.get(id) ?? null, querySelector: () => null, querySelectorAll: () => [] },
   console,
@@ -32,9 +33,9 @@ assert(!stats.includes('data-name="CMv4"'));
 assert(stats.includes('data-name="CMv6"'));
 assert.equal(ctx.activeTcppingResults(1,history).length,1);
 assert(ctx.tcpingStatusText(node).includes('1 target enabled'));
-assert.equal(ctx.tcpingLayoutSignature([node]),ctx.tcpingLayoutSignature([{...node,latest_tcpping:[{...node.latest_tcpping[0],latency_ms:99}]}]));
+assert.equal(ctx.dashboardLayoutSignature([node]),ctx.dashboardLayoutSignature([{...node,latest_tcpping:[{...node.latest_tcpping[0],latency_ms:99}]}]));
 const disabled = {...node,tcpping_enabled:false,latest_tcpping:[]};
-assert.notEqual(ctx.tcpingLayoutSignature([node]),ctx.tcpingLayoutSignature([disabled]));
+assert.notEqual(ctx.dashboardLayoutSignature([node]),ctx.dashboardLayoutSignature([disabled]));
 assert(ctx.renderCard(disabled,false).includes('TCP Ping disabled'));
 assert(!ctx.renderCard(disabled,false).includes('class="probe-lat"'));
 assert(ctx.renderListRow(disabled,0,false).includes('Disabled'));
@@ -125,6 +126,8 @@ ctx.fixture=[disabled];vm.runInContext('agents = fixture',ctx);
   const refreshed={...dual,agent:{...dual.agent,monthly_traffic_limit:1e12,cpu_cores:4},traffic,
     latest_metric:{cpu_usage:25,memory_total:4e9,memory_used:1e9,disk_total:10e9,disk_used:2e9,network_down:2e6,network_up:3.5e6,load1:.12,uptime:86400}};
   next=[refreshed];await ctx.softRefresh();
+  // The first metric changes the layout; a subsequent sample uses live updates.
+  await ctx.softRefresh();
   assert(elements.get('.card-metrics').innerHTML.includes('396 GB / 1 TB'));
   assert(elements.get('.card-metrics').innerHTML.includes('4C · Load 0.12'));
   assert(!ctx.cardMetricsHTML({...refreshed,agent:{...refreshed.agent,cpu_cores:0}}).includes('0C'));
@@ -137,5 +140,19 @@ ctx.fixture=[disabled];vm.runInContext('agents = fixture',ctx);
   next=[{...refreshed,traffic:{...traffic,recv:400_000_000_000}}];await ctx.softRefresh();
   assert(elements.get('.card-metrics').innerHTML.includes('500 GB / 1 TB'));
   assert(elements.get('.card-speeds').innerHTML.includes('↓ 400 GB'));
-  console.log('Dashboard checks passed: quota totals, overage, unset/no data, probe families, safe labels, and live refresh.');
+  const partial={...refreshed,latest_metric:{...refreshed.latest_metric,missing_metrics:1|2|4|16,cpu_usage:0,memory_total:0,memory_used:0,disk_total:0,disk_used:0,network_up:0,network_down:0}};
+  const partialCPU=ctx.cardMetricsHTML(partial);
+  assert(partialCPU.includes('4C · Load —'));
+  assert(!partialCPU.includes('NaN'));
+  assert(ctx.cardNetworkHTML(partial).includes('↓ 0 B/s'),'measured zero speed must remain visible');
+  assert(ctx.cardNetworkHTML({...partial,latest_metric:{...partial.latest_metric,missing_metrics:8}}).includes('↓ —'));
+  assert(ctx.renderListRow(partial,0,false).includes('list-bar-val">—'));
+  const snapshots=[];ctx.snapshots=snapshots;
+  vm.runInContext('renderSparkline=(id,data)=>snapshots.push({id,data});',ctx);
+  for(const key of ['spark-cpu','spark-mem','spark-netin','spark-netout'])nodes.set(key+'-val',{innerHTML:''});
+  ctx.renderSparklines(1,[{...refreshed.latest_metric,created_at:100}, {...partial.latest_metric,created_at:130}]);
+  assert.equal(snapshots.find(s=>s.id==='spark-cpu').data.at(-1)[1],null,'missing CPU must produce a chart gap');
+  assert.equal(nodes.get('spark-cpu-val').innerHTML,'—');
+  assert.equal(snapshots.find(s=>s.id==='spark-netin').data.at(-1)[1],0,'valid zero network remains a data point');
+  console.log('Dashboard checks passed: quota totals, partial collectors, zero readings, chart gaps, probe families, safe labels, and live refresh.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

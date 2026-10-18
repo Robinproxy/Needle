@@ -62,6 +62,9 @@ type trafficCounterState struct {
 // a newer report's uptime confirms a reboot. Returning to a pre-dip value then
 // cannot charge the same bytes a second time. Missing uptime is not evidence.
 func (s *trafficCounterState) consume(m *MetricRow) (sent, recv int64) {
+	if m.MissingMetrics&missingNetwork != 0 {
+		return 0, 0
+	}
 	if s.SampleAt > 0 && (m.CreatedAt < s.SampleAt ||
 		(m.CreatedAt == s.SampleAt && s.Uptime > 0 && m.Uptime > 0 && m.Uptime < s.Uptime)) {
 		return 0, 0
@@ -77,7 +80,10 @@ func (s *trafficCounterState) consume(m *MetricRow) (sent, recv int64) {
 		s.Sent = max(s.Sent, m.TotalSent)
 		s.Recv = max(s.Recv, m.TotalRecv)
 	}
-	s.Uptime, s.SampleAt = m.Uptime, m.CreatedAt
+	if m.Uptime > 0 {
+		s.Uptime = m.Uptime
+	}
+	s.SampleAt = m.CreatedAt
 	return sent, recv
 }
 
@@ -88,11 +94,11 @@ func addTrafficUsage(usage, delta int64) (int64, error) {
 	return usage + delta, nil
 }
 
-func accumulateTrafficUsage(x execer, stampedAt, agentID, boundary int64, m *MetricRow) error {
+func accumulateTrafficUsage(x execer, stampedAt, agentID int64, cycle trafficCycle, m *MetricRow) error {
 	var baseSent, baseRecv, epoch int64
 	var usageSent, usageRecv, lastSent, lastRecv, lastUptime, lastAt sql.NullInt64
 	err := x.QueryRow(`SELECT total_sent,total_recv,usage_sent,usage_recv,last_sent,last_recv,last_uptime,last_sample_at,counter_epoch
-  FROM traffic_baselines WHERE agent_id=? AND boundary=?`, agentID, boundary).Scan(&baseSent, &baseRecv, &usageSent, &usageRecv, &lastSent, &lastRecv, &lastUptime, &lastAt, &epoch)
+  FROM traffic_baselines WHERE agent_id=? AND boundary=?`, agentID, cycle.Start).Scan(&baseSent, &baseRecv, &usageSent, &usageRecv, &lastSent, &lastRecv, &lastUptime, &lastAt, &epoch)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -102,16 +108,37 @@ func accumulateTrafficUsage(x execer, stampedAt, agentID, boundary int64, m *Met
 	var sent, recv int64
 	var state trafficCounterState
 	if !usageSent.Valid || !usageRecv.Valid || !lastSent.Valid || !lastRecv.Valid {
-		// Conservative legacy seed. A counter below the cycle baseline is not a
-		// reason to charge its entire lifetime value.
-		sent = max(0, m.TotalSent-baseSent)
-		recv = max(0, m.TotalRecv-baseRecv)
-		state = trafficCounterState{Sent: max(baseSent, m.TotalSent), Recv: max(baseRecv, m.TotalRecv), Uptime: m.Uptime, SampleAt: m.CreatedAt}
+		// Preserve the value visible before this report arrived. Initializing
+		// from the arriving sample alone would erase that prefix on a reboot
+		// or lower it when the first post-upgrade report is delayed.
+		state = trafficCounterState{Sent: baseSent, Recv: baseRecv, Epoch: epoch}
+		var prior MetricRow
+		err = x.QueryRow(`SELECT total_sent,total_recv,uptime,created_at FROM metrics
+		 WHERE agent_id=? AND id<? AND created_at>=? AND created_at<? AND `+networkCounterPresent+`
+		 ORDER BY created_at DESC,id DESC LIMIT 1`, agentID, m.ID, cycle.Start, cycle.End).
+			Scan(&prior.TotalSent, &prior.TotalRecv, &prior.Uptime, &prior.CreatedAt)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			sent, recv = max(0, prior.TotalSent-baseSent), max(0, prior.TotalRecv-baseRecv)
+			state.Sent, state.Recv = max(baseSent, prior.TotalSent), max(baseRecv, prior.TotalRecv)
+			state.Uptime, state.SampleAt = prior.Uptime, prior.CreatedAt
+		}
+		ds, dr := state.consume(m)
+		if sent, err = addTrafficUsage(sent, ds); err != nil {
+			return err
+		}
+		if recv, err = addTrafficUsage(recv, dr); err != nil {
+			return err
+		}
 	} else {
 		if !lastUptime.Valid || !lastAt.Valid {
 			// Existing Agents already report uptime; seed it from the preceding raw
 			// sample so the first report after a Server upgrade can detect a reboot.
-			err = x.QueryRow(`SELECT uptime,created_at FROM metrics WHERE agent_id=? AND id<? AND total_sent=? AND total_recv=? ORDER BY id DESC LIMIT 1`, agentID, m.ID, lastSent.Int64, lastRecv.Int64).Scan(&lastUptime, &lastAt)
+			err = x.QueryRow(`SELECT uptime,created_at FROM metrics WHERE agent_id=? AND id<?
+			 AND created_at>=? AND created_at<? AND total_sent=? AND total_recv=? AND `+networkCounterPresent+`
+			 ORDER BY created_at DESC,id DESC LIMIT 1`, agentID, m.ID, cycle.Start, cycle.End, lastSent.Int64, lastRecv.Int64).Scan(&lastUptime, &lastAt)
 			if err != nil && err != sql.ErrNoRows {
 				return err
 			}
@@ -128,6 +155,6 @@ func accumulateTrafficUsage(x execer, stampedAt, agentID, boundary int64, m *Met
 		}
 	}
 	_, err = x.Exec(`UPDATE traffic_baselines SET usage_sent=?,usage_recv=?,last_sent=?,last_recv=?,last_uptime=?,last_sample_at=?,counter_epoch=?,accounting_version=1,updated_at=?
-  WHERE agent_id=? AND boundary=?`, sent, recv, state.Sent, state.Recv, state.Uptime, state.SampleAt, state.Epoch, stampedAt, agentID, boundary)
+  WHERE agent_id=? AND boundary=?`, sent, recv, state.Sent, state.Recv, state.Uptime, state.SampleAt, state.Epoch, stampedAt, agentID, cycle.Start)
 	return err
 }

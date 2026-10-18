@@ -12,6 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check Go code and accounting regressions
+        run: |
+          go test -race ./...
+          go vet ./...
       - name: Check installers and dashboard
         run: |
           sh -n scripts/needle-agent-openwrt.sh
@@ -20,6 +27,7 @@ jobs:
           python3 scripts/test-tcpping-selection.py
           python3 scripts/test-agent-upgrade-config.py
           node scripts/test-tcpping-dashboard.cjs
+          node scripts/test-dashboard-refresh.cjs
 
   build:
     needs: installer-check

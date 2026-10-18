@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -204,7 +203,10 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN last_seen INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN monthly_traffic_limit INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
-	return s.migrateTrafficAccounting()
+	if err := s.migrateTrafficAccounting(); err != nil {
+		return err
+	}
+	return s.migrateAccountingAudit()
 }
 
 // migrateDropAutoIncrement rebuilds tables that historically used AUTOINCREMENT.
@@ -494,11 +496,12 @@ func insertMetric(x execer, m *MetricRow, createdAt int64) error {
 	result, err := x.Exec(
 		`INSERT INTO metrics(agent_id, cpu_usage, memory_total, memory_used,
 			disk_total, disk_used, network_up, network_down,
-			total_sent, total_recv, load1, load5, load15, uptime, created_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.AgentID, m.CPUUsage, m.MemoryTotal, m.MemoryUsed,
-		m.DiskTotal, m.DiskUsed, m.NetworkUp, m.NetworkDown,
-		m.TotalSent, m.TotalRecv, m.Load1, m.Load5, m.Load15, m.Uptime, createdAt,
+			total_sent, total_recv, load1, load5, load15, uptime, created_at, missing_metrics)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.AgentID, metricValue(m, missingCPU, m.CPUUsage), metricValue(m, missingMemory, m.MemoryTotal), metricValue(m, missingMemory, m.MemoryUsed),
+		metricValue(m, missingDisk, m.DiskTotal), metricValue(m, missingDisk, m.DiskUsed), metricValue(m, missingNetwork, m.NetworkUp), metricValue(m, missingNetwork, m.NetworkDown),
+		metricValue(m, missingNetwork, m.TotalSent), metricValue(m, missingNetwork, m.TotalRecv),
+		metricValue(m, missingLoad, m.Load1), metricValue(m, missingLoad, m.Load5), metricValue(m, missingLoad, m.Load15), m.Uptime, createdAt, m.MissingMetrics,
 	)
 	if err != nil {
 		return err
@@ -544,7 +547,6 @@ type ReportWrite struct {
 	Metric              *MetricRow  // nil when the report carries no metric
 	TCPings             []TCPingRow // AgentID is filled in by SaveReport
 	CreatedAt           int64
-	BaselineBoundary    *int64 // billing-cycle boundary to snapshot, nil to skip
 }
 
 // SaveReport writes the agent upsert, metric, traffic baseline, and TCPing
@@ -557,39 +559,47 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	agentID, err := upsertAgent(tx, r.Hostname, r.Region, r.ExpiresAt, r.BillingPeriod, s.now().Unix())
+	now := s.now()
+	createdAt := r.CreatedAt
+	if createdAt <= 0 || createdAt > now.Unix() {
+		createdAt = now.Unix()
+	}
+	agentID, metadataCurrent, err := saveReportMetadata(tx, r, now, createdAt)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec("UPDATE agents SET monthly_traffic_limit = ?, cpu_cores = ? WHERE id = ?", r.MonthlyTrafficLimit, r.CPUCores, agentID); err != nil {
-		return 0, err
-	}
 	if r.Metric != nil {
-		createdAt := r.CreatedAt
-		if createdAt <= 0 {
-			createdAt = s.now().Unix()
-		}
 		r.Metric.AgentID = agentID
 		if err := insertMetric(tx, r.Metric, createdAt); err != nil {
 			return 0, err
 		}
 	}
-	// After the metric insert so the baseline seed can see this report.
-	if r.BaselineBoundary != nil {
-		if err := ensureTrafficBaseline(tx, s.now().Unix(), agentID, *r.BaselineBoundary); err != nil {
+	// Use sample time for delayed reports, capped at receipt time so a slightly
+	// fast Agent clock cannot start the next billing cycle early.
+	if r.Metric != nil && r.Metric.MissingMetrics&missingNetwork == 0 {
+		at := time.Unix(createdAt, 0).In(now.Location())
+		cycle, configured, err := activeTrafficCycle(tx, agentID, r.BillingPeriod, r.ExpiresAt, at)
+		if err != nil {
 			return 0, err
 		}
-		if r.Metric != nil {
-			if err := accumulateTrafficUsage(tx, s.now().Unix(), agentID, *r.BaselineBoundary, r.Metric); err != nil {
+		if configured {
+			// After insertion so a new baseline can see this report.
+			if err := ensureTrafficBaseline(tx, now.Unix(), agentID, cycle); err != nil {
+				return 0, err
+			}
+			if err := accumulateTrafficUsage(tx, now.Unix(), agentID, cycle, r.Metric); err != nil {
 				return 0, err
 			}
 		}
 	}
 	for i := range r.TCPings {
 		r.TCPings[i].AgentID = agentID
-		if err := insertTCPing(tx, &r.TCPings[i], r.CreatedAt); err != nil {
+		if err := insertTCPing(tx, &r.TCPings[i], createdAt); err != nil {
 			return 0, err
 		}
+	}
+	if !metadataCurrent {
+		return agentID, tx.Commit()
 	}
 	// Keep the current report independent of history timestamps. Empty results
 	// explicitly disable probing, even when two reports arrive in one second.
@@ -643,16 +653,14 @@ func (s *Store) AgentIDByHostname(hostname string) (id int64, ok bool, err error
 
 func (s *Store) GetLatestMetric(agentID int64) (*MetricRow, error) {
 	row := s.db.QueryRow(
-		`SELECT id, agent_id, cpu_usage, memory_total, memory_used,
-			disk_total, disk_used, network_up, network_down,
-			total_sent, total_recv, load1, load5, load15, uptime, created_at
-		 FROM metrics WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1`,
+		`SELECT id, agent_id, `+rawMetricValues+`, `+metricMaskSQL(false)+`
+		 FROM metrics WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
 		agentID,
 	)
 	var m MetricRow
 	err := row.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 		&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
-		&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt)
+		&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt, &m.MissingMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -664,9 +672,7 @@ func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSecon
 		return s.getMetricsAggregated(agentID, since, until, bucketSeconds)
 	}
 	rows, err := s.db.Query(
-		`SELECT id, agent_id, cpu_usage, memory_total, memory_used,
-			disk_total, disk_used, network_up, network_down,
-			total_sent, total_recv, load1, load5, load15, uptime, created_at
+		`SELECT id, agent_id, `+rawMetricValues+`, `+metricMaskSQL(false)+`
 		 FROM metrics WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?) ORDER BY created_at`,
 		agentID, since, until, until,
 	)
@@ -680,7 +686,7 @@ func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSecon
 		var m MetricRow
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
-			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt); err != nil {
+			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt, &m.MissingMetrics); err != nil {
 			return nil, err
 		}
 		metrics = append(metrics, m)
@@ -690,13 +696,13 @@ func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSecon
 
 func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
 	rows, err := s.db.Query(
-		`SELECT MAX(id), agent_id, AVG(cpu_usage),
-			CAST(ROUND(AVG(memory_total)) AS INTEGER), CAST(ROUND(AVG(memory_used)) AS INTEGER),
-			CAST(ROUND(AVG(disk_total)) AS INTEGER), CAST(ROUND(AVG(disk_used)) AS INTEGER),
-			AVG(network_up), AVG(network_down), MAX(total_sent), MAX(total_recv),
-			AVG(load1), AVG(load5), AVG(load15), MAX(uptime), MAX(created_at),
-			MAX(cpu_usage), MAX(CASE WHEN memory_total > 0 THEN memory_used * 100.0 / memory_total ELSE 0 END),
-			MAX(network_up), MAX(network_down)
+		`SELECT MAX(id), agent_id, COALESCE(AVG(cpu_usage),0),
+			CAST(ROUND(COALESCE(AVG(memory_total),0)) AS INTEGER), CAST(ROUND(COALESCE(AVG(memory_used),0)) AS INTEGER),
+			CAST(ROUND(COALESCE(AVG(disk_total),0)) AS INTEGER), CAST(ROUND(COALESCE(AVG(disk_used),0)) AS INTEGER),
+			COALESCE(AVG(network_up),0), COALESCE(AVG(network_down),0), COALESCE(MAX(total_sent),0), COALESCE(MAX(total_recv),0),
+			COALESCE(AVG(load1),0), COALESCE(AVG(load5),0), COALESCE(AVG(load15),0), MAX(uptime), MAX(created_at),
+			COALESCE(MAX(cpu_usage),0), COALESCE(MAX(CASE WHEN memory_total > 0 THEN memory_used * 100.0 / memory_total END),0),
+			COALESCE(MAX(network_up),0), COALESCE(MAX(network_down),0), `+metricMaskSQL(true)+`
 		 FROM metrics WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?)
 		 GROUP BY agent_id, created_at / ? ORDER BY created_at`,
 		agentID, since, until, until, bucketSeconds,
@@ -712,7 +718,7 @@ func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds 
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
 			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt,
-			&m.CPUPeak, &m.MemoryPeakPct, &m.NetworkUpPeak, &m.NetworkDownPeak); err != nil {
+			&m.CPUPeak, &m.MemoryPeakPct, &m.NetworkUpPeak, &m.NetworkDownPeak, &m.MissingMetrics); err != nil {
 			return nil, err
 		}
 		metrics = append(metrics, m)
@@ -725,11 +731,16 @@ func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds 
 // 30d window is at most 720 rows — no query-time aggregation needed.
 func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, error) {
 	rows, err := s.db.Query(
-		`SELECT 0, agent_id, COALESCE(cpu_avg, 0), COALESCE(memory_total, 0), COALESCE(memory_used, 0),
-			COALESCE(disk_total, 0), COALESCE(disk_used, 0), COALESCE(net_up_avg, 0), COALESCE(net_down_avg, 0),
+		`SELECT 0, agent_id, COALESCE(cpu_avg, 0), CAST(ROUND(COALESCE(memory_total, 0)) AS INTEGER), CAST(ROUND(COALESCE(memory_used, 0)) AS INTEGER),
+			CAST(ROUND(COALESCE(disk_total, 0)) AS INTEGER), CAST(ROUND(COALESCE(disk_used, 0)) AS INTEGER), COALESCE(net_up_avg, 0), COALESCE(net_down_avg, 0),
 			COALESCE(total_sent, 0), COALESCE(total_recv, 0), COALESCE(load1, 0), COALESCE(load5, 0),
 			COALESCE(load15, 0), COALESCE(uptime, 0), hour_start,
-			COALESCE(cpu_peak, 0), COALESCE(memory_peak_pct, 0), COALESCE(net_up_peak, 0), COALESCE(net_down_peak, 0)
+			COALESCE(cpu_peak, 0), COALESCE(memory_peak_pct, 0), COALESCE(net_up_peak, 0), COALESCE(net_down_peak, 0),
+			(CASE WHEN COALESCE(cpu_samples,CASE WHEN cpu_avg IS NULL THEN 0 ELSE sample_count END)=0 THEN 1 ELSE 0 END +
+			 CASE WHEN COALESCE(memory_samples,CASE WHEN memory_total IS NULL THEN 0 ELSE sample_count END)=0 THEN 2 ELSE 0 END +
+			 CASE WHEN COALESCE(disk_samples,CASE WHEN disk_total IS NULL THEN 0 ELSE sample_count END)=0 THEN 4 ELSE 0 END +
+			 CASE WHEN COALESCE(network_samples,CASE WHEN net_up_avg IS NULL THEN 0 ELSE sample_count END)=0 THEN 8 ELSE 0 END +
+			 CASE WHEN COALESCE(load_samples,CASE WHEN load1 IS NULL THEN 0 ELSE sample_count END)=0 THEN 16 ELSE 0 END)
 		 FROM metrics_hourly WHERE agent_id = ? AND hour_start >= ? AND (? = 0 OR hour_start < ?)
 		 ORDER BY hour_start`,
 		agentID, since, until, until,
@@ -745,7 +756,7 @@ func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, erro
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
 			&m.TotalSent, &m.TotalRecv, &m.Load1, &m.Load5, &m.Load15, &m.Uptime, &m.CreatedAt,
-			&m.CPUPeak, &m.MemoryPeakPct, &m.NetworkUpPeak, &m.NetworkDownPeak); err != nil {
+			&m.CPUPeak, &m.MemoryPeakPct, &m.NetworkUpPeak, &m.NetworkDownPeak, &m.MissingMetrics); err != nil {
 			return nil, err
 		}
 		metrics = append(metrics, m)
@@ -815,7 +826,7 @@ func (s *Store) getTCPingResultsAggregated(agentID int64, since, until, bucketSe
 		`SELECT MAX(id), agent_id, name, target,
 			COALESCE(AVG(CASE WHEN success = 1 THEN latency_ms END), 0),
 			CASE WHEN SUM(success) > 0 THEN 1 ELSE 0 END,
-			COUNT(*), SUM(success), MAX(created_at), MAX(latency_ms)
+			COUNT(*), SUM(success), MAX(created_at), COALESCE(MAX(CASE WHEN success = 1 THEN latency_ms END), 0)
 		 FROM tcpping_results WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?)
 		 GROUP BY agent_id, name, target, created_at / ? ORDER BY created_at, name`,
 		agentID, since, until, until, bucketSeconds,
@@ -909,27 +920,28 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 	if expiresAt.Valid {
 		expiry = &expiresAt.Int64
 	}
-	resetDay, configured := trafficResetDay(billingPeriod, expiry)
+	cycle, configured, err := activeTrafficCycle(s.db, agentID, billingPeriod, expiry, s.now())
+	if err != nil {
+		return nil, err
+	}
 	if !configured {
 		return &TrafficUsage{Reason: "billing_not_configured"}, nil
 	}
 
 	usage := &TrafficUsage{Available: true}
-	boundary := monthlyBoundary(resetDay, s.now())
-	boundaryUnix := boundary.Unix()
 
 	var baseSent, baseRecv, usageSent, usageRecv sql.NullInt64
 	err = s.db.QueryRow(
 		`SELECT total_sent, total_recv, usage_sent, usage_recv
 		 FROM traffic_baselines WHERE agent_id = ? AND boundary = ?`,
-		agentID, boundaryUnix,
+		agentID, cycle.Start,
 	).Scan(&baseSent, &baseRecv, &usageSent, &usageRecv)
 	if err == sql.ErrNoRows {
 		// No snapshot yet (pre-baseline install or first report of the cycle
 		// not seen): fall back to the earliest surviving metric of the cycle.
 		err = s.db.QueryRow(
-			`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? AND created_at >= ? ORDER BY created_at LIMIT 1`,
-			agentID, boundaryUnix,
+			`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? AND created_at >= ? AND created_at < ? AND `+networkCounterPresent+` ORDER BY created_at, id LIMIT 1`,
+			agentID, cycle.Start, cycle.End,
 		).Scan(&baseSent, &baseRecv)
 	}
 	if err == sql.ErrNoRows {
@@ -948,9 +960,13 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 
 	var latestSent, latestRecv sql.NullInt64
 	err = s.db.QueryRow(
-		`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1`,
-		agentID,
+		`SELECT total_sent, total_recv FROM metrics WHERE agent_id = ? AND created_at >= ? AND created_at < ? AND `+networkCounterPresent+` ORDER BY created_at DESC, id DESC LIMIT 1`,
+		agentID, cycle.Start, cycle.End,
 	).Scan(&latestSent, &latestRecv)
+	if err == sql.ErrNoRows {
+		usage.Reason = "no_data"
+		return usage, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -968,16 +984,35 @@ func (s *Store) GetTrafficUsage(agentID int64) (*TrafficUsage, error) {
 // after the boundary so pre-upgrade data still in the retention window is
 // preserved; a no-op until such a metric exists (retried on the next report).
 func (s *Store) EnsureTrafficBaseline(agentID, boundary int64) error {
-	return ensureTrafficBaseline(s.db, s.now().Unix(), agentID, boundary)
+	var expiry sql.NullInt64
+	var period string
+	if err := s.db.QueryRow("SELECT expires_at,billing_period FROM agents WHERE id=?", agentID).Scan(&expiry, &period); err != nil {
+		return err
+	}
+	var expiresAt *int64
+	if expiry.Valid {
+		expiresAt = &expiry.Int64
+	}
+	cycle, configured, err := activeTrafficCycle(s.db, agentID, period, expiresAt, time.Unix(boundary, 0).In(s.now().Location()))
+	if err != nil {
+		return err
+	}
+	if !configured {
+		return nil
+	}
+	if cycle.Start != boundary {
+		return fmt.Errorf("traffic boundary is not the start of a configured cycle")
+	}
+	return ensureTrafficBaseline(s.db, s.now().Unix(), agentID, cycle)
 }
 
-func ensureTrafficBaseline(x execer, stampedAt, agentID, boundary int64) error {
+func ensureTrafficBaseline(x execer, stampedAt, agentID int64, cycle trafficCycle) error {
 	_, err := x.Exec(
 		`INSERT OR IGNORE INTO traffic_baselines(agent_id, boundary, total_sent, total_recv, created_at, accounting_version)
 		 SELECT ?, ?, total_sent, total_recv, ?, 1
-		 FROM metrics WHERE agent_id = ? AND created_at >= ?
-		 ORDER BY created_at LIMIT 1`,
-		agentID, boundary, stampedAt, agentID, boundary,
+		 FROM metrics WHERE agent_id = ? AND created_at >= ? AND created_at < ? AND `+networkCounterPresent+`
+		 ORDER BY created_at, id LIMIT 1`,
+		agentID, cycle.Start, stampedAt, agentID, cycle.Start, cycle.End,
 	)
 	return err
 }
@@ -990,7 +1025,7 @@ func trafficResetDay(period string, expiresAt *int64) (int, bool) {
 	if expiresAt == nil {
 		return 0, false
 	}
-	return time.Unix(*expiresAt, 0).Day(), true
+	return billingAnchor(*expiresAt, time.Local).Day(), true
 }
 
 func monthlyBoundary(day int, now time.Time) time.Time {
@@ -1014,7 +1049,7 @@ func clampedMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time
 }
 
 func calcNextReset(expiresAtUnix int64, period string, now time.Time) (int, string) {
-	anchor := time.Unix(expiresAtUnix, 0)
+	anchor := billingAnchor(expiresAtUnix, now.Location())
 	addMonths := 0
 	switch period {
 	case "1m":
@@ -1040,7 +1075,13 @@ func calcNextReset(expiresAtUnix int64, period string, now time.Time) (int, stri
 		b := clampedMonthDay(y, m+time.Month(k*addMonths), anchor.Day(), loc)
 		nextReset = time.Date(b.Year(), b.Month(), b.Day(), hour, min, sec, 0, loc)
 	}
-	days := int(nextReset.Sub(now).Hours()/24) + 1
+	// Calendar days are independent of 23/25-hour daylight-saving days.
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	due := time.Date(nextReset.Year(), nextReset.Month(), nextReset.Day(), 0, 0, 0, 0, time.UTC)
+	days := int(due.Sub(today) / (24 * time.Hour))
+	if days == 0 {
+		days = 1
+	}
 	return days, nextReset.Format("2006-01-02")
 }
 
@@ -1112,86 +1153,17 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 	if _, err := tx.Exec("DELETE FROM agent_tcpping_current WHERE agent_id = ?", id); err != nil {
 		return err
 	}
+	for _, table := range []string{"traffic_cycle_transition", "metrics_rollup_legacy", "metrics_hourly_rollup_legacy", "tcpping_results_rollup_legacy", "tcpping_hourly_rollup_legacy"} {
+		if _, err := tx.Exec("DELETE FROM "+table+" WHERE agent_id=?", id); err != nil {
+			return err
+		}
+	}
 	if hostname != "" {
 		if _, err := tx.Exec(`DELETE FROM agent_tokens WHERE hostname = ?`, hostname); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// rollUpHourly re-aggregates every hour still covered by raw retention into
-// the hourly tables. Recomputing the whole raw window each pass needs no
-// watermark bookkeeping and self-heals missed runs: an hour's row stops
-// changing only once its raw rows age out, days after it was last rewritten.
-func (s *Store) rollUpHourly() {
-	cutoff := s.now().Add(-rawRetention).Unix()
-	if _, err := s.db.Exec(
-		`INSERT OR REPLACE INTO metrics_hourly(
-			agent_id, hour_start, cpu_avg, cpu_peak,
-			memory_total, memory_used, memory_peak_pct,
-			disk_total, disk_used,
-			net_up_avg, net_up_peak, net_down_avg, net_down_peak,
-			total_sent, total_recv, load1, load5, load15, uptime, sample_count)
-		 SELECT agent_id, (created_at/3600)*3600, AVG(cpu_usage), MAX(cpu_usage),
-			CAST(ROUND(AVG(memory_total)) AS INTEGER), CAST(ROUND(AVG(memory_used)) AS INTEGER),
-			MAX(CASE WHEN memory_total > 0 THEN memory_used * 100.0 / memory_total ELSE 0 END),
-			CAST(ROUND(AVG(disk_total)) AS INTEGER), CAST(ROUND(AVG(disk_used)) AS INTEGER),
-			AVG(network_up), MAX(network_up), AVG(network_down), MAX(network_down),
-			MAX(total_sent), MAX(total_recv), AVG(load1), AVG(load5), AVG(load15),
-			MAX(uptime), COUNT(*)
-		 FROM metrics WHERE created_at >= ?
-		 GROUP BY agent_id, created_at/3600`, cutoff,
-	); err != nil {
-		log.Printf("rollup metrics: %v", err)
-	}
-	if _, err := s.db.Exec(
-		`INSERT OR REPLACE INTO tcpping_hourly(
-			agent_id, name, hour_start, latency_avg, latency_peak, sample_count, success_count)
-		 SELECT agent_id, name, (created_at/3600)*3600,
-			COALESCE(AVG(CASE WHEN success = 1 THEN latency_ms END), 0),
-			MAX(latency_ms), COUNT(*), SUM(success)
-		 FROM tcpping_results WHERE created_at >= ?
-		 GROUP BY agent_id, name, created_at/3600`, cutoff,
-	); err != nil {
-		log.Printf("rollup tcpping: %v", err)
-	}
-}
-
-func (s *Store) PurgeOldData() {
-	// Roll up strictly before deleting so raw rows are always aggregated
-	// into the hourly tables before they age out.
-	s.rollUpHourly()
-
-	cutoff := s.now().Add(-rawRetention).Unix()
-	if res, err := s.db.Exec("DELETE FROM metrics WHERE created_at < ?", cutoff); err != nil {
-		log.Printf("purge metrics: %v", err)
-	} else if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("purged %d old metric rows", n)
-	}
-	if res, err := s.db.Exec("DELETE FROM tcpping_results WHERE created_at < ?", cutoff); err != nil {
-		log.Printf("purge tcpping: %v", err)
-	} else if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("purged %d old tcpping rows", n)
-	}
-	hourlyCutoff := s.now().Add(-hourlyRetention).Unix()
-	if _, err := s.db.Exec("DELETE FROM metrics_hourly WHERE hour_start < ?", hourlyCutoff); err != nil {
-		log.Printf("purge metrics_hourly: %v", err)
-	}
-	if _, err := s.db.Exec("DELETE FROM tcpping_hourly WHERE hour_start < ?", hourlyCutoff); err != nil {
-		log.Printf("purge tcpping_hourly: %v", err)
-	}
-	// Keep the current and previous cycle's baselines (62d covers both).
-	baselineCutoff := s.now().Add(-62 * 24 * time.Hour).Unix()
-	if _, err := s.db.Exec("DELETE FROM traffic_accounting_legacy WHERE boundary < ?", baselineCutoff); err != nil {
-		log.Printf("purge traffic audit snapshots: %v", err)
-	}
-	if _, err := s.db.Exec("DELETE FROM traffic_baselines WHERE boundary < ?", baselineCutoff); err != nil {
-		log.Printf("purge traffic baselines: %v", err)
-	}
-	if _, err := s.db.Exec("PRAGMA incremental_vacuum"); err != nil {
-		log.Printf("incremental vacuum: %v", err)
-	}
 }
 
 func (s *Store) startPurgeLoop() {

@@ -16,6 +16,13 @@ func insertPingRaw(t *testing.T, store *Store, agentID int64, at time.Time, name
 	}
 }
 
+func mustRollUpHourly(t *testing.T, store *Store) {
+	t.Helper()
+	if err := store.maintainHistory(false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Raw rows must survive as hourly aggregates after the raw retention purge.
 func TestRollUpSurvivesRawPurge(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.Local)
@@ -83,13 +90,13 @@ func TestRollUpIdempotentAndUpdating(t *testing.T) {
 	if err := store.InsertMetric(&MetricRow{AgentID: agentID, CPUUsage: 10}, at.Unix()); err != nil {
 		t.Fatal(err)
 	}
-	store.rollUpHourly()
-	store.rollUpHourly() // idempotent
+	mustRollUpHourly(t, store)
+	mustRollUpHourly(t, store) // idempotent
 
 	if err := store.InsertMetric(&MetricRow{AgentID: agentID, CPUUsage: 50}, at.Add(time.Minute).Unix()); err != nil {
 		t.Fatal(err)
 	}
-	store.rollUpHourly()
+	mustRollUpHourly(t, store)
 
 	metrics, err := store.GetMetricsHourly(agentID, 0, 0)
 	if err != nil {

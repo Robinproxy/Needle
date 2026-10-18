@@ -10,20 +10,47 @@ CONFIG=$CONFIG_DIR/agent.yaml
 SERVICE=/etc/init.d/needle-agent
 BACKUP_LIST=/etc/sysupgrade.conf
 NETWORK_DIR=/sys/class/net
+MEMINFO=/proc/meminfo
+RC_DIR=/etc/rc.d
+LOCK_DIR=/tmp/needle-agent-installer.lock
+LOCK_HELD=false
 TMP_DIR=
 VERSION=
 YES=false
 PURGE=false
 UNREGISTER=false
 INSTALL_PENDING=false
+INSTALL_MUTATED=false
+SERVICE_TOUCHED=false
+UNREGISTER_PENDING=false
+KEEP_TMP=false
 UPGRADE_CONFIG_MODE=ask
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() {
-    if [ "$INSTALL_PENDING" = true ]; then
-        rollback_install || echo 'ERROR: rollback incomplete; inspect the Agent installation.' >&2
+    if [ "$UNREGISTER_PENDING" = true ]; then
+        UNREGISTER_PENDING=false
+        if [ "$UNREGISTER_WAS_RUNNING" = true ] && [ -x "$SERVICE" ]; then
+            "$SERVICE" start || echo 'ERROR: could not restart the retained Agent.' >&2
+        fi
     fi
-    [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
+    if [ "$INSTALL_PENDING" = true ]; then
+        if ! rollback_install; then
+            KEEP_TMP=true
+            echo "ERROR: rollback incomplete. Recovery files retained in: $TMP_DIR" >&2
+        fi
+    fi
+    if [ "$INSTALL_MUTATED" = true ]; then
+        rm -f "$BINARY.new" "$CONFIG.new" "$CONFIG.bak.new" "$SERVICE.new" "$BACKUP_LIST.needle.tmp"
+        INSTALL_MUTATED=false
+    fi
+    if [ -n "$TMP_DIR" ] && [ "$KEEP_TMP" = false ]; then rm -rf "$TMP_DIR"; fi
+    TMP_DIR=
+    if [ "$LOCK_HELD" = true ]; then
+        rm -f "$LOCK_DIR/pid"
+        rmdir "$LOCK_DIR" || echo "ERROR: cannot release installer lock: $LOCK_DIR" >&2
+        LOCK_HELD=false
+    fi
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -48,6 +75,49 @@ require_system() {
     [ -f /etc/openwrt_release ] && [ -f /etc/rc.common ] || fail 'OpenWrt / ImmortalWrt with procd is required.'
 }
 
+lock_installer() {
+    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+        fail "Installer lock exists: $LOCK_DIR. Another operation may be running; inspect its pid file before removing a stale lock."
+    fi
+    LOCK_HELD=true
+    printf '%s\n' "$$" > "$LOCK_DIR/pid"
+}
+
+validate_paths() {
+    [ ! -L "$CONFIG_DIR" ] || fail "Refusing symlink directory: $CONFIG_DIR"
+    [ ! -e "$CONFIG_DIR" ] || [ -d "$CONFIG_DIR" ] || fail "Not a directory: $CONFIG_DIR"
+    for FILE in "$BINARY" "$CONFIG" "$CONFIG.bak" "$SERVICE" "$CONFIG_DIR/version" "$BACKUP_LIST"; do
+        [ ! -L "$FILE" ] || fail "Refusing symlink: $FILE"
+        [ ! -e "$FILE" ] || [ -f "$FILE" ] || fail "Not a regular file: $FILE"
+    done
+    [ "${ACTION:-}" != uninstall ] || return 0
+    for FILE in "$BINARY.new" "$CONFIG.new" "$CONFIG.bak.new" "$SERVICE.new" "$BACKUP_LIST.needle.tmp" \
+        "$BINARY.needle-restore" "$CONFIG.needle-restore" "$CONFIG.bak.needle-restore" \
+        "$SERVICE.needle-restore" "$CONFIG_DIR/version.needle-restore" "$BACKUP_LIST.needle-restore"; do
+        [ ! -e "$FILE" ] && [ ! -L "$FILE" ] || fail "Staging/recovery path already exists; inspect it before retrying: $FILE"
+    done
+}
+
+wait_stopped() {
+    STOP_WAIT=0
+    while "$SERVICE" running >/dev/null 2>&1; do
+        [ "$STOP_WAIT" -lt 30 ] || { echo 'Agent did not stop; local files retained.' >&2; return 1; }
+        sleep 1
+        STOP_WAIT=$((STOP_WAIT + 1))
+    done
+}
+
+stop_agent() {
+    "$SERVICE" stop || return 1
+    wait_stopped
+}
+
+remove_boot_links() {
+    for LINK in "$RC_DIR"/S[0-9][0-9]needle-agent "$RC_DIR"/K[0-9][0-9]needle-agent; do
+        [ ! -L "$LINK" ] || rm -f "$LINK"
+    done
+}
+
 fetch() {
     if command -v curl >/dev/null 2>&1; then
         curl -fLsS --connect-timeout 15 --max-time 180 "$1" -o "$2"
@@ -66,6 +136,17 @@ prompt() {
 yaml_quote() {
     # YAML single-quoted scalars escape apostrophes by doubling them.
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
+preflight_resources() {
+    # Downloads, extracted binaries and recovery snapshots occupy tmpfs RAM.
+    # Refuse before downloading when the router already has little headroom.
+    AVAILABLE_KB=$(awk '$1 == "MemAvailable:" { print $2; exit }' "$MEMINFO")
+    case "$AVAILABLE_KB" in ''|*[!0-9]*) fail 'Cannot determine available router memory.' ;; esac
+    [ "$AVAILABLE_KB" -ge 65536 ] || fail 'At least 64 MiB of available memory is required before installation; running Agent is unchanged.'
+    TMP_FREE_KB=$(df -Pk /tmp | awk 'END { print $4 }')
+    case "$TMP_FREE_KB" in ''|*[!0-9]*) fail 'Cannot determine free temporary space.' ;; esac
+    [ "$TMP_FREE_KB" -ge 32768 ] || fail 'At least 32 MiB of free /tmp space is required for download and recovery files.'
 }
 
 download() {
@@ -91,11 +172,27 @@ download() {
     case "$EXPECTED" in *[!0-9a-fA-F]*) fail 'Invalid checksum.' ;; esac
     ACTUAL=$(sha256sum "$TMP_DIR/$ARCHIVE" | awk '{print $1}')
     [ "$EXPECTED" = "$ACTUAL" ] || fail 'Checksum mismatch; installation aborted.'
-    # Extract only the binary from the verified package.
-    tar xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR" needle-agent
-    [ -f "$TMP_DIR/needle-agent" ] && [ ! -L "$TMP_DIR/needle-agent" ] || fail 'Agent binary missing.'
+    # Write bytes only: archive permissions, symlinks and hardlinks must not
+    # be applied to the router filesystem, even inside the staging directory.
+    tar xOzf "$TMP_DIR/$ARCHIVE" needle-agent > "$TMP_DIR/needle-agent"
+    [ -s "$TMP_DIR/needle-agent" ] && [ ! -L "$TMP_DIR/needle-agent" ] || fail 'Agent binary missing or empty.'
     chmod 755 "$TMP_DIR/needle-agent"
-    "$TMP_DIR/needle-agent" -h >/dev/null 2>&1 || fail 'Agent binary cannot execute on this router.'
+    "$TMP_DIR/needle-agent" -h > "$TMP_DIR/agent-help" 2>&1 || fail 'Agent binary cannot execute on this router.'
+}
+
+preflight_install() {
+    # A full overlay can affect other router services. Reserve room beyond
+    # the new binary; all downloads and snapshots remain in temporary RAM.
+    FREE_KB=$(df -Pk "${BINARY%/*}" | awk 'END { print $4 }')
+    case "$FREE_KB" in ''|*[!0-9]*) fail 'Cannot determine free installation space.' ;; esac
+    BINARY_BYTES=$(wc -c < "$TMP_DIR/needle-agent")
+    NEEDED_KB=$((BINARY_BYTES / 1024 + 1 + 4096))
+    [ "$FREE_KB" -ge "$NEEDED_KB" ] || fail 'Insufficient free space; keep at least 4 MiB free after staging the Agent.'
+    if grep -q '^[[:space:]]*-check-config' "$TMP_DIR/agent-help"; then
+        CHECK_CONFIG=$CONFIG
+        [ ! -f "$TMP_DIR/agent.yaml" ] || CHECK_CONFIG=$TMP_DIR/agent.yaml
+        "$TMP_DIR/needle-agent" -check-config "$CHECK_CONFIG" || fail 'Configuration validation failed; running Agent is unchanged.'
+    fi
 }
 
 require_interactive() {
@@ -275,6 +372,8 @@ configure() {
     prompt 'Report interval in seconds [30]: '; INTERVAL=${ANSWER:-30}
     case "$INTERVAL" in ''|*[!0-9]*) fail 'Interval must be a positive integer.' ;; esac
     [ "$INTERVAL" -gt 0 ] && [ "$INTERVAL" -le 86400 ] || fail 'Interval must be 1–86400 seconds.'
+    # YAML 1.1 treats leading-zero integers as octal; save decimal seconds.
+    INTERVAL=$(printf '%s\n' "$INTERVAL" | awk '{ printf "%d", $0 + 0 }')
     echo 'Billing: forever (default), 1m, 3m, 6m, 12m, or skip'
     prompt 'Billing period [forever]: '; PERIOD=${ANSWER:-forever}; EXPIRY=
     case "$PERIOD" in
@@ -311,7 +410,7 @@ configure() {
 }
 
 write_service() {
-    cat > "$SERVICE" <<'INIT'
+    cat > "$SERVICE.new" <<'INIT'
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
@@ -320,34 +419,53 @@ start_service() {
     [ -s /etc/needle/agent.yaml ] || return 1
     procd_open_instance
     procd_set_param command /usr/bin/needle-agent /etc/needle/agent.yaml
-    procd_set_param respawn 3600 10 0
+    procd_set_param respawn 3600 10 5
+    procd_set_param nice 10
+    procd_set_param term_timeout 25
+    procd_set_param env GOMAXPROCS=1 GOMEMLIMIT=32MiB
+    procd_set_param limits core="0" nofile="128 128"
     procd_set_param file /etc/needle/agent.yaml
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_close_instance
 }
 INIT
-    chmod 755 "$SERVICE"
+    chmod 755 "$SERVICE.new"
+    mv -f "$SERVICE.new" "$SERVICE"
 }
 
 preserve_config() {
-    touch "$BACKUP_LIST"
-    grep -qxF "$CONFIG_DIR/" "$BACKUP_LIST" || printf '%s\n' "$CONFIG_DIR/" >> "$BACKUP_LIST"
+    if [ -f "$BACKUP_LIST" ]; then
+        if grep -qxF "$CONFIG_DIR/" "$BACKUP_LIST"; then return; fi
+        cp -p "$BACKUP_LIST" "$BACKUP_LIST.needle.tmp"
+        if [ -s "$BACKUP_LIST" ] && [ -n "$(tail -c 1 "$BACKUP_LIST")" ]; then
+            printf '\n' >> "$BACKUP_LIST.needle.tmp"
+        fi
+    else
+        : > "$BACKUP_LIST.needle.tmp"
+    fi
+    printf '%s\n' "$CONFIG_DIR/" >> "$BACKUP_LIST.needle.tmp"
+    mv -f "$BACKUP_LIST.needle.tmp" "$BACKUP_LIST"
 }
 
 backup_install() {
     OLD_RUNNING=false
     OLD_ENABLED=false
     OLD_CONFIG_DIR=false
-    [ ! -d "$CONFIG_DIR" ] || OLD_CONFIG_DIR=true
+    if [ -d "$CONFIG_DIR" ]; then
+        OLD_CONFIG_DIR=true
+    fi
+    OLD_SERVICE=false
     if [ -x "$SERVICE" ]; then
+        OLD_SERVICE=true
         if "$SERVICE" running >/dev/null 2>&1; then OLD_RUNNING=true; fi
         if "$SERVICE" enabled >/dev/null 2>&1; then OLD_ENABLED=true; fi
     fi
-    for ITEM in binary config service version backup-list; do
+    for ITEM in binary config config-backup service version backup-list; do
         case "$ITEM" in
             binary) FILE=$BINARY ;;
             config) FILE=$CONFIG ;;
+            config-backup) FILE=$CONFIG.bak ;;
             service) FILE=$SERVICE ;;
             version) FILE=$CONFIG_DIR/version ;;
             backup-list) FILE=$BACKUP_LIST ;;
@@ -359,14 +477,15 @@ backup_install() {
 rollback_install() {
     INSTALL_PENDING=false
     echo 'Installation failed; restoring the previous Agent installation.' >&2
-    if [ -x "$SERVICE" ]; then
-        "$SERVICE" stop >/dev/null 2>&1 || true
-        "$SERVICE" disable >/dev/null 2>&1 || true
+    if [ "$SERVICE_TOUCHED" = true ] && [ -x "$SERVICE" ]; then
+        stop_agent || return 1
+        "$SERVICE" disable || return 1
     fi
-    for ITEM in binary config service version backup-list; do
+    for ITEM in binary config config-backup service version backup-list; do
         case "$ITEM" in
             binary) FILE=$BINARY ;;
             config) FILE=$CONFIG ;;
+            config-backup) FILE=$CONFIG.bak ;;
             service) FILE=$SERVICE ;;
             version) FILE=$CONFIG_DIR/version ;;
             backup-list) FILE=$BACKUP_LIST ;;
@@ -379,7 +498,7 @@ rollback_install() {
         fi
     done
     rm -f "$BINARY.new"
-    if [ -x "$SERVICE" ]; then
+    if [ "$SERVICE_TOUCHED" = true ] && [ -x "$SERVICE" ]; then
         if [ "$OLD_ENABLED" = true ]; then
             "$SERVICE" enable || return 1
         else
@@ -391,48 +510,67 @@ rollback_install() {
             "$SERVICE" running >/dev/null 2>&1 || return 1
         fi
     fi
-    if [ "$OLD_CONFIG_DIR" = false ]; then rmdir "$CONFIG_DIR" 2>/dev/null || true; fi
+    if [ "$OLD_CONFIG_DIR" = false ]; then
+        rmdir "$CONFIG_DIR" 2>/dev/null || true
+    fi
 }
 
 install_agent() {
+    validate_paths
     if [ -f "$CONFIG" ]; then
         echo 'Existing configuration found.'
     else
         [ "$ACTION" = install ] || fail 'Not installed; run install first.'
         require_interactive
     fi
+    preflight_resources
     download
     if [ ! -f "$CONFIG" ]; then
         configure
     elif [ "$ACTION" = upgrade ]; then
         choose_upgrade_config "$CONFIG"
     fi
+    preflight_install
     backup_install
+    INSTALL_PENDING=true
+    INSTALL_MUTATED=true
     mkdir -p "$CONFIG_DIR"
-    chmod 700 "$CONFIG_DIR"
+    # Keep existing directory permissions; it may contain user-owned files.
+    # New directories inherit umask 077, and Agent configs are always 0600.
     # Stage on the destination filesystem before stopping the old process.
     cp "$TMP_DIR/needle-agent" "$BINARY.new"
     chmod 755 "$BINARY.new"
-    INSTALL_PENDING=true
     if [ "${UPGRADE_RECONFIGURE:-false}" = true ]; then
-        cp -p "$CONFIG" "$CONFIG.bak"
-        chmod 600 "$CONFIG.bak"
+        cp -p "$CONFIG" "$CONFIG.bak.new"
+        chmod 600 "$CONFIG.bak.new"
+        mv -f "$CONFIG.bak.new" "$CONFIG.bak"
     fi
-    if [ -x "$SERVICE" ]; then "$SERVICE" stop; fi
+    SERVICE_TOUCHED=true
+    if [ -x "$SERVICE" ]; then stop_agent; fi
     mv -f "$BINARY.new" "$BINARY"
-    if [ -f "$TMP_DIR/agent.yaml" ]; then mv "$TMP_DIR/agent.yaml" "$CONFIG"; fi
+    if [ -f "$TMP_DIR/agent.yaml" ]; then
+        cp "$TMP_DIR/agent.yaml" "$CONFIG.new"
+        chmod 600 "$CONFIG.new"
+        mv -f "$CONFIG.new" "$CONFIG"
+    fi
     chmod 600 "$CONFIG"
     write_service
     preserve_config
-    "$SERVICE" enable
-    "$SERVICE" start
-    # procd start is asynchronous: reject processes that immediately crash,
-    # including bad YAML and invalid Server URLs, before reporting success.
-    sleep 1
-    "$SERVICE" running >/dev/null 2>&1 || fail 'Agent did not stay running; check logread -e needle-agent.'
+    if [ "$OLD_SERVICE" = false ] || [ "$OLD_ENABLED" = true ]; then
+        "$SERVICE" enable
+    else
+        "$SERVICE" disable
+    fi
+    if [ "$OLD_SERVICE" = false ] || [ "$OLD_RUNNING" = true ]; then
+        "$SERVICE" start
+        # procd starts asynchronously; reject immediately crashing processes.
+        sleep 1
+        "$SERVICE" running >/dev/null 2>&1 || fail 'Agent did not stay running; check logread -e needle-agent.'
+    fi
     printf '%s\n' "$VERSION" > "$CONFIG_DIR/version"
     INSTALL_PENDING=false
     echo "Installed $VERSION. Configuration: $CONFIG"
+    echo 'Existing service running/autostart state was preserved; a new installation starts at boot.'
     if [ "${UPGRADE_RECONFIGURE:-false}" = true ]; then
         echo "TCP Ping and allowance settings updated; token and identity preserved. Backup: $CONFIG.bak"
     fi
@@ -449,29 +587,47 @@ uninstall_agent() {
         prompt 'Remove Needle Agent? Configuration is kept unless --purge is specified. [y/N]: '
         case "$ANSWER" in y|Y|yes) ;; *) return ;; esac
     fi
+    # Only dedicated Needle paths are touched; never follow a symlink into
+    # another router component or recursively remove a shared directory.
+    validate_paths
     if [ "$UNREGISTER" = true ]; then
         [ -x "$BINARY" ] && [ -f "$CONFIG" ] || fail 'Binary and configuration are needed to unregister.'
-        if [ -x "$SERVICE" ]; then "$SERVICE" stop; fi
+        UNREGISTER_WAS_RUNNING=false
+        if [ -x "$SERVICE" ] && "$SERVICE" running >/dev/null 2>&1; then UNREGISTER_WAS_RUNNING=true; fi
+        UNREGISTER_PENDING=true
+        if [ -x "$SERVICE" ]; then stop_agent; fi
         if ! "$BINARY" -unregister "$CONFIG"; then
-            if [ -x "$SERVICE" ]; then "$SERVICE" start; fi
-            fail 'Unregister failed; local installation retained and service restarted.'
+            fail 'Unregister failed; local installation retained and previous running state will be restored.'
         fi
+        UNREGISTER_PENDING=false
     fi
-    if [ -x "$SERVICE" ]; then "$SERVICE" stop; "$SERVICE" disable; fi
-    rm -f "$SERVICE" "$BINARY" "$BINARY.new" "$CONFIG_DIR/version"
+    if [ -x "$SERVICE" ]; then stop_agent; "$SERVICE" disable; fi
+    remove_boot_links
+    rm -f "$SERVICE" "$SERVICE.new" "$SERVICE.needle-restore" "$BINARY" "$BINARY.new" "$BINARY.needle-restore" \
+        "$CONFIG_DIR/version" "$CONFIG_DIR/version.needle-restore"
     if [ "$PURGE" = true ]; then
-        rm -f "$CONFIG" "$CONFIG.bak"
-        rmdir "$CONFIG_DIR" 2>/dev/null || true
-        if [ -f "$BACKUP_LIST" ]; then
-            sed '\|^/etc/needle/$|d' "$BACKUP_LIST" > "$BACKUP_LIST.needle.tmp"
-            cat "$BACKUP_LIST.needle.tmp" > "$BACKUP_LIST"
-            rm -f "$BACKUP_LIST.needle.tmp"
+        rm -f "$CONFIG" "$CONFIG.new" "$CONFIG.bak" "$CONFIG.bak.new" "$CONFIG.needle-restore" "$CONFIG.bak.needle-restore"
+        if [ -d "$CONFIG_DIR" ] && ! rmdir "$CONFIG_DIR" 2>/dev/null; then
+            echo "Other files retained in: $CONFIG_DIR"
+        fi
+        rm -f "$BACKUP_LIST.needle.tmp" "$BACKUP_LIST.needle-restore"
+        if [ -f "$BACKUP_LIST" ] && grep -qxF "$CONFIG_DIR/" "$BACKUP_LIST"; then
+            cp -p "$BACKUP_LIST" "$BACKUP_LIST.needle.tmp"
+            awk -v entry="$CONFIG_DIR/" '$0 != entry { print }' "$BACKUP_LIST" > "$BACKUP_LIST.needle.tmp"
+            mv -f "$BACKUP_LIST.needle.tmp" "$BACKUP_LIST"
         fi
     fi
     echo 'Agent removed. Server history is retained unless --unregister was used.'
 }
 
 main() {
+    VERSION=
+    YES=false
+    PURGE=false
+    UNREGISTER=false
+    UPGRADE_RECONFIGURE=false
+    SERVICE_TOUCHED=false
+    KEEP_TMP=false
     UPGRADE_CONFIG_MODE=ask
     ACTION=${1:-install}
     [ "$#" -eq 0 ] || shift
@@ -497,6 +653,7 @@ main() {
         fail '--keep-config and --reconfigure are only valid with upgrade.'
     fi
     require_system
+    if [ "$ACTION" != status ]; then lock_installer; fi
     case "$ACTION" in
         install|upgrade) install_agent ;;
         uninstall) uninstall_agent ;;
@@ -507,6 +664,7 @@ main() {
             "$SERVICE" status
             ;;
     esac
+    cleanup
 }
 
 main "$@"

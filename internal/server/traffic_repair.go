@@ -66,12 +66,15 @@ func (s *Store) RepairTrafficUsage(agentID, since int64, apply bool) (*TrafficRe
 	if expiry.Valid {
 		expiresAt = &expiry.Int64
 	}
-	day, configured := trafficResetDay(period, expiresAt)
+	cycle, configured, err := activeTrafficCycle(tx, agentID, period, expiresAt, s.now())
+	if err != nil {
+		return nil, err
+	}
 	if !configured {
 		result.Reason = "billing cycle is not configured"
 		return result, nil
 	}
-	result.Boundary = monthlyBoundary(day, s.now()).Unix()
+	result.Boundary = cycle.Start
 	if apply {
 		// Acquire the write lock before reading the live accumulator, so a report
 		// arriving concurrently cannot make the preview stale during this repair.
@@ -107,7 +110,7 @@ func (s *Store) RepairTrafficUsage(agentID, since int64, apply bool) (*TrafficRe
 		result.Reason = "current usage was externally reduced after the legacy snapshot; manual review required"
 		return result, nil
 	}
-	rows, err := tx.Query(`SELECT id,total_sent,total_recv,uptime,created_at FROM metrics WHERE agent_id=? AND id<=? AND created_at>=? ORDER BY id`, agentID, endID.Int64, max(result.Boundary, since))
+	rows, err := tx.Query(`SELECT id,total_sent,total_recv,uptime,created_at FROM metrics WHERE agent_id=? AND id<=? AND created_at>=? AND created_at<? ORDER BY id`, agentID, endID.Int64, max(result.Boundary, since), cycle.End)
 	if err != nil {
 		return nil, err
 	}

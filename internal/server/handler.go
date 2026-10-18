@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -334,16 +335,27 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:           createdAt,
 	}
 
-	if req.CPU != nil {
-		write.CPUCores = req.CPU.Cores
+	if req.CPU != nil || req.Memory != nil || req.Disk != nil || req.Network != nil || req.Load != nil {
+		missing := 0
+		var cpuUsage float64
+		if req.CPU != nil {
+			write.CPUCores = req.CPU.Cores
+			cpuUsage = req.CPU.Percent
+		} else {
+			missing |= missingCPU
+		}
 		var memTotal, memUsed, diskTotal, diskUsed int64
 		if req.Memory != nil {
 			memTotal = int64(req.Memory.Total)
 			memUsed = int64(req.Memory.Used)
+		} else {
+			missing |= missingMemory
 		}
 		if req.Disk != nil {
 			diskTotal = int64(req.Disk.Total)
 			diskUsed = int64(req.Disk.Used)
+		} else {
+			missing |= missingDisk
 		}
 		var netUp, netDown, totalSent, totalRecv int64
 		if req.Network != nil {
@@ -351,33 +363,33 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			netDown = req.Network.Down
 			totalSent = req.Network.TotalSent
 			totalRecv = req.Network.TotalRecv
+		} else {
+			missing |= missingNetwork
 		}
 		var load1, load5, load15 float64
 		if req.Load != nil {
 			load1 = req.Load.Load1
 			load5 = req.Load.Load5
 			load15 = req.Load.Load15
+		} else {
+			missing |= missingLoad
 		}
 		write.Metric = &MetricRow{
-			CPUUsage:    req.CPU.Percent,
-			MemoryTotal: memTotal,
-			MemoryUsed:  memUsed,
-			DiskTotal:   diskTotal,
-			DiskUsed:    diskUsed,
-			NetworkUp:   float64(netUp),
-			NetworkDown: float64(netDown),
-			TotalSent:   totalSent,
-			TotalRecv:   totalRecv,
-			Load1:       load1,
-			Load5:       load5,
-			Load15:      load15,
-			Uptime:      int64(req.Uptime),
+			MissingMetrics: missing,
+			CPUUsage:       cpuUsage,
+			MemoryTotal:    memTotal,
+			MemoryUsed:     memUsed,
+			DiskTotal:      diskTotal,
+			DiskUsed:       diskUsed,
+			NetworkUp:      float64(netUp),
+			NetworkDown:    float64(netDown),
+			TotalSent:      totalSent,
+			TotalRecv:      totalRecv,
+			Load1:          load1,
+			Load5:          load5,
+			Load15:         load15,
+			Uptime:         int64(req.Uptime),
 		}
-	}
-
-	if resetDay, configured := trafficResetDay(req.BillingPeriod, req.ExpiresAt); configured && req.Network != nil {
-		boundary := monthlyBoundary(resetDay, now).Unix()
-		write.BaselineBoundary = &boundary
 	}
 
 	for _, t := range req.TCPing {
@@ -410,6 +422,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	agents, err := h.store.GetAgents()
 	if err != nil {
+		log.Printf("agents: list: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -427,10 +440,21 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	now := h.now()
 	result := make([]agentWithMetric, 0, len(agents))
 	for _, a := range agents {
-		m, _ := h.store.GetLatestMetric(a.ID)
-		t, _ := h.store.GetLatestTCPing(a.ID)
+		m, err := h.store.GetLatestMetric(a.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("agents: latest metric for agent %d: %v", a.ID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		t, err := h.store.GetLatestTCPing(a.ID)
+		if err != nil {
+			log.Printf("agents: latest probes for agent %d: %v", a.ID, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		traffic, err := h.store.GetTrafficUsage(a.ID)
 		if err != nil {
+			log.Printf("agents: traffic for agent %d: %v", a.ID, err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}

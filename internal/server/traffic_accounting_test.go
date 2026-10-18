@@ -9,8 +9,7 @@ func saveTrafficSample(t *testing.T, s *Store, at time.Time, sent, recv, uptime 
 	t.Helper()
 	s.now = func() time.Time { return at }
 	expiry := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC).Unix()
-	boundary := monthlyBoundary(6, at).Unix()
-	_, err := s.SaveReport(&ReportWrite{Hostname: "node-1", Region: "SG", ExpiresAt: &expiry, BillingPeriod: "1m", CreatedAt: at.Unix(), Metric: &MetricRow{TotalSent: sent, TotalRecv: recv, Uptime: uptime}, BaselineBoundary: &boundary})
+	_, err := s.SaveReport(&ReportWrite{Hostname: "node-1", Region: "SG", ExpiresAt: &expiry, BillingPeriod: "1m", CreatedAt: at.Unix(), Metric: &MetricRow{TotalSent: sent, TotalRecv: recv, Uptime: uptime}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +42,8 @@ func TestTrafficCounterState(t *testing.T) {
 		{"confirmed reboot", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100, CreatedAt: 1000}, {TotalSent: 10, TotalRecv: 20, Uptime: 10, CreatedAt: 1010}, {TotalSent: 30, TotalRecv: 50, Uptime: 20, CreatedAt: 1020}}, 30, 50},
 		{"reboot counts both directions even if a counter increased", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100, CreatedAt: 1000}, {TotalSent: 1200, TotalRecv: 20, Uptime: 10, CreatedAt: 1010}}, 1200, 20},
 		{"missing uptime does not prove reboot", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, CreatedAt: 1000}, {TotalSent: 10, TotalRecv: 20, CreatedAt: 1010}}, 0, 0},
+		{"one missing uptime does not erase reboot evidence", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100, CreatedAt: 1000}, {TotalSent: 1010, TotalRecv: 2020, CreatedAt: 1010}, {TotalSent: 10, TotalRecv: 20, Uptime: 10, CreatedAt: 1020}}, 20, 40},
+		{"missing network does not reset watermarks", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100, CreatedAt: 1000}, {MissingMetrics: missingNetwork, Uptime: 110, CreatedAt: 1010}, {TotalSent: 1010, TotalRecv: 2020, Uptime: 120, CreatedAt: 1020}}, 10, 20},
 		{"same-second delayed sample is not a reboot", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100, CreatedAt: 1000}, {TotalSent: 900, TotalRecv: 1800, Uptime: 90, CreatedAt: 1000}, {TotalSent: 1010, TotalRecv: 2010, Uptime: 110, CreatedAt: 1010}}, 10, 10},
 		{"delayed sample is not a reboot", []MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100, CreatedAt: 1000}, {TotalSent: 900, TotalRecv: 1800, Uptime: 90, CreatedAt: 990}, {TotalSent: 1010, TotalRecv: 2010, Uptime: 110, CreatedAt: 1010}}, 10, 10},
 	}

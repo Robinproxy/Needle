@@ -13,6 +13,7 @@ type AgentRow struct {
 }
 
 type MetricRow struct {
+	MissingMetrics  int     `json:"missing_metrics,omitempty"`
 	ID              int64   `json:"id"`
 	AgentID         int64   `json:"agent_id"`
 	CPUUsage        float64 `json:"cpu_usage"`

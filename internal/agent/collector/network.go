@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -8,10 +10,10 @@ import (
 )
 
 type NetworkStats struct {
-	Up         int64 `json:"up"`
-	Down       int64 `json:"down"`
-	TotalSent  int64 `json:"total_sent"`
-	TotalRecv  int64 `json:"total_recv"`
+	Up        int64 `json:"up"`
+	Down      int64 `json:"down"`
+	TotalSent int64 `json:"total_sent"`
+	TotalRecv int64 `json:"total_recv"`
 }
 
 // Interface name prefixes excluded by default: loopback and virtual devices
@@ -64,16 +66,26 @@ func (nc *NetworkCollector) Collect() (*NetworkStats, error) {
 	if err != nil {
 		return nil, err
 	}
+	return nc.collect(counters, time.Now())
+}
 
+func (nc *NetworkCollector) collect(counters []net.IOCountersStat, now time.Time) (*NetworkStats, error) {
 	var curSent, curRecv uint64
+	matched := false
 	for _, c := range counters {
 		if nc.counted(c.Name) {
+			matched = true
+			if c.BytesSent > math.MaxInt64-curSent || c.BytesRecv > math.MaxInt64-curRecv {
+				return nil, fmt.Errorf("network counters exceed supported range")
+			}
 			curSent += c.BytesSent
 			curRecv += c.BytesRecv
 		}
 	}
 
-	now := time.Now()
+	if !matched {
+		return nil, fmt.Errorf("no network interfaces matched the configured filter")
+	}
 
 	if nc.first {
 		nc.prevUp = curSent

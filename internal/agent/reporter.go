@@ -14,6 +14,7 @@ import (
 )
 
 type ReportData struct {
+	CreatedAt           int64                    `json:"created_at,omitempty"`
 	MonthlyTrafficLimit int64                    `json:"monthly_traffic_limit"`
 	Hostname            string                   `json:"hostname"`
 	Region              string                   `json:"region"`
@@ -32,6 +33,22 @@ type Reporter struct {
 	serverURL string
 	token     string
 	client    *http.Client
+}
+
+const maxResponseBytes = 4096
+
+// Keep a failed/misconfigured upstream from filling router memory or logs.
+// Draining small success bodies also permits HTTP connection reuse.
+func readReportResponse(resp *http.Response) error {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server %d: %s", resp.StatusCode, string(body))
+	}
+	if err != nil {
+		return fmt.Errorf("read server response: %w", err)
+	}
+	return nil
 }
 
 func NewReporter(serverURL, token string, tlsSkipVerify bool) *Reporter {
@@ -62,13 +79,7 @@ func (r *Reporter) Send(ctx context.Context, data *ReportData) error {
 	if err != nil {
 		return fmt.Errorf("send: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server %d: %s", resp.StatusCode, string(b))
-	}
-	return nil
+	return readReportResponse(resp)
 }
 
 func (r *Reporter) Unregister(ctx context.Context, hostname string) error {
@@ -96,11 +107,5 @@ func (r *Reporter) Unregister(ctx context.Context, hostname string) error {
 	if err != nil {
 		return fmt.Errorf("unregister: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server %d: %s", resp.StatusCode, string(b))
-	}
-	return nil
+	return readReportResponse(resp)
 }

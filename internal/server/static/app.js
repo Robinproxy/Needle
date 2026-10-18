@@ -4,13 +4,15 @@ let sparkCharts = {};
 let tcppingChart = null;
 let filterRegion = '';
 let cardFormat = localStorage.getItem('cardFormat') || 'card';
-let infoData = null;
+let infoRefreshInFlight = false;
+let detailRequest = null;
 let currentTcppingRange = '24h';
 let currentMetricsRange = '24h';
 let currentHistoryDay = null;
 let detailDayAlerts = new Map();
 let gridCols = 4;
 let refreshInFlight = false;
+let dashboardNeedsRender = false;
 let lastRefreshAt = null;
 let dashboardLoadingTimer = null;
 const TCPPING_COLORS = ['#6485ac', '#85a6c0', '#9282ae', '#b1a1c5', '#679b96', '#91b9ad', '#818bb4'];
@@ -67,7 +69,7 @@ function pingLossColor(pct) {
   return 'red';
 }
 function valCss(c) {
-  const m = { green: 'var(--success)', amber: 'var(--warning)', red: 'var(--destructive)', gray: 'var(--muted-foreground)' };
+  const m = { amber: 'var(--warning)', red: 'var(--destructive)', gray: 'var(--muted-foreground)' };
   return 'hsl(' + m[c] + ')';
 }
 
@@ -115,7 +117,6 @@ function metricColor(v) {
   if (v == null) return 'blue';
   if (v >= 90) return 'red';
   if (v >= 70) return 'amber';
-  if (v >= 40) return 'green';
   return 'blue';
 }
 
@@ -130,13 +131,12 @@ function setRegionFilter(code) {
 }
 
 function renderInfoBar() {
-  const d = infoData?.db_stats || {};
   const now = Date.now();
   const online = agents.filter(a => {
     const seen = lastSeenMs(a);
     return seen && (now - seen < 120000);
   }).length;
-  const total = d.agent_count || 0;
+  const total = agents.length;
 
   const regions = {};
   agents.forEach(a => {
@@ -158,10 +158,76 @@ function renderInfoBar() {
     + regionHtml;
 }
 
-async function fetchJSON(url) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error('HTTP ' + response.status);
-  return response.json();
+async function fetchJSON(url, { signal, timeoutMs = 15000 } = {}) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const cancel = () => controller.abort();
+  if (signal?.aborted) cancel();
+  signal?.addEventListener('abort', cancel, { once: true });
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      const error = new Error('HTTP ' + response.status);
+      error.status = response.status;
+      throw error;
+    }
+    try { return await response.json(); }
+    catch (error) {
+      if (controller.signal.aborted || error.name !== 'SyntaxError') throw error;
+      const invalid = new Error('invalid JSON response');
+      invalid.kind = 'json';
+      throw invalid;
+    }
+  } catch (cause) {
+    if (signal?.aborted) throw cause;
+    const error = new Error(url + ': ' + (timedOut ? 'request timed out' : cause.message));
+    error.kind = timedOut ? 'timeout' : cause.kind || (cause.status ? 'http' : 'network');
+    error.status = cause.status;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
+async function fetchRows(url, options) {
+  const rows = await fetchJSON(url, options);
+  // History endpoints in older releases encode an empty slice as null.
+  if (rows === null && url !== '/api/agents') return [];
+  if (!Array.isArray(rows)) {
+    const error = new Error(url + ': expected a data array');
+    error.kind = 'data';
+    throw error;
+  }
+  return rows;
+}
+
+function refreshErrorText(error) {
+  if (error.kind === 'http') return 'server returned HTTP ' + error.status;
+  if (error.kind === 'timeout') return 'request timed out';
+  if (error.kind === 'json' || error.kind === 'data') return 'server returned invalid data';
+  return 'connection failed';
+}
+
+async function refreshServerInfo() {
+  if (infoRefreshInFlight) return;
+  infoRefreshInFlight = true;
+  try {
+    const info = await fetchJSON('/api/info');
+    if (!info || typeof info !== 'object' || Array.isArray(info)) throw new Error('/api/info: expected an object');
+    const version = document.getElementById('version-label');
+    if (version) {
+      const value = String(info.version || '');
+      version.textContent = 'NEEDLE ' + (value.split('-')[0] || value);
+      version.title = value;
+    }
+  } catch (error) {
+    // Auxiliary metadata must not block or mark fresh node data as stale.
+    console.warn('Server info refresh:', error);
+  } finally {
+    infoRefreshInFlight = false;
+  }
 }
 
 function setDashboardState(state, message) {
@@ -274,6 +340,7 @@ function updateHeaderIcons() {
 }
 
 function renderAll(scrollToDetail) {
+  destroyDetailCharts();
   const container = document.getElementById('card-grid');
   const empty = document.getElementById('empty-state');
 
@@ -365,16 +432,22 @@ function trafficHTML(data, limit = 0) {
   return metricHTML('TRF', value, text, 'Monthly upload + download; decimal GB/TB. Observed usage since monitoring began, not provider billing data.');
 }
 
+// Missing collectors are distinct from measured zero, including in old API
+// responses that omit the mask (all resources are treated as present).
+function hasMetric(m, bit) {
+  return !!m && !((m.missing_metrics || 0) & bit);
+}
+
 function cardMetricsHTML(a) {
   const m = a.latest_metric;
   const cores = a.agent.cpu_cores > 0 ? a.agent.cpu_cores : null;
-  const cpuSub = m ? (cores ? cores + 'C · ' : '') + 'Load ' + (m.load1 || 0).toFixed(2) : 'No data';
+  const cpuSub = m ? (cores ? cores + 'C · ' : '') + 'Load ' + (hasMetric(m, 16) ? (m.load1 || 0).toFixed(2) : '—') : 'No data';
   const cpuTitle = (cores ? cores + ' logical CPU' + (cores === 1 ? '' : 's') + '; ' : '') + 'Load is the 1-minute system load average';
-  return metricHTML('CPU', m ? m.cpu_usage : null, cpuSub, cpuTitle)
+  return metricHTML('CPU', hasMetric(m, 1) ? m.cpu_usage : null, cpuSub, cpuTitle)
     + metricHTML('MEM', m && m.memory_total > 0 ? m.memory_used / m.memory_total * 100 : null,
-      m ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : 'No data')
+      hasMetric(m, 2) ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : 'No data')
     + metricHTML('DSK', m && m.disk_total > 0 ? m.disk_used / m.disk_total * 100 : null,
-      m ? formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total) : 'No data')
+      hasMetric(m, 4) ? formatBytes(m.disk_used) + ' / ' + formatBytes(m.disk_total) : 'No data')
     + trafficHTML(a.traffic, a.agent.monthly_traffic_limit);
 }
 
@@ -413,8 +486,8 @@ function cardNetworkHTML(a) {
   const traffic = a.traffic;
   const ready = traffic?.available && traffic?.has_data;
   return '<div class="net-rates" aria-label="Current network rates">'
-    + '<span class="net-down" title="Current download rate">↓ ' + formatCardSpeed(m?.network_down) + '</span>'
-    + '<span class="net-up" title="Current upload rate">↑ ' + formatCardSpeed(m?.network_up) + '</span></div>'
+    + '<span class="net-down" title="Current download rate">↓ ' + formatCardSpeed(hasMetric(m, 8) ? m.network_down : null) + '</span>'
+    + '<span class="net-up" title="Current upload rate">↑ ' + formatCardSpeed(hasMetric(m, 8) ? m.network_up : null) + '</span></div>'
     + '<div class="net-totals" aria-label="Monthly network usage">'
     + '<span class="net-down" title="Monthly download usage">↓ ' + (ready ? formatTrafficBytes(traffic.recv) : '—') + '</span>'
     + '<span class="net-up" title="Monthly upload usage">↑ ' + (ready ? formatTrafficBytes(traffic.sent) : '—') + '</span></div>';
@@ -434,8 +507,8 @@ function updateExpiryBadge(node, a) {
   node.insertAdjacentHTML('beforeend', expiryBadge(a));
 }
 
-function tcpingLayoutSignature(list) {
-  return JSON.stringify(list.map(a => [a.agent.id, a.tcpping_enabled,
+function dashboardLayoutSignature(list) {
+  return JSON.stringify(list.map(a => [a.agent.id, a.agent.hostname, a.agent.region, !!a._online, !!a.latest_metric, a.tcpping_enabled,
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 
@@ -468,11 +541,11 @@ function renderCard(a, isActive) {
 function renderListRow(a, idx, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
-  const cpu = m ? m.cpu_usage : null;
+  const cpu = hasMetric(m, 1) ? m.cpu_usage : null;
   const memPct = m && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
   const diskPct = m && m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : null;
-  const upSpeed = m ? formatSpeed(m.network_up) : '—';
-  const downSpeed = m ? formatSpeed(m.network_down) : '—';
+  const upSpeed = hasMetric(m, 8) ? formatSpeed(m.network_up) : '—';
+  const downSpeed = hasMetric(m, 8) ? formatSpeed(m.network_down) : '—';
   const uptime = m ? formatUptime(m.uptime) : '-';
   const seenTs = lastSeenMs(a);
   const region = a.agent.region;
@@ -531,10 +604,8 @@ function relativeTime(ts) {
 function toggleExpand(id) {
   if (expandedId === id) {
     expandedId = null;
-    destroyDetailCharts();
     renderAll();
   } else {
-    destroyDetailCharts();
     currentHistoryDay = null;
     expandedId = id;
     renderAll(true);
@@ -542,6 +613,8 @@ function toggleExpand(id) {
 }
 
 function destroyDetailCharts() {
+  detailRequest?.controller.abort();
+  detailRequest = null;
   Object.values(sparkCharts).forEach(c => { try { c.dispose(); } catch(e) {} });
   sparkCharts = {};
   if (tcppingChart) { try { tcppingChart.dispose(); } catch(e) {}; tcppingChart = null; }
@@ -566,6 +639,7 @@ function renderDetailContent(id) {
       + '<div class="spark-item"><div class="spark-header"><span class="label">Net In</span><span class="value" id="spark-netin-val">—</span></div><div id="spark-netin" class="spark-chart"></div></div>'
       + '<div class="spark-item"><div class="spark-header"><span class="label">Net Out</span><span class="value" id="spark-netout-val">—</span></div><div id="spark-netout" class="spark-chart"></div></div>'
     + '</div>'
+    + '<p class="detail-load-error" id="metrics-error-' + id + '" role="status" hidden></p>'
     + '<div class="tcpping-section" id="tcpping-section-' + id + '">'
       + '<div class="tcpping-header">'
         + '<div class="tcpping-header-left">'
@@ -584,6 +658,7 @@ function renderDetailContent(id) {
         + '</div>'
       + '</div>'
       + '<p class="tcpping-status" id="tcpping-status-' + id + '">' + escapeHtml(tcpingStatusText(agent)) + '</p>'
+      + '<p class="detail-load-error" id="tcpping-error-' + id + '" role="status" hidden></p>'
       + '<div class="tcpping-chart-wrap"><div id="tcpping-chart-' + id + '" class="tcpping-chart"></div><div id="tcpping-days-' + id + '" class="tcpping-day-nav"></div></div>'
       + '<div class="tcpping-stats" id="tcpping-stats-' + id + '">'
         + '<div id="tcpping-rows-' + id + '"></div>'
@@ -631,14 +706,47 @@ function openHistoricalDay(id, ts) {
   loadDetailData(id, 'day');
 }
 
-function loadDetailData(id, range) {
-  Promise.all([
-    fetchJSON(detailDataURL(id, 'metrics', range)),
-    fetchJSON(detailDataURL(id, 'tcpping', range)),
-  ]).then(([metrics, tcpping]) => {
-    renderSparklines(id, metrics);
-    renderTCPingChart(id, tcpping);
-  }).catch(err => console.error('loadDetailData:', err));
+async function loadDetailData(id, range) {
+  detailRequest?.controller.abort();
+  const request = { controller: new AbortController(), element: document.getElementById('detail-' + id) };
+  detailRequest = request;
+  if (!request.element) { detailRequest = null; return; }
+  const isCurrent = () => detailRequest === request && expandedId === Number(id)
+    && document.getElementById('detail-' + id) === request.element;
+  detailDayAlerts = new Map();
+  let pingResults;
+  await Promise.all(['metrics', 'tcpping'].map(async kind => {
+    let rendering = false;
+    try {
+      const rows = await fetchRows(detailDataURL(id, kind, range), { signal: request.controller.signal });
+      if (!isCurrent()) return;
+      rendering = true;
+      if (kind === 'metrics') renderSparklines(id, rows);
+      else { pingResults = rows; renderTCPingChart(id, rows); }
+      const errorEl = document.getElementById(kind + '-error-' + id);
+      if (errorEl) errorEl.hidden = true;
+    } catch (error) {
+      if (!isCurrent() || request.controller.signal.aborted) return;
+      console.error('Detail ' + kind + ' ' + (rendering ? 'render' : 'request') + ':', error);
+      const errorEl = document.getElementById(kind + '-error-' + id);
+      if (errorEl) {
+        const message = (kind === 'metrics' ? 'Metrics' : 'TCP Ping') + ' could not be refreshed ('
+          + (rendering ? 'display error' : refreshErrorText(error)) + ').';
+        errorEl.innerHTML = escapeHtml(message) + ' <button type="button" class="btn btn-ghost btn-sm" onclick="loadDetailData('
+          + Number(id) + ', currentMetricsRange)">Retry</button>';
+        errorEl.hidden = false;
+      }
+    }
+  }));
+  if (isCurrent()) {
+    // Both successful renderers may contribute alerts to the day navigator.
+    try {
+      const activeResults = activeTcppingResults(id, pingResults);
+      if (activeResults.length && tcppingChart) renderDayNav(id, activeResults, chartWindowForResults(activeResults));
+    } catch (error) {
+      console.error('Detail day navigation render:', error);
+    } finally { detailRequest = null; }
+  }
 }
 
 function localDayKey(ts) {
@@ -682,33 +790,42 @@ function sparkValueHTML(current, peak) {
 }
 
 function renderSparklines(id, metrics) {
-  if (!metrics || !metrics.length) return;
+  if (!metrics || !metrics.length) {
+    ['spark-cpu', 'spark-mem', 'spark-netin', 'spark-netout'].forEach(key => {
+      sparkCharts[key]?.dispose();
+      delete sparkCharts[key];
+      const value = document.getElementById(key + '-val');
+      if (value) value.textContent = '—';
+      const chart = document.getElementById(key);
+      if (chart) chart.innerHTML = '<div class="chart-empty">No data in this range</div>';
+    });
+    return;
+  }
 
-  const cpuData = metrics.map(m => [m.created_at * 1000, m.cpu_usage]);
+  const cpuData = metrics.map(m => [m.created_at * 1000, hasMetric(m, 1) ? m.cpu_usage : null]);
   const memData = metrics.map(m => {
-    const pctVal = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
+    const pctVal = hasMetric(m, 2) && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
     return [m.created_at * 1000, pctVal];
   });
-  const netInData = metrics.map(m => [m.created_at * 1000, m.network_down]);
-  const netOutData = metrics.map(m => [m.created_at * 1000, m.network_up]);
+  const netInData = metrics.map(m => [m.created_at * 1000, hasMetric(m, 8) ? m.network_down : null]);
+  const netOutData = metrics.map(m => [m.created_at * 1000, hasMetric(m, 8) ? m.network_up : null]);
 
-  const peak = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
-  const cpuPeak = peak(metrics.map(m => [m.created_at * 1000, m.cpu_peak || m.cpu_usage]));
+  const peak = arr => Math.max(0, ...arr.map(d => d[1]).filter(v => v != null));
+  const cpuPeak = peak(metrics.map(m => [m.created_at * 1000, hasMetric(m, 1) ? (m.cpu_peak ?? m.cpu_usage) : null]));
   const memPeak = peak(metrics.map((m, i) => [m.created_at * 1000, m.memory_peak_pct || memData[i][1]]));
-  const netInPeak = peak(metrics.map(m => [m.created_at * 1000, m.network_down_peak || m.network_down]));
-  const netOutPeak = peak(metrics.map(m => [m.created_at * 1000, m.network_up_peak || m.network_up]));
+  const netInPeak = peak(metrics.map(m => [m.created_at * 1000, hasMetric(m, 8) ? (m.network_down_peak ?? m.network_down) : null]));
+  const netOutPeak = peak(metrics.map(m => [m.created_at * 1000, hasMetric(m, 8) ? (m.network_up_peak ?? m.network_up) : null]));
 
-  document.getElementById('spark-cpu-val').innerHTML = cpuData.length ? sparkValueHTML(cpuData[cpuData.length - 1][1].toFixed(1) + '%', cpuPeak.toFixed(1) + '%') : '—';
-  document.getElementById('spark-mem-val').innerHTML = memData.length ? sparkValueHTML(memData[memData.length - 1][1].toFixed(1) + '%', memPeak.toFixed(1) + '%') : '—';
-  document.getElementById('spark-netin-val').innerHTML = netInData.length ? sparkValueHTML(formatSpeed(netInData[netInData.length - 1][1]) + '/s', formatSpeed(netInPeak)) : '—';
-  document.getElementById('spark-netout-val').innerHTML = netOutData.length ? sparkValueHTML(formatSpeed(netOutData[netOutData.length - 1][1]) + '/s', formatSpeed(netOutPeak)) : '—';
+  document.getElementById('spark-cpu-val').innerHTML = cpuData.at(-1)[1] != null ? sparkValueHTML(cpuData.at(-1)[1].toFixed(1) + '%', cpuPeak.toFixed(1) + '%') : '—';
+  document.getElementById('spark-mem-val').innerHTML = memData.at(-1)[1] != null ? sparkValueHTML(memData.at(-1)[1].toFixed(1) + '%', memPeak.toFixed(1) + '%') : '—';
+  document.getElementById('spark-netin-val').innerHTML = netInData.at(-1)[1] != null ? sparkValueHTML(formatSpeed(netInData.at(-1)[1]) + '/s', formatSpeed(netInPeak)) : '—';
+  document.getElementById('spark-netout-val').innerHTML = netOutData.at(-1)[1] != null ? sparkValueHTML(formatSpeed(netOutData.at(-1)[1]) + '/s', formatSpeed(netOutPeak)) : '—';
 
   const overview = overviewDays(currentMetricsRange);
-  if (overview) detailDayAlerts = new Map();
   const dailyAlerts = (field, averages, qualifies, severity) => {
     if (!overview) return [];
     const points = metrics.map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]]);
-    return dailyWorst(points, qualifies, severity, overview);
+    return dailyWorst(points.filter(p => p[2] != null), qualifies, severity, overview);
   };
   const cpuAlerts = dailyAlerts('cpu_peak', cpuData, p => p[1] >= 85, p => p[1]);
   const memAlerts = dailyAlerts('memory_peak_pct', memData, p => p[1] >= 85, p => p[1]);
@@ -743,8 +860,8 @@ function renderSparkline(elemId, data, isPercent) {
   const color = sparklineColor();
   const el = document.getElementById(elemId);
   if (!el) return;
-  if (sparkCharts[elemId]) { sparkCharts[elemId].dispose(); }
-  const chart = echarts.init(el);
+  if (!sparkCharts[elemId]) el.innerHTML = '';
+  const chart = sparkCharts[elemId] || echarts.init(el);
   chart.setOption({
     grid: { left: 4, right: 4, top: 2, bottom: 4 },
     xAxis: { type: 'time', show: false },
@@ -761,7 +878,7 @@ function renderSparkline(elemId, data, isPercent) {
         const d = new Date(p.data[0]);
         const dateStr = (d.getMonth() + 1) + '/' + String(d.getDate()).padStart(2, '0');
         const timeStr = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-        const valStr = isPercent ? p.data[1].toFixed(1) + '%'
+        const valStr = p.data[1] == null ? 'No data' : isPercent ? p.data[1].toFixed(1) + '%'
           : (p.data[1] >= 1000000 ? (p.data[1] / 1000000).toFixed(2) + 'M/s'
             : p.data[1] >= 1000 ? (p.data[1] / 1000).toFixed(1) + 'K/s'
             : p.data[1].toFixed(0) + '/s');
@@ -836,11 +953,11 @@ function renderTCPingChart(id, results) {
 
   const chartEl = document.getElementById('tcpping-chart-' + id);
   if (!chartEl) return;
-  if (tcppingChart) { try { tcppingChart.dispose(); } catch(e) {} }
+  if (!tcppingChart) chartEl.innerHTML = '';
 
   const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
   const chartWin = chartWindowForResults(results);
-  const chart = echarts.init(chartEl);
+  const chart = tcppingChart || echarts.init(chartEl);
   const overview = overviewDays(currentTcppingRange);
   let tcppingAlerts = [];
   if (overview) {
@@ -899,7 +1016,7 @@ function renderTCPingChart(id, results) {
       axisLabel: { fontSize: 10, margin: 0, formatter: v => v + 'ms' },
     },
     series,
-  });
+  }, { replaceMerge: ['series'] });
   chart.setOption(tcpingChartTheme());
   tcppingChart = chart;
 
@@ -1105,66 +1222,63 @@ function tcppingToggleLine(id, name) {
 function goHome() {
   expandedId = null;
   filterRegion = '';
-  destroyDetailCharts();
   renderAll();
   fullRefresh();
 }
 
 async function fullRefresh() {
+  return refreshDashboard(true);
+}
+
+async function softRefresh() {
+  return refreshDashboard(false);
+}
+
+async function refreshDashboard(forceRender) {
   if (refreshInFlight) return;
   refreshInFlight = true;
-  const wasExpanded = expandedId;
+  refreshServerInfo();
   if (!agents.length) setDashboardState('loading');
+  let rendering = false;
   try {
-    const [data, info] = await Promise.all([fetchJSON('/api/agents'), fetchJSON('/api/info')]);
+    const data = await fetchRows('/api/agents');
+    if (data.some(a => !a?.agent || !Number.isSafeInteger(a.agent.id))) {
+      const error = new Error('/api/agents: invalid node records');
+      error.kind = 'data';
+      throw error;
+    }
+    const previousLayout = dashboardLayoutSignature(agents);
     agents = data;
     agents.forEach(a => {
       const seen = lastSeenMs(a);
       a._online = !!seen && (Date.now() - seen < 120000);
     });
-    infoData = info;
+    rendering = true;
     renderInfoBar();
-    const version = document.getElementById('version-label');
-    if (version) {
-      // git-describe builds look like "v0.6.3-2-ga9ad000": show the clean
-      // tag, keep the full build string in the tooltip.
-      const v = String(info.version || '');
-      version.textContent = 'NEEDLE ' + (v.split('-')[0] || v);
-      version.title = v;
+    if (expandedId && !agents.some(a => a.agent.id === expandedId)) expandedId = null;
+    if (forceRender || dashboardNeedsRender || previousLayout !== dashboardLayoutSignature(agents)) renderAll();
+    else {
+      updateLiveSummaries(data);
+      if (expandedId) updateDetailCharts(expandedId);
     }
-    if (wasExpanded && !agents.find(a => a.agent.id === wasExpanded)) {
-      expandedId = null;
-    }
-    renderAll();
-    if (expandedId) updateDetailCharts(expandedId);
     lastRefreshAt = new Date();
+    dashboardNeedsRender = false;
     setDashboardState('ready');
-  } catch (err) {
-    console.error('fullRefresh:', err);
-    const stale = agents.length > 0;
+  } catch (error) {
+    if (rendering) dashboardNeedsRender = true;
+    console.error('Dashboard ' + (rendering ? 'render' : 'request') + ':', error);
     const suffix = lastRefreshAt ? ' Last updated ' + lastRefreshAt.toLocaleTimeString() + '.' : '';
-    setDashboardState(stale ? 'stale' : 'error', (stale ? 'Refresh failed; showing the last successful data.' : 'Dashboard data could not be loaded.') + suffix);
+    const message = rendering ? 'Dashboard display could not be updated. Please retry.'
+      : 'Node refresh failed (' + refreshErrorText(error) + ').'
+        + (lastRefreshAt ? ' Showing the last successful data.' : ' Please retry.');
+    setDashboardState(lastRefreshAt ? 'stale' : 'error', message + suffix);
   } finally {
     refreshInFlight = false;
   }
 }
 
-async function softRefresh() {
-  if (refreshInFlight) return;
-  refreshInFlight = true;
-  try {
-    const [data, info] = await Promise.all([fetchJSON('/api/agents'), fetchJSON('/api/info')]);
-    const previousLayout = tcpingLayoutSignature(agents);
-    agents = data;
-    agents.forEach(a => {
-      const seen = lastSeenMs(a);
-      a._online = !!seen && (Date.now() - seen < 120000);
-    });
-    infoData = info;
-    renderInfoBar();
-    if (previousLayout !== tcpingLayoutSignature(agents)) renderAll();
-
-    data.forEach(a => {
+function updateLiveSummaries(data) {
+  data.forEach(a => {
       const card = document.querySelector('[data-id="' + a.agent.id + '"]');
       if (!card) return;
       const m = a.latest_metric;
@@ -1178,7 +1292,6 @@ async function softRefresh() {
       const dot = card.querySelector('.status-dot');
       if (dot) {
         dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
-        dot.onclick = null;
       }
 
       const seenTs = lastSeenMs(a);
@@ -1195,13 +1308,13 @@ async function softRefresh() {
       }
 
       if (!m) return;
-      const cpu = m.cpu_usage;
-      const memPct = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
-      const diskPct = m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : 0;
+      const cpu = hasMetric(m, 1) ? m.cpu_usage : null;
+      const memPct = hasMetric(m, 2) && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
+      const diskPct = hasMetric(m, 4) && m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : null;
 
       const bars = card.querySelectorAll('.list-bar');
       if (bars.length >= 3) {
-        const upd = (i, v) => { const f = bars[i].querySelector('.metric-fill'); if (f) { f.style.width = v.toFixed(0) + '%'; f.className = 'metric-fill ' + metricColor(v); } const l = bars[i].querySelector('.list-bar-val'); if (l) l.textContent = pct(v); };
+        const upd = (i, v) => { const f = bars[i].querySelector('.metric-fill'); if (f) { f.style.width = (v == null ? 0 : v).toFixed(0) + '%'; f.className = 'metric-fill ' + metricColor(v); } const l = bars[i].querySelector('.list-bar-val'); if (l) l.textContent = pct(v); };
         upd(0, cpu); upd(1, memPct); upd(2, diskPct);
       }
       const ping = a.latest_tcpping?.[0];
@@ -1212,70 +1325,15 @@ async function softRefresh() {
         if (loss) { loss.textContent = ping.success ? '0%' : '100%'; loss.style.color = valCss(pingLossColor(ping.success ? 0 : 100)); }
       }
       const netEl = card.querySelector('.list-net');
-      if (netEl) netEl.textContent = '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up);
+      if (netEl) netEl.textContent = hasMetric(m, 8) ? '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up) : '\u2193— \u2191—';
       const uptimeEl = card.querySelector('.list-uptime');
       if (uptimeEl) uptimeEl.textContent = formatUptime(m.uptime);
     });
-    if (expandedId) updateDetailCharts(expandedId);
-    lastRefreshAt = new Date();
-    setDashboardState('ready');
-  } catch (err) {
-    console.error('softRefresh:', err);
-    const suffix = lastRefreshAt ? ' Last updated ' + lastRefreshAt.toLocaleTimeString() + '.' : '';
-    setDashboardState(agents.length ? 'stale' : 'error', 'Refresh failed; showing the last successful data.' + suffix);
-  } finally {
-    refreshInFlight = false;
-  }
 }
 
 function updateDetailCharts(id) {
-  if (currentHistoryDay) return;
-  const metricsRange = currentMetricsRange || '24h';
-  const tcppingRange = currentTcppingRange || '24h';
-  fetch('/api/agents/' + id + '/metrics?range=' + metricsRange).then(r => r.json()).then(metrics => {
-    if (!metrics || !metrics.length) return;
-    const cpuData = metrics.map(m => [m.created_at * 1000, m.cpu_usage]);
-    const memData = metrics.map(m => {
-      const pctVal = m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : 0;
-      return [m.created_at * 1000, pctVal];
-    });
-    const netInData = metrics.map(m => [m.created_at * 1000, m.network_down]);
-    const netOutData = metrics.map(m => [m.created_at * 1000, m.network_up]);
-
-    const peak2 = arr => arr.length ? Math.max(...arr.map(d => d[1])) : 0;
-    document.getElementById('spark-cpu-val').innerHTML = cpuData.length ? sparkValueHTML(cpuData[cpuData.length - 1][1].toFixed(1) + '%', peak2(cpuData).toFixed(1) + '%') : '—';
-    document.getElementById('spark-mem-val').innerHTML = memData.length ? sparkValueHTML(memData[memData.length - 1][1].toFixed(1) + '%', peak2(memData).toFixed(1) + '%') : '—';
-    document.getElementById('spark-netin-val').innerHTML = netInData.length ? sparkValueHTML(formatSpeed(netInData[netInData.length - 1][1]) + '/s', formatSpeed(peak2(netInData))) : '—';
-    document.getElementById('spark-netout-val').innerHTML = netOutData.length ? sparkValueHTML(formatSpeed(netOutData[netOutData.length - 1][1]) + '/s', formatSpeed(peak2(netOutData))) : '—';
-
-    const configs = [
-      ['spark-cpu', cpuData], ['spark-mem', memData],
-      ['spark-netin', netInData], ['spark-netout', netOutData],
-    ];
-    configs.forEach(([elemId, data]) => {
-      const chart = sparkCharts[elemId];
-      if (chart) chart.setOption({ series: [{ data }] });
-    });
-  }).catch(() => {});
-
-  fetch('/api/agents/' + id + '/tcpping?range=' + tcppingRange).then(r => r.json()).then(results => {
-    results = activeTcppingResults(id, results);
-    if (!results || !results.length || !tcppingChart) { renderTCPingChart(id, results); return; }
-    const names = sortTcppingNames([...new Set(results.map(r => r.name))]);
-    const series = names.map((name) => {
-    const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
-    return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
-    });
-    if (tcppingChart) {
-      const win = chartWindowForResults(results);
-      tcppingChart.setOption({ legend: { data: names }, xAxis: { min: win[0], max: win[1] }, series }, { replaceMerge: ['series'] });
-      renderDayNav(id, results, win);
-    }
-
-    const rowsEl = document.getElementById('tcpping-rows-' + id);
-    if (rowsEl) rowsEl.innerHTML = tcppingStatsHTML(id, results, names);
-    applyTcppingSelections(id, names);
-  }).catch(() => {});
+  if (currentHistoryDay || detailRequest) return;
+  return loadDetailData(id, currentMetricsRange || '24h');
 }
 
 let themeMode = localStorage.getItem('themeMode') || 'light';

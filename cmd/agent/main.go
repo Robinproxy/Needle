@@ -48,9 +48,26 @@ func (c Config) monthlyTrafficLimitBytes() (int64, error) {
 	return int64(math.Round(v * 1_000_000_000)), nil
 }
 
+func (c Config) expiryUnix() (*int64, error) {
+	if c.ExpiresAt == "" || c.BillingPeriod == "forever" {
+		return nil, nil
+	}
+	date, err := time.Parse("2006-01-02", c.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	// Preserve the existing wire representation of configured dates.
+	unix := date.Add(12 * time.Hour).Unix()
+	return &unix, nil
+}
+
 func main() {
 	unregister := flag.Bool("unregister", false, "unregister this agent from server and exit")
+	checkConfig := flag.Bool("check-config", false, "validate configuration without collecting metrics or contacting the server")
 	flag.Parse()
+	if *unregister && *checkConfig {
+		log.Fatal("choose either -unregister or -check-config")
+	}
 
 	cfgPath := "agent.yaml"
 	if args := flag.Args(); len(args) > 0 {
@@ -77,6 +94,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid server configuration: %v", err)
 	}
+	if *checkConfig {
+		if strings.TrimSpace(cfg.Token) == "" {
+			log.Fatal("Agent token is required")
+		}
+		if err := cfg.validateProbesAndInterval(); err != nil {
+			log.Fatal(err)
+		}
+		if _, err := cfg.monthlyTrafficLimitBytes(); err != nil {
+			log.Fatal(err)
+		}
+		if _, err := cfg.expiryUnix(); err != nil {
+			log.Fatalf("invalid expiry date: %v", err)
+		}
+		fmt.Println("Configuration is valid.")
+		return
+	}
 	if cfg.AllowPlainHTTP && strings.HasPrefix(serverURL, "http://") {
 		log.Printf("SECURITY WARNING: allow_plain_http is enabled; the Agent token may be transmitted without encryption to %s", serverURL)
 	}
@@ -96,20 +129,15 @@ func main() {
 		log.Println("unregistered successfully")
 		return
 	}
+	if err := cfg.validateProbesAndInterval(); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("Needle Agent - server: %s, interval: %ds", serverURL, cfg.Interval)
 
-	var expiresAtUnix *int64
-	if cfg.ExpiresAt != "" && cfg.BillingPeriod != "forever" {
-		t, err := time.Parse("2006-01-02", cfg.ExpiresAt)
-		if err != nil {
-			log.Printf("WARNING: invalid expires_at %q (expected YYYY-MM-DD); billing period and due date will not be reported", cfg.ExpiresAt)
-		} else {
-			// Anchor at noon UTC so the calendar day survives conversion to
-			// the server's timezone anywhere from UTC-11 to UTC+12.
-			unix := time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, time.UTC).Unix()
-			expiresAtUnix = &unix
-		}
+	expiresAtUnix, err := cfg.expiryUnix()
+	if err != nil {
+		log.Printf("WARNING: invalid expires_at %q (expected YYYY-MM-DD); due date will not be reported", cfg.ExpiresAt)
 	}
 
 	monthlyLimit, err := cfg.monthlyTrafficLimitBytes()
@@ -117,6 +145,12 @@ func main() {
 		log.Fatalf("invalid traffic configuration: %v", err)
 	}
 	netCollector := collector.NewNetworkCollector(cfg.Interfaces)
+	collectors := reportCollectors{
+		cpu: collector.CollectCPU, memory: collector.CollectMemory,
+		disk: collector.CollectDisk, network: netCollector.Collect,
+		load: collector.CollectLoad, uptime: collector.CollectUptime,
+		tcpping: collector.TCPing,
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -138,52 +172,12 @@ func main() {
 			return
 		}
 
-		cpu, err := collector.CollectCPU()
-		if err != nil {
-			log.Printf("collect cpu: %v", err)
-			return
-		}
-		mem, err := collector.CollectMemory()
-		if err != nil {
-			log.Printf("collect memory: %v", err)
-			return
-		}
-		diskStat, err := collector.CollectDisk()
-		if err != nil {
-			log.Printf("collect disk: %v", err)
-			return
-		}
-		netStat, err := netCollector.Collect()
-		if err != nil {
-			log.Printf("collect network: %v", err)
-			return
-		}
-		load, err := collector.CollectLoad()
-		if err != nil {
-			log.Printf("collect load: %v", err)
-			return
-		}
-		uptime, err := collector.CollectUptime()
-		if err != nil {
-			log.Printf("collect uptime: %v", err)
-			return
-		}
-		tcpping := collector.TCPing(cfg.TCPing)
-
-		data := &agentpkg.ReportData{
-			Hostname:            hostname,
-			Region:              cfg.Region,
-			ExpiresAt:           expiresAtUnix,
-			BillingPeriod:       cfg.BillingPeriod,
-			MonthlyTrafficLimit: monthlyLimit,
-			CPU:                 cpu,
-			Memory:              mem,
-			Disk:                diskStat,
-			Network:             netStat,
-			Load:                load,
-			Uptime:              uptime,
-			TCPing:              tcpping,
-		}
+		data := collectReport(collectors, cfg.TCPing, log.Printf)
+		data.Hostname = hostname
+		data.Region = cfg.Region
+		data.ExpiresAt = expiresAtUnix
+		data.BillingPeriod = cfg.BillingPeriod
+		data.MonthlyTrafficLimit = monthlyLimit
 
 		if err := reporter.Send(ctx, data); err != nil {
 			log.Printf("report failed: %v", err)

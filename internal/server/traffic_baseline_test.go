@@ -177,13 +177,12 @@ func TestTrafficUsageSurvivesCounterReset(t *testing.T) {
 	report := func(at time.Time, sent, recv, uptime int64) {
 		t.Helper()
 		_, err := store.SaveReport(&ReportWrite{
-			Hostname:         "node-1",
-			Region:           "SG",
-			ExpiresAt:        &expiresAt,
-			BillingPeriod:    "1m",
-			Metric:           &MetricRow{TotalSent: sent, TotalRecv: recv, Uptime: uptime},
-			CreatedAt:        at.Unix(),
-			BaselineBoundary: int64Ptr(boundary.Unix()),
+			Hostname:      "node-1",
+			Region:        "SG",
+			ExpiresAt:     &expiresAt,
+			BillingPeriod: "1m",
+			Metric:        &MetricRow{TotalSent: sent, TotalRecv: recv, Uptime: uptime},
+			CreatedAt:     at.Unix(),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -214,13 +213,12 @@ func TestTrafficAccumulatorUpgradeKeepsCurrentUsage(t *testing.T) {
 	assertUsage(t, store, agentID, 500, 700)
 
 	_, err := store.SaveReport(&ReportWrite{
-		Hostname:         "node-1",
-		Region:           "SG",
-		ExpiresAt:        &expiresAt,
-		BillingPeriod:    "1m",
-		Metric:           &MetricRow{TotalSent: 800, TotalRecv: 1200},
-		CreatedAt:        now.Unix(),
-		BaselineBoundary: int64Ptr(boundary.Unix()),
+		Hostname:      "node-1",
+		Region:        "SG",
+		ExpiresAt:     &expiresAt,
+		BillingPeriod: "1m",
+		Metric:        &MetricRow{TotalSent: 800, TotalRecv: 1200},
+		CreatedAt:     now.Unix(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -244,13 +242,12 @@ func TestTrafficAccumulatorResetsAtDueDay(t *testing.T) {
 		{now, 600, 900},
 	} {
 		_, err := store.SaveReport(&ReportWrite{
-			Hostname:         "node-1",
-			Region:           "SG",
-			ExpiresAt:        &expiresAt,
-			BillingPeriod:    "1m",
-			Metric:           &MetricRow{TotalSent: sample.sent, TotalRecv: sample.recv},
-			CreatedAt:        sample.at.Unix(),
-			BaselineBoundary: int64Ptr(julyBoundary.Unix()),
+			Hostname:      "node-1",
+			Region:        "SG",
+			ExpiresAt:     &expiresAt,
+			BillingPeriod: "1m",
+			Metric:        &MetricRow{TotalSent: sample.sent, TotalRecv: sample.recv},
+			CreatedAt:     sample.at.Unix(),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -260,7 +257,6 @@ func TestTrafficAccumulatorResetsAtDueDay(t *testing.T) {
 
 	later := time.Date(2026, 8, 6, 12, 0, 0, 0, time.Local)
 	store.now = func() time.Time { return later }
-	augustBoundary := monthlyBoundary(5, later)
 	for _, sample := range []struct {
 		sent, recv int64
 	}{
@@ -268,13 +264,12 @@ func TestTrafficAccumulatorResetsAtDueDay(t *testing.T) {
 		{7300, 8400},
 	} {
 		_, err := store.SaveReport(&ReportWrite{
-			Hostname:         "node-1",
-			Region:           "SG",
-			ExpiresAt:        &expiresAt,
-			BillingPeriod:    "1m",
-			Metric:           &MetricRow{TotalSent: sample.sent, TotalRecv: sample.recv},
-			CreatedAt:        later.Unix(),
-			BaselineBoundary: int64Ptr(augustBoundary.Unix()),
+			Hostname:      "node-1",
+			Region:        "SG",
+			ExpiresAt:     &expiresAt,
+			BillingPeriod: "1m",
+			Metric:        &MetricRow{TotalSent: sample.sent, TotalRecv: sample.recv},
+			CreatedAt:     later.Unix(),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -282,8 +277,6 @@ func TestTrafficAccumulatorResetsAtDueDay(t *testing.T) {
 	}
 	assertUsage(t, store, agentID, 300, 400)
 }
-
-func int64Ptr(v int64) *int64 { return &v }
 
 func TestDeleteAgentRemovesBaselines(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.Local)
