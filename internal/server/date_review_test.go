@@ -14,18 +14,23 @@ func TestAgentDateWireEncodingUsesLocalCalendarDate(t *testing.T) {
 		for _, hour := range []int{0, 12} {
 			expiry := time.Date(2026, 11, 6, hour, 0, 0, 0, time.UTC).Unix()
 			now := time.Date(2026, 11, 5, 23, 59, 0, 0, loc)
-			days, date := calcNextReset(expiry, "1m", now)
+			days, date := calcRenewalDue(expiry, "1m", now)
 			if days != 1 || date != "2026-11-06" {
 				t.Fatalf("%s hour=%d: due %d/%s", loc, hour, days, date)
 			}
 			now = now.Add(time.Minute)
-			days, date = calcNextReset(expiry, "1m", now)
-			if days != 30 || date != "2026-12-06" {
-				t.Fatalf("%s hour=%d: due did not roll over at midnight: %d/%s", loc, hour, days, date)
+			days, date = calcRenewalDue(expiry, "1m", now)
+			if days != 0 || date != "2026-11-06" {
+				t.Fatalf("%s hour=%d: renewal day must remain due today: %d/%s", loc, hour, days, date)
 			}
 			day, ok := trafficResetDay("1m", &expiry)
 			if !ok || day != 6 || monthlyBoundary(day, now).Unix() != now.Unix() {
 				t.Fatalf("%s hour=%d: traffic and due day disagree", loc, hour)
+			}
+			now = now.AddDate(0, 0, 1)
+			days, date = calcRenewalDue(expiry, "1m", now)
+			if days != 29 || date != "2026-12-06" {
+				t.Fatalf("%s hour=%d: next-day monthly renewal did not advance: %d/%s", loc, hour, days, date)
 			}
 		}
 	}

@@ -221,11 +221,11 @@ sudo systemctl status needle-agent --no-pager
 sudo journalctl -u needle-agent -n 100 --no-pager
 sudo journalctl -u needle-agent -f
 
-# Interactive upgrade: keep existing config (default) or reconfigure TCP Ping and monthly allowance
+# Interactive upgrade: keep existing config (default) or reconfigure probes, allowance, and optional billing
 sudo bash /tmp/needle-agent.sh upgrade
 # Skip the configuration question
 sudo bash /tmp/needle-agent.sh upgrade --keep-config
-# Reselect TCP Ping and monthly allowance (requires a terminal)
+# Reselect probes, allowance, and optional billing (requires a terminal)
 sudo bash /tmp/needle-agent.sh upgrade --reconfigure
 
 sudo systemctl restart needle-agent
@@ -284,10 +284,10 @@ wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinprox
 sh /tmp/needle-agent-openwrt.sh status
 logread -e needle-agent
 
-# Interactive upgrade: keep existing config (default) or reconfigure TCP Ping and monthly allowance
+# Interactive upgrade: keep existing config (default) or reconfigure probes, allowance, and optional billing
 sh /tmp/needle-agent-openwrt.sh upgrade
 sh /tmp/needle-agent-openwrt.sh upgrade --keep-config
-# Reselect TCP Ping and monthly allowance; preserve token and identity
+# Reselect TCP Ping, allowance, and optional billing settings; preserve token and identity
 sh /tmp/needle-agent-openwrt.sh upgrade --reconfigure
 # Pin this release if needed
 sh /tmp/needle-agent-openwrt.sh upgrade --version v0.7.0
@@ -472,6 +472,8 @@ hostname: ""
 server: "https://needle.example.com"
 token: "replace-with-unique-agent-token"
 region: SG
+billing_currency: "USD"
+billing_amount: "" # Entire billing period; "0" = free, "" = not configured
 billing_period: "forever"
 expires_at: ""
 monthly_traffic_limit_gb: 1000 # 1000 decimal GB = 1 TB; 0 = no limit
@@ -489,8 +491,10 @@ tcpping:
 | `server` | Server URL; use the public HTTPS address |
 | `token` | Unique allowed token for this Agent; do not reuse across nodes |
 | `region` | Region code shown in the dashboard |
-| `billing_period` | `1m`, `3m`, `6m`, `12m`, or `forever`; empty leaves the billing period unset |
-| `expires_at` | Renewal date in `YYYY-MM-DD`; empty for `forever` |
+| `billing_currency` | Three-letter currency code, e.g. `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`; no exchange-rate conversion |
+| `billing_amount` | Exact decimal amount for the entire billing period, not a monthly equivalent; quote it in YAML. `"0"` means free, `""` means not configured; up to 12 integer and 6 fractional digits |
+| `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves the billing period unset |
+| `expires_at` | Actual next renewal / top-up date in `YYYY-MM-DD`, independent of when you bought or acquired the node; empty for `forever` |
 | `monthly_traffic_limit_gb` | Monthly upload + download allowance in decimal GB; `1000` = 1 TB, `0` or omitted displays ♾️; display only, does not stop traffic; Server and Agent v0.7.0+ |
 | `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
 | `interfaces` | Exact NIC whitelist; omitted or empty uses the virtual-interface exclusion filter |
@@ -498,7 +502,9 @@ tcpping:
 | `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
 | `tcpping` | List of named TCP targets in `host:port` format |
 
-Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
+The installer asks separately for currency, the amount for the entire billing period, the billing period, and the actual next renewal date. It does not infer the date from today or the original purchase date, so a transferred annual node can retain its existing renewal date. `forever` skips the date question; free service and unlimited monthly traffic are independent settings. Billing metadata is reported to the Server and retained in its database/API. The card footer shows the amount with its billing-period suffix and the next scheduled renewal date. Zero amounts display `Free`; missing amounts display `Not set`. Reports from Agents that omit billing cost preserve the previously saved cost. Upgrade the Server before using the new Agent billing fields and `24m`/`36m` periods.
+
+Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, twelve, twenty-four, or thirty-six months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The configured `expires_at` date anchors the payment schedule. The countdown shows `Due today` throughout a renewal day; on the next day, the displayed date advances by the billing period until it is current or future. Every candidate retains the original day, clamped to the end of shorter months, so a day-31 schedule returns to day 31 after February. The stored anchor is unchanged, and monthly traffic still resets independently. This is a scheduled payment reminder, not confirmation of payment or service status. Update the configuration and restart the Agent only when the schedule changes.
 
 Date-only settings retain their configured calendar date in the Server timezone, including the UTC-noon encoding sent by existing Agents and UTC-midnight date values. Renewal days count calendar days, including across daylight-saving changes; day 29–31 resets clamp to shorter months. When upgrading from the earlier UTC/local-date behavior, an existing active traffic cycle keeps its accumulated usage until the next corrected local reset. Renewing the date or changing the payment period preserves that transition when the monthly reset day stays the same. The original baseline remains available; restarting the Server does not repeat the transition. Keep the Server timezone stable.
 
@@ -524,9 +530,9 @@ The Linux installer offers these TCP Ping choices starting in v0.7.0, with no au
 
 Custom targets require unique names and `host:port` addresses; bracket literal IPv6 addresses, for example `[2001:db8::1]:443`. Up to 32 targets are supported. Choose according to the node's usable outbound connectivity, including NAT or WARP routes.
 
-The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping and monthly allowance**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance); the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600.
+The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping, monthly allowance, and optional billing settings**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance). The final billing question defaults to **No**, preserving existing currency, amount, period, and renewal date. Choosing **Yes** replaces all four billing fields through separate prompts; the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600.
 
-Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance prompt. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
+Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance and optional billing prompts. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
 
 ```yaml
 tcpping: []
@@ -555,6 +561,8 @@ hostname: "home-router"
 server: "https://needle.example.com"
 token: "replace-with-unique-agent-token"
 region: CN
+billing_currency: "USD"
+billing_amount: "" # Entire billing period; "0" = free, "" = not configured
 billing_period: "forever"
 expires_at: ""
 monthly_traffic_limit_gb: 1000 # 1000 decimal GB = 1 TB; 0 = no limit
@@ -573,8 +581,10 @@ tcpping:
 | `server` | Server URL; use the public HTTPS address |
 | `token` | Unique allowed token for this Agent; do not reuse across nodes |
 | `region` | Region code shown in the dashboard |
-| `billing_period` | `1m`, `3m`, `6m`, `12m`, or `forever`; empty leaves the billing period unset |
-| `expires_at` | Renewal date in `YYYY-MM-DD`; empty for `forever` |
+| `billing_currency` | Three-letter currency code, e.g. `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`; no exchange-rate conversion |
+| `billing_amount` | Exact decimal amount for the entire billing period, not a monthly equivalent; quote it in YAML. `"0"` means free, `""` means not configured; up to 12 integer and 6 fractional digits |
+| `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves the billing period unset |
+| `expires_at` | Actual next renewal / top-up date in `YYYY-MM-DD`, independent of when you bought or acquired the node; empty for `forever` |
 | `monthly_traffic_limit_gb` | Monthly upload + download allowance in decimal GB; `1000` = 1 TB, `0` or omitted displays ♾️; display only, does not stop traffic; Server and Agent v0.7.0+ |
 | `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
 | `interfaces` | Exact NIC whitelist; explicitly select the actual WAN device, such as `pppoe-wan` or `eth1`, to avoid counting LAN/WAN traffic twice |
@@ -582,7 +592,9 @@ tcpping:
 | `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
 | `tcpping` | List of named TCP targets in `host:port` format |
 
-Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, or twelve months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The countdown does not disable an Agent when a date is reached.
+The installer asks separately for currency, the amount for the entire billing period, the billing period, and the actual next renewal date. It does not infer the date from today or the original purchase date, so a transferred annual node can retain its existing renewal date. `forever` skips the date question; free service and unlimited monthly traffic are independent settings. Billing metadata is reported to the Server and retained in its database/API. The card footer shows the amount with its billing-period suffix and the next scheduled renewal date. Zero amounts display `Free`; missing amounts display `Not set`. Reports from Agents that omit billing cost preserve the previously saved cost. Upgrade the Server before using the new Agent billing fields and `24m`/`36m` periods.
+
+Finite periods control the renewal countdown. Monthly traffic resets on the day of month in `expires_at`, regardless of whether the billing period is one, three, six, twelve, twenty-four, or thirty-six months. `forever` displays ♾️ in the due-date position, ignores any expiry date, and resets traffic on the first of each month in the Server timezone. Server v0.6.4+ is required for `forever`. Without an expiry date or `forever`, monthly traffic is unavailable. The configured `expires_at` date anchors the payment schedule. The countdown shows `Due today` throughout a renewal day; on the next day, the displayed date advances by the billing period until it is current or future. Every candidate retains the original day, clamped to the end of shorter months, so a day-31 schedule returns to day 31 after February. The stored anchor is unchanged, and monthly traffic still resets independently. This is a scheduled payment reminder, not confirmation of payment or service status. Update the configuration and restart the Agent only when the schedule changes.
 
 Date-only settings retain their configured calendar date in the Server timezone, including the UTC-noon encoding sent by existing Agents and UTC-midnight date values. Renewal days count calendar days, including across daylight-saving changes; day 29–31 resets clamp to shorter months. When upgrading from the earlier UTC/local-date behavior, an existing active traffic cycle keeps its accumulated usage until the next corrected local reset. Renewing the date or changing the payment period preserves that transition when the monthly reset day stays the same. The original baseline remains available; restarting the Server does not repeat the transition. Keep the Server timezone stable.
 
@@ -610,9 +622,9 @@ The OpenWrt installer recommends WAN's `l3_device` when available. Multiple WAN 
 
 Custom targets require unique names and `host:port` addresses; bracket literal IPv6 addresses, for example `[2001:db8::1]:443`. Up to 32 targets are supported. Choose according to the node's usable outbound connectivity, including NAT or WARP routes.
 
-The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping and monthly allowance**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance); the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600. OpenWrt installation failures restore the original configuration along with the old binary and service.
+The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping, monthly allowance, and optional billing settings**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance). The final billing question defaults to **No**, preserving existing currency, amount, period, and renewal date. Choosing **Yes** replaces all four billing fields through separate prompts; the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600. OpenWrt installation failures restore the original configuration along with the old binary and service.
 
-Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance prompt. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
+Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance and optional billing prompts. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
 
 ```yaml
 tcpping: []
@@ -636,13 +648,13 @@ Keep the database, environment files, configurations, and tokens out of source c
 <details>
 <summary><strong>Node cards and live probe results</strong></summary>
 
-The card header shows online status, hostname, region, uptime, and the renewal countdown; permanent nodes show ♾️ for expiry.
+The card header shows online status, hostname, region, uptime, and the renewal countdown; permanent nodes show ♾️ for expiry. Cards use compact spacing while preserving font sizes, all metrics, dividers, and aligned probe areas for enabled and disabled nodes. The countdown has no Due-date hover tooltip. A footer below the probes shows the billing cost on the left and the next scheduled renewal date on the right. Amounts use the configured currency and period (`/mo`, `/3mo`, `/6mo`, `/yr`, `/2yr`, `/3yr`, or ` · Lifetime`); free service displays `Free`, unconfigured cost/date displays `Not set`, and permanent dates display ♾️. The date and countdown advance automatically by the configured billing period after a renewal day has passed; there is no overdue-day counter. The countdown shows `Due today` on the renewal day itself.
 
 | Card area | Display |
 | --- | --- |
 | CPU | Utilization, logical core count (`4C` = four logical CPUs / vCPUs), and the one-minute load average (`Load 0.14`, not 14% CPU utilization) |
 | MEM / DSK | Utilization bars and used / total capacity |
-| TRF | Combined monthly upload + download, allowance, and usage percentage; for example, `396 GB / 1 TB` and `39.6%`. An unlimited allowance displays ♾️ and no percentage |
+| TRF | Combined monthly upload + download, allowance, and usage percentage; for example, `396 GB / 1 TB` and `39.6%`. An unlimited allowance displays ♾️ and actual usage such as `164 GB used`, with no percentage |
 | Network, left | Current download and upload rates in bytes per second |
 | Network, right | Separate monthly download and upload totals, aligned with their current rates |
 | Probes | Currently enabled targets, ordered CM / CU / CT, with v4 fixed on the left and v6 on the right; other custom targets appear below |
@@ -656,14 +668,16 @@ The dashboard refreshes every 30 seconds. Detail chart line selection, Show/Hide
 </details>
 
 <details>
-<summary><strong>Upgrading to v0.7.0</strong></summary>
+<summary><strong>Upgrading to v0.7.4</strong></summary>
 
 1. Upgrade the Server using its Docker or binary section above. SQLite columns are migrated automatically and existing history is retained.
 2. Download the latest Agent installer for each machine and run `upgrade` from an interactive terminal.
-3. Choose **Keep existing configuration** (default) to preserve the file unchanged, or **Reconfigure TCP Ping and monthly allowance** to select the desired probes and optional allowance. Press Enter at the allowance prompt to retain its current value; enter `0` to remove a limit.
+3. Choose **Keep existing configuration** (default) to preserve the file unchanged, or **Reconfigure TCP Ping, monthly allowance, and optional billing settings** to select the desired probes and optional allowance. Press Enter at the allowance prompt to retain its current value; enter `0` to remove a limit.
 4. Existing tokens, hostnames, Server URLs, and interfaces are preserved. No token registration is needed again. Restart after manual YAML edits.
 
 Non-interactive upgrades keep the original configuration. Use `upgrade --keep-config` for an explicit unchanged configuration, or `upgrade --reconfigure` to enter the configuration flow directly (requires a terminal). Upgrading does not automatically change an existing six-target configuration to IPv4-only; choose a new mode explicitly if needed.
+
+If probes, traffic allowance, period, and renewal date are already correct, use `upgrade --keep-config`, then add only `billing_currency` and `billing_amount` to the existing YAML and restart the Agent. No renewal date re-entry or token registration is needed. For example, `billing_currency: "USD"` and `billing_amount: "50.00"` with an existing `billing_period: "12m"` means USD 50 per year. The card projects the next scheduled renewal from the existing `expires_at`; monthly traffic continues to reset on that date's day of month, independently of the payment period. Upgrade the Server first so it can accept billing cost and the new two-/three-year periods.
 
 </details>
 

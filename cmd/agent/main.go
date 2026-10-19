@@ -15,11 +15,14 @@ import (
 
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
+	"needle/internal/billing"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
+	BillingCurrency       string                   `yaml:"billing_currency"`
+	BillingAmount         *string                  `yaml:"billing_amount"`
 	MonthlyTrafficLimitGB float64                  `yaml:"monthly_traffic_limit_gb"`
 	Hostname              string                   `yaml:"hostname"`
 	Server                string                   `yaml:"server"`
@@ -33,6 +36,27 @@ type Config struct {
 	Insecure              *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
 	Interfaces            []string                 `yaml:"interfaces"`
 	TCPing                []collector.TCPingTarget `yaml:"tcpping"`
+}
+
+func (c Config) billingCost() (*billing.Cost, error) {
+	if c.BillingAmount == nil && c.BillingCurrency == "" {
+		return nil, nil
+	}
+	cost := billing.Cost{Currency: c.BillingCurrency}
+	if cost.Currency == "" {
+		cost.Currency = "USD"
+	}
+	if c.BillingAmount != nil {
+		cost.Amount = *c.BillingAmount
+	}
+	cost, err := cost.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	if cost.Amount != "" && c.BillingPeriod == "" {
+		return nil, fmt.Errorf("billing_period is required when billing_amount is configured")
+	}
+	return &cost, nil
 }
 
 func (c Config) effectiveTLSSkipVerify() bool {
@@ -107,6 +131,9 @@ func main() {
 		if _, err := cfg.expiryUnix(); err != nil {
 			log.Fatalf("invalid expiry date: %v", err)
 		}
+		if _, err := cfg.billingCost(); err != nil {
+			log.Fatal(err)
+		}
 		fmt.Println("Configuration is valid.")
 		return
 	}
@@ -137,12 +164,16 @@ func main() {
 
 	expiresAtUnix, err := cfg.expiryUnix()
 	if err != nil {
-		log.Printf("WARNING: invalid expires_at %q (expected YYYY-MM-DD); due date will not be reported", cfg.ExpiresAt)
+		log.Fatalf("invalid expires_at %q (expected YYYY-MM-DD): %v", cfg.ExpiresAt, err)
 	}
 
 	monthlyLimit, err := cfg.monthlyTrafficLimitBytes()
 	if err != nil {
 		log.Fatalf("invalid traffic configuration: %v", err)
+	}
+	billingCost, err := cfg.billingCost()
+	if err != nil {
+		log.Fatal(err)
 	}
 	netCollector := collector.NewNetworkCollector(cfg.Interfaces)
 	collectors := reportCollectors{
@@ -178,6 +209,7 @@ func main() {
 		data.ExpiresAt = expiresAtUnix
 		data.BillingPeriod = cfg.BillingPeriod
 		data.MonthlyTrafficLimit = monthlyLimit
+		data.BillingCost = billingCost
 
 		if err := reporter.Send(ctx, data); err != nil {
 			log.Printf("report failed: %v", err)

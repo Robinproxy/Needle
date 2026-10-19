@@ -327,6 +327,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	write := &ReportWrite{
+		BillingCost:         req.BillingCost,
 		Hostname:            req.Hostname,
 		Region:              sanitizeRegion(req.Region),
 		ExpiresAt:           req.ExpiresAt,
@@ -460,7 +461,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		expiryDays, expiryDate := 0, ""
 		if a.ExpiresAt != nil && a.BillingPeriod != "" {
-			expiryDays, expiryDate = calcNextReset(*a.ExpiresAt, a.BillingPeriod, now)
+			expiryDays, expiryDate = calcRenewalDue(*a.ExpiresAt, a.BillingPeriod, now)
 		}
 		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, TCPingEnabled: len(t) > 0, Traffic: traffic, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
 	}

@@ -335,7 +335,7 @@ func TestPurgeRemovesStaleBaselines(t *testing.T) {
 	}
 }
 
-func TestCalcNextReset(t *testing.T) {
+func TestCalcRenewalDue(t *testing.T) {
 	loc := time.Local
 	date := func(y int, m time.Month, d int) time.Time {
 		return time.Date(y, m, d, 0, 0, 0, 0, loc)
@@ -351,39 +351,45 @@ func TestCalcNextReset(t *testing.T) {
 	}{
 		{"future annual anchor counts to renewal", date(2027, 2, 15), "12m", now, 204, "2027-02-15"},
 		{"future monthly anchor", date(2026, 8, 23), "1m", now, 28, "2026-08-23"},
-		{"lapsed day-31 monthly stays on month end", date(2026, 1, 31), "1m", now, 5, "2026-07-31"},
-		{"lapsed day-31 quarterly clamps to feb", date(2025, 8, 31), "3m",
+		{"lapsed monthly stays on original month end", date(2026, 1, 31), "1m", now, 5, "2026-07-31"},
+		{"quarterly advances by three months", date(2025, 8, 31), "3m",
 			time.Date(2026, 1, 15, 12, 0, 0, 0, loc), 44, "2026-02-28"},
-		{"leap-day annual clamps to feb 28", date(2028, 2, 29), "12m",
+		{"leap-day annual clamps to february 28", date(2028, 2, 29), "12m",
 			time.Date(2029, 1, 10, 12, 0, 0, 0, loc), 49, "2029-02-28"},
+		{"renewal is due today", date(2026, 7, 26), "6m", now, 0, "2026-07-26"},
+		{"two-year due date is independent of purchase date", date(2026, 8, 23), "24m", now, 28, "2026-08-23"},
+		{"three-year due date is independent of purchase date", date(2026, 8, 23), "36m", now, 28, "2026-08-23"},
+		{"two-year period clamps to leap month end", date(2028, 2, 29), "24m", date(2030, 2, 28), 0, "2030-02-28"},
+		{"two-year period recovers leap day", date(2028, 2, 29), "24m", date(2032, 2, 28), 1, "2032-02-29"},
+		{"three-year period advances by thirty-six months", date(2026, 10, 16), "36m", date(2026, 10, 19), 1093, "2029-10-16"},
+		{"clamped day stays due all day", date(2026, 1, 31), "1m", time.Date(2026, 2, 28, 23, 59, 0, 0, loc), 0, "2026-02-28"},
+		{"day after clamped renewal restores original day", date(2026, 1, 31), "1m", date(2026, 3, 1), 30, "2026-03-31"},
 		{"unknown period disables the badge", date(2026, 8, 23), "", now, 0, ""},
 	}
 	for _, tc := range cases {
-		days, dateStr := calcNextReset(tc.anchor.Unix(), tc.period, tc.now)
+		days, dateStr := calcRenewalDue(tc.anchor.Unix(), tc.period, tc.now)
 		if days != tc.wantDays || dateStr != tc.wantDate {
-			t.Errorf("%s: calcNextReset = (%d, %q), want (%d, %q)",
+			t.Errorf("%s: calcRenewalDue = (%d, %q), want (%d, %q)",
 				tc.name, days, dateStr, tc.wantDays, tc.wantDate)
 		}
 	}
 }
 
-// The due badge and the traffic reset must land on the same calendar day for
-// monthly billing, whatever the anchor's day of month.
-func TestDueAndTrafficResetAgree(t *testing.T) {
+// Projected monthly renewals and monthly traffic share the original day.
+func TestScheduledRenewalAgreesWithMonthlyTrafficReset(t *testing.T) {
 	loc := time.Local
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, loc)
 	for day := 1; day <= 31; day++ {
 		anchor := time.Date(2026, 1, day, 0, 0, 0, 0, loc)
-		_, dueDate := calcNextReset(anchor.Unix(), "1m", now)
+		_, dueDate := calcRenewalDue(anchor.Unix(), "1m", now)
 		due, err := time.ParseInLocation("2006-01-02", dueDate, loc)
 		if err != nil {
 			t.Fatalf("day %d: parse due date %q: %v", day, dueDate, err)
 		}
 		cycleStart := monthlyBoundary(anchor.Day(), now)
 		next := monthlyBoundary(anchor.Day(), due.Add(12*time.Hour))
-		if !next.Equal(due) {
-			t.Errorf("day %d: due %s but traffic resets %s (cycle started %s)",
-				day, due.Format("2006-01-02"), next.Format("2006-01-02"), cycleStart.Format("2006-01-02"))
+		if !next.Equal(due) || cycleStart.After(now) || due.Before(cycleStart) {
+			t.Errorf("day %d: scheduled due %s and monthly traffic reset %s disagree (current cycle %s)", day, due, next, cycleStart)
 		}
 	}
 }

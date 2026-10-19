@@ -26,9 +26,11 @@ jobs:
           python3 scripts/test-openwrt-installer.py
           python3 scripts/test-tcpping-selection.py
           python3 scripts/test-agent-upgrade-config.py
+          python3 scripts/test-billing-config.py
           node scripts/test-tcpping-dashboard.cjs
           node scripts/test-dashboard-refresh.cjs
           node scripts/test-sparkline-hover.cjs
+          node scripts/test-card-billing.cjs
 
   build:
     needs: installer-check

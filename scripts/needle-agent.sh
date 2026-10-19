@@ -30,7 +30,7 @@ No command:
 Options:
   -y, --yes            Skip uninstall confirmation
   --keep-config        With upgrade: keep configuration without prompting
-  --reconfigure        With upgrade: reselect TCP Ping and monthly allowance; preserve token
+  --reconfigure        With upgrade: reselect probes, allowance, and optional billing; preserve token
   --unregister         With uninstall: also notify Server to delete this node
 
 Examples:
@@ -383,19 +383,85 @@ configure_monthly_traffic() {
 
 upgrade_interactive() { [ -t 0 ]; }
 
+configure_billing() {
+    rm -f "$TMP_DIR/billing.yaml"
+    if [ "${1:-install}" = upgrade ]; then
+        tcping_prompt 'Replace currency, amount, billing period, and renewal date? [y/N]: '
+        case "$TCPING_ANSWER" in
+            y|Y|yes|YES) ;;
+            ''|n|N|no|NO) return 0 ;;
+            *) echo 'Choose y or n.' >&2; return 1 ;;
+        esac
+        echo 'All four billing fields will be replaced. Other settings and the token are preserved.'
+    fi
+    echo 'Currency: USD, CNY, EUR, GBP, CAD, HKD, JPY, AUD, or another three-letter code.'
+    tcping_prompt 'Currency [USD]: '
+    BILLING_CURRENCY=$(printf '%s' "${TCPING_ANSWER:-USD}" | tr '[:lower:]' '[:upper:]')
+    case "$BILLING_CURRENCY" in
+        [A-Z][A-Z][A-Z]) ;;
+        *) echo 'Currency must be a three-letter code.' >&2; return 1 ;;
+    esac
+    tcping_prompt 'Amount for the entire billing period (0 = free; Enter = not configured): '
+    BILLING_AMOUNT=$TCPING_ANSWER
+    if [ -n "$BILLING_AMOUNT" ]; then
+        printf '%s\n' "$BILLING_AMOUNT" | LC_ALL=C awk -F. '
+            /^[0-9]+([.][0-9]+)?$/ && length($1) <= 12 && (NF == 1 || length($2) <= 6) { ok = 1 }
+            END { if (!ok) exit 1 }
+        ' || { echo 'Amount must be non-negative, with up to 12 integer and 6 fractional digits.' >&2; return 1; }
+    fi
+    echo 'Billing period: 1m, 3m, 6m, 12m, 24m, 36m, forever (no expiry), or skip.'
+    tcping_prompt 'Billing period [forever]: '
+    BILLING_PERIOD=${TCPING_ANSWER:-forever}
+    EXPIRES_AT=
+    case "$BILLING_PERIOD" in
+        forever) ;;
+        skip)
+            BILLING_PERIOD=
+            [ -z "$BILLING_AMOUNT" ] || { echo 'Choose a billing period when an amount is configured.' >&2; return 1; } ;;
+        1m|3m|6m|12m|24m|36m)
+            tcping_prompt 'Next renewal / top-up date (YYYY-MM-DD; actual due date, including for a transferred node): '
+            EXPIRES_AT=$TCPING_ANSWER
+            printf '%s\n' "$EXPIRES_AT" | LC_ALL=C awk -F- '
+                /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ {
+                    y=$1+0; m=$2+0; d=$3+0
+                    days[1]=31; days[2]=28+(y%4==0 && (y%100!=0 || y%400==0)); days[3]=31
+                    days[4]=30; days[5]=31; days[6]=30; days[7]=31; days[8]=31
+                    days[9]=30; days[10]=31; days[11]=30; days[12]=31
+                    if (y>=1970 && m>=1 && m<=12 && d>=1 && d<=days[m]) ok=1
+                }
+                END { if (!ok) exit 1 }
+            ' || { echo 'Invalid renewal date; use a real calendar date in YYYY-MM-DD format.' >&2; return 1; } ;;
+        *) echo 'Unsupported billing period.' >&2; return 1 ;;
+    esac
+    {
+        printf 'billing_currency: '; tcping_yaml_quote "$BILLING_CURRENCY"
+        printf '\nbilling_amount: '; tcping_yaml_quote "$BILLING_AMOUNT"
+        printf '\nbilling_period: '; tcping_yaml_quote "$BILLING_PERIOD"
+        printf '\nexpires_at: '; tcping_yaml_quote "$EXPIRES_AT"; printf '\n'
+    } > "$TMP_DIR/billing.yaml"
+}
+
 stage_tcping_config() {
-    # Change the top-level tcpping section and, if requested, the quota.
+    # Change the top-level tcpping section and optionally quota/billing settings.
     # Credentials and other settings are copied verbatim, including multiline values.
     # Reject layouts we cannot safely edit instead of regenerating an identity.
     REPLACE_QUOTA=0
     [ ! -f "$TMP_DIR/traffic.yaml" ] || REPLACE_QUOTA=1
-    awk -v quota="$REPLACE_QUOTA" '
+    REPLACE_BILLING=0
+    [ ! -f "$TMP_DIR/billing.yaml" ] || REPLACE_BILLING=1
+    awk -v quota="$REPLACE_QUOTA" -v billing="$REPLACE_BILLING" '
         BEGIN { skip = 0; token = 0; documents = 0; sections = 0; quotas = 0; unsafe = 0 }
         /^---([ \t]*#.*)?[ \t]*$/ { documents++; if (documents > 1) exit 1; print; next }
         /^\.\.\.([ \t]*#.*)?[ \t]*$/ { next }
         /^(token|"token"|\047token\047)[ \t]*:/ { token = 1 }
         /^(tcpping|"tcpping"|\047tcpping\047)[ \t]*:/ { skip = 1; sections++; if ($0 ~ /[&*]/) unsafe = 1; next }
         quota && /^(monthly_traffic_limit_gb|"monthly_traffic_limit_gb"|\047monthly_traffic_limit_gb\047)[ \t]*:/ { skip = 1; quotas++; if ($0 ~ /[&*]/) unsafe = 1; next }
+        billing && /^[^ \t#][^:]*:/ {
+            key = $0; sub(/[ \t]*:.*/, "", key); gsub(/^["\047]|["\047]$/, "", key)
+            if (key == "billing_currency" || key == "billing_amount" || key == "billing_period" || key == "expires_at") {
+                skip = 1; count[key]++; if (count[key] > 1 || $0 ~ /[&*]/) unsafe = 1; next
+            }
+        }
         skip && /^[^ \t#][^:]*:/ { skip = 0 }
         skip && /[&*]/ { unsafe = 1 }
         !skip { print }
@@ -407,6 +473,7 @@ stage_tcping_config() {
     }
     cat "$TMP_DIR/tcpping.yaml" >> "$TMP_DIR/agent.yaml"
     if [ -f "$TMP_DIR/traffic.yaml" ]; then cat "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"; fi
+    if [ -f "$TMP_DIR/billing.yaml" ]; then cat "$TMP_DIR/billing.yaml" >> "$TMP_DIR/agent.yaml"; fi
 }
 
 choose_upgrade_config() {
@@ -421,7 +488,7 @@ choose_upgrade_config() {
             if upgrade_interactive; then
                 echo 'Upgrade configuration:'
                 echo '  1) Keep existing configuration (default)'
-                echo '  2) Reconfigure TCP Ping and monthly allowance; preserve token and identity'
+                echo '  2) Reconfigure TCP Ping, monthly allowance, and optional billing settings; preserve token and identity'
                 tcping_prompt 'Configuration choice [1]: '
                 case "${TCPING_ANSWER:-1}" in
                     1) ;;
@@ -435,6 +502,7 @@ choose_upgrade_config() {
     if [ "$UPGRADE_RECONFIGURE" = true ]; then
         configure_tcping
         configure_monthly_traffic upgrade
+        configure_billing upgrade
         stage_tcping_config "$1"
     fi
 }
@@ -520,31 +588,7 @@ cmd_install() {
   read_prompt INTERVAL "Report interval (seconds) [30]: "
   INTERVAL="${INTERVAL:-30}"
 
-  echo
-  echo "VPS billing setup (for dashboard expiry countdown and traffic reset):"
-  echo "  1) Monthly (1m)"
-  echo "  2) Quarterly (3m)"
-  echo "  3) Semi-annual (6m)"
-  echo "  4) Annual (12m)"
-  echo "  5) Permanent (forever; traffic resets monthly on day 1)"
-  echo "  0) Skip"
-  read_prompt PERIOD_CHOICE "Select billing period [0]: "
-
-  EXPIRES_AT=""
-  BILLING_PERIOD=""
-  case "$PERIOD_CHOICE" in
-    1) BILLING_PERIOD="1m";  DEFAULT_EXPIRY=$(date -d "+1 month" +%Y-%m-%d 2>/dev/null || date -v+1m +%Y-%m-%d) ;;
-    2) BILLING_PERIOD="3m";  DEFAULT_EXPIRY=$(date -d "+3 months" +%Y-%m-%d 2>/dev/null || date -v+3m +%Y-%m-%d) ;;
-    3) BILLING_PERIOD="6m";  DEFAULT_EXPIRY=$(date -d "+6 months" +%Y-%m-%d 2>/dev/null || date -v+6m +%Y-%m-%d) ;;
-    4) BILLING_PERIOD="12m"; DEFAULT_EXPIRY=$(date -d "+1 year" +%Y-%m-%d 2>/dev/null || date -v+1y +%Y-%m-%d) ;;
-    5) BILLING_PERIOD="forever" ;;
-    *) BILLING_PERIOD="" ;;
-  esac
-
-  if [ -n "$BILLING_PERIOD" ] && [ "$BILLING_PERIOD" != "forever" ]; then
-    read_prompt EXPIRES_AT "Next renewal date [${DEFAULT_EXPIRY}]: "
-    EXPIRES_AT="${EXPIRES_AT:-$DEFAULT_EXPIRY}"
-  fi
+  configure_billing
 
   configure_tcping
   configure_monthly_traffic
@@ -554,13 +598,11 @@ hostname: "${HOSTNAME}"
 server: ${SERVER_URL}
 token: ${TOKEN}
 region: ${REGION}
-billing_period: "${BILLING_PERIOD}"
-expires_at: "${EXPIRES_AT}"
 interval: ${INTERVAL}
 tls_skip_verify: false
 allow_plain_http: ${ALLOW_PLAIN_HTTP}
 YAML
-  cat "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$AGENT_YAML"
+  cat "$TMP_DIR/billing.yaml" "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$AGENT_YAML"
   chmod 600 "$AGENT_YAML"
 
   echo "Installing systemd service..."
@@ -643,7 +685,7 @@ cmd_upgrade() {
   echo "========================================="
   echo " Needle Agent upgraded to $VERSION!"
   if [ "$UPGRADE_RECONFIGURE" = true ]; then
-    echo " TCP Ping and allowance settings updated; token and identity preserved. Backup: $AGENT_YAML.bak"
+    echo " Selected settings updated; token and identity preserved. Backup: $AGENT_YAML.bak"
   else
     echo " Config preserved: $AGENT_YAML"
   fi

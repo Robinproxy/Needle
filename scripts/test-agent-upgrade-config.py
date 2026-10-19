@@ -57,7 +57,7 @@ choose_upgrade_config {shlex.quote(str(original))}
 
     def test_reselection_preserves_identity_and_other_settings(self):
         for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
-            result,staged,original=self.run_choice(script,answers='2\n2\n\n')
+            result,staged,original=self.run_choice(script,answers='2\n2\n\n\n')
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(original,OLD)
             for line in OLD.splitlines():
@@ -70,7 +70,7 @@ choose_upgrade_config {shlex.quote(str(original))}
 
     def test_explicit_reconfigure_and_disabled(self):
         for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
-            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n\n')
+            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n\n\n')
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertIn('tcpping: []\n',staged)
             self.assertIn("token: 'token:# with ''quotes'' and spaces'\n",staged)
@@ -90,7 +90,7 @@ choose_upgrade_config {shlex.quote(str(original))}
             '---\ntoken: |-\n  token:with:colons\nhostname: host\ntcpping: []\n...\n',
             'token: keep-me\nhostname: host\ninterval: 30\n',
         ]:
-            result,staged,original=self.run_choice('needle-agent-openwrt.sh',mode='reconfigure',answers='5\n\n',config=config)
+            result,staged,original=self.run_choice('needle-agent-openwrt.sh',mode='reconfigure',answers='5\n\n\n',config=config)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(original,config)
             self.assertIn('tcpping: []',staged)
@@ -99,12 +99,12 @@ choose_upgrade_config {shlex.quote(str(original))}
     def test_quota_reconfiguration_preserves_identity_and_omitted_quota(self):
         config=OLD+"monthly_traffic_limit_gb: 500\n"
         for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
-            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n1000\n',config=config)
+            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n1000\n\n',config=config)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(staged.count('monthly_traffic_limit_gb:'),1)
             self.assertIn('monthly_traffic_limit_gb: 1000.000',staged)
             self.assertIn("token: 'token:# with ''quotes'' and spaces'",staged)
-            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n\n',config=config)
+            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n\n\n',config=config)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertIn('monthly_traffic_limit_gb: 500\n',staged)
             for value in ['-1','1e3','nan','9000001','0.0001','1; echo unsafe']:
@@ -132,7 +132,7 @@ cmd_install
             self.assertEqual(config.read_text(),OLD)
 
     def test_linux_upgrade_applies_choice_and_keeps_backup(self):
-        for option,answers,changed in [('--keep-config','',False),('','2\n5\n\n',True),('--reconfigure','2\n\n',True)]:
+        for option,answers,changed in [('--keep-config','',False),('','2\n5\n\n\n',True),('--reconfigure','2\n\n\n',True)]:
             with self.subTest(option=option),tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp);config=root/'agent.yaml';config.write_text(OLD)
                 bindir=root/'bin';bindir.mkdir()

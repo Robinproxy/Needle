@@ -9,7 +9,7 @@ import (
 
 func (c Config) validateProbesAndInterval() error {
 	switch c.BillingPeriod {
-	case "", "1m", "3m", "6m", "12m", "forever":
+	case "", "1m", "3m", "6m", "12m", "24m", "36m", "forever":
 	default:
 		return fmt.Errorf("unsupported billing_period")
 	}

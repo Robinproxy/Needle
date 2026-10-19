@@ -6,14 +6,17 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"needle/internal/billing"
 )
 
 type reportRequest struct {
-	MonthlyTrafficLimit int64  `json:"monthly_traffic_limit"`
-	Hostname            string `json:"hostname"`
-	Region              string `json:"region"`
-	ExpiresAt           *int64 `json:"expires_at"`
-	BillingPeriod       string `json:"billing_period"`
+	BillingCost         *billing.Cost `json:"billing_cost"`
+	MonthlyTrafficLimit int64         `json:"monthly_traffic_limit"`
+	Hostname            string        `json:"hostname"`
+	Region              string        `json:"region"`
+	ExpiresAt           *int64        `json:"expires_at"`
+	BillingPeriod       string        `json:"billing_period"`
 	CPU                 *struct {
 		Percent float64 `json:"percent"`
 		Cores   int     `json:"cores"`
@@ -60,9 +63,19 @@ func validateReport(req *reportRequest, now time.Time) error {
 		return fmt.Errorf("invalid monthly traffic limit")
 	}
 	switch req.BillingPeriod {
-	case "", "1m", "3m", "6m", "12m", "forever":
+	case "", "1m", "3m", "6m", "12m", "24m", "36m", "forever":
 	default:
 		return fmt.Errorf("invalid billing period")
+	}
+	if req.BillingCost != nil {
+		cost, err := req.BillingCost.Normalize()
+		if err != nil {
+			return err
+		}
+		if cost.Amount != "" && req.BillingPeriod == "" {
+			return fmt.Errorf("billing period is required when billing amount is configured")
+		}
+		req.BillingCost = &cost
 	}
 	if req.BillingPeriod == "forever" {
 		req.ExpiresAt = nil // Permanent nodes have no renewal date.

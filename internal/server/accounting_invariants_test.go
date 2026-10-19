@@ -280,7 +280,7 @@ func TestRenewalCountdownUsesCalendarDaysAcrossDST(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		days, date := calcNextReset(anchor.Unix(), "1m", tc.now)
+		days, date := calcRenewalDue(anchor.Unix(), "1m", tc.now)
 		if days != tc.days || date != tc.due {
 			t.Fatalf("%v: days/date=%d/%s want %d/%s", tc.now, days, date, tc.days, tc.due)
 		}

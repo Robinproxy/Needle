@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"needle/internal/agent/collector"
+	"needle/internal/billing"
 )
 
 type ReportData struct {
+	BillingCost         *billing.Cost            `json:"billing_cost,omitempty"`
 	CreatedAt           int64                    `json:"created_at,omitempty"`
 	MonthlyTrafficLimit int64                    `json:"monthly_traffic_limit"`
 	Hostname            string                   `json:"hostname"`

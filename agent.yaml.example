@@ -2,8 +2,10 @@ hostname: ""     # optional, defaults to os.Hostname()
 server: http://127.0.0.1:8008
 token: replace-with-unique-agent-token   # unique per agent; allow on Server with allow-token
 region: SG
-billing_period: "1m"        # 1m/3m/6m/12m/forever; forever displays ♾️ and resets traffic on day 1
-expires_at: "2026-08-15"    # YYYY-MM-DD, optional; leave empty for forever
+billing_currency: "USD"     # USD/CNY/EUR/GBP/CAD/HKD/JPY/AUD or another three-letter code; no conversion
+billing_amount: "5.00"      # Entire billing period, not monthly equivalent; "0" = free, "" = not configured
+billing_period: "1m"        # 1m/3m/6m/12m/24m/36m/forever; forever has no expiry
+expires_at: "2026-11-15"    # Actual next renewal / top-up date (YYYY-MM-DD), including transferred nodes; empty for forever
 monthly_traffic_limit_gb: 1000 # Upload + download per month; decimal GB (1000 GB = 1 TB); 0 = no limit
 interval: 30
 # interfaces: ["eth0"]      # optional NIC whitelist; default counts physical NICs only

@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
@@ -44,6 +45,15 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 	id, err = upsertAgent(tx, r.Hostname, r.Region, r.ExpiresAt, r.BillingPeriod, now.Unix())
 	if err != nil {
 		return 0, false, err
+	}
+	if r.BillingCost != nil {
+		encoded, err := json.Marshal(r.BillingCost)
+		if err != nil {
+			return 0, false, err
+		}
+		if _, err := tx.Exec("UPDATE agents SET billing_cost=? WHERE id=?", string(encoded), id); err != nil {
+			return 0, false, err
+		}
 	}
 	_, err = tx.Exec(`UPDATE agents SET report_sample_at=?,monthly_traffic_limit=?,
 	 cpu_cores=CASE WHEN ?>0 THEN ? ELSE cpu_cores END WHERE id=?`,

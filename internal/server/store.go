@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"needle/internal/billing"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -204,6 +206,9 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN monthly_traffic_limit INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
 	if err := s.migrateAgentOrder(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec("ALTER TABLE agents ADD COLUMN billing_cost TEXT"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return err
 	}
 	if err := s.migrateTrafficAccounting(); err != nil {
@@ -542,6 +547,7 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
+	BillingCost         *billing.Cost
 	CPUCores            int
 	MonthlyTrafficLimit int64
 	Hostname            string
@@ -626,7 +632,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 }
 
 func (s *Store) GetAgents() ([]AgentRow, error) {
-	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order FROM agents ORDER BY display_order, id")
+	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost FROM agents ORDER BY display_order, id")
 	if err != nil {
 		return nil, err
 	}
@@ -635,8 +641,14 @@ func (s *Store) GetAgents() ([]AgentRow, error) {
 	var agents []AgentRow
 	for rows.Next() {
 		var a AgentRow
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder); err != nil {
+		var cost sql.NullString
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost); err != nil {
 			return nil, err
+		}
+		if cost.Valid {
+			if err := json.Unmarshal([]byte(cost.String), &a.BillingCost); err != nil {
+				return nil, err
+			}
 		}
 		agents = append(agents, a)
 	}
@@ -1052,41 +1064,38 @@ func clampedMonthDay(y int, m time.Month, day int, loc *time.Location) time.Time
 	return time.Date(y, m, day, 0, 0, 0, 0, loc)
 }
 
-func calcNextReset(expiresAtUnix int64, period string, now time.Time) (int, string) {
-	anchor := billingAnchor(expiresAtUnix, now.Location())
-	addMonths := 0
+// calcRenewalDue projects the next scheduled renewal from the configured date
+// and payment period. The due date itself stays visible for the whole day;
+// past dates advance without changing the stored anchor or proving payment.
+func calcRenewalDue(expiresAtUnix int64, period string, now time.Time) (int, string) {
+	months := 0
 	switch period {
 	case "1m":
-		addMonths = 1
+		months = 1
 	case "3m":
-		addMonths = 3
+		months = 3
 	case "6m":
-		addMonths = 6
+		months = 6
 	case "12m":
-		addMonths = 12
-	}
-	if addMonths == 0 {
+		months = 12
+	case "24m":
+		months = 24
+	case "36m":
+		months = 36
+	default:
 		return 0, ""
 	}
-	// Each candidate is derived from the original anchor (not the previous
-	// candidate) with the day clamped per month, so a day-31 anchor stays on
-	// the month's last day instead of drifting via AddDate normalization.
-	hour, min, sec := anchor.Clock()
-	loc := anchor.Location()
-	y, m, _ := anchor.Date()
-	nextReset := anchor
-	for k := 1; !nextReset.After(now); k++ {
-		b := clampedMonthDay(y, m+time.Month(k*addMonths), anchor.Day(), loc)
-		nextReset = time.Date(b.Year(), b.Month(), b.Day(), hour, min, sec, 0, loc)
-	}
+	anchor := billingAnchor(expiresAtUnix, now.Location())
 	// Calendar days are independent of 23/25-hour daylight-saving days.
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	due := time.Date(nextReset.Year(), nextReset.Month(), nextReset.Day(), 0, 0, 0, 0, time.UTC)
-	days := int(due.Sub(today) / (24 * time.Hour))
-	if days == 0 {
-		days = 1
+	due := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.UTC)
+	// Derive every candidate from the original day so January 31 clamps in
+	// February and returns to March 31, rather than drifting to March 28.
+	for k := 1; due.Before(today); k++ {
+		due = clampedMonthDay(anchor.Year(), anchor.Month()+time.Month(k*months), anchor.Day(), time.UTC)
 	}
-	return days, nextReset.Format("2006-01-02")
+	days := int(due.Sub(today) / (24 * time.Hour))
+	return days, due.Format("2006-01-02")
 }
 
 func (s *Store) GetStats() (*ServerStats, error) {

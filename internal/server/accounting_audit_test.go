@@ -55,7 +55,7 @@ func TestAuditDueDateMustPreserveConfiguredCalendarDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 5, 20, 0, 0, 0, time.FixedZone("west", -7*3600))
-	days, date := calcNextReset(anchor.Unix(), "1m", now)
+	days, date := calcRenewalDue(anchor.Unix(), "1m", now)
 	if date != "2026-11-06" || days != 1 {
 		t.Fatalf("configured date 2026-11-06 became (%d, %s) before local midnight", days, date)
 	}

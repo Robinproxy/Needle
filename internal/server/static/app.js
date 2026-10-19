@@ -415,10 +415,10 @@ function formatTrafficBytes(bytes) {
   return Number((bytes / (1000 ** i)).toFixed(2)) + ' ' + units[i];
 }
 
-function metricHTML(label, value, sub, title = '') {
+function metricHTML(label, value, sub, title = '', valueText = null) {
   const width = value == null ? 0 : Math.max(0, Math.min(100, value));
   return '<div class="metric"' + (title ? ' title="' + escapeAttr(title) + '"' : '') + '>'
-    + '<div class="metric-header"><span class="label">' + label + '</span><span class="value ' + metricColor(value) + '">' + pct(value) + '</span></div>'
+    + '<div class="metric-header"><span class="label">' + label + '</span><span class="value ' + metricColor(value) + '">' + (valueText == null ? pct(value) : escapeHtml(valueText)) + '</span></div>'
     + '<div class="metric-bar"><div class="metric-fill ' + metricColor(value) + '" style="width:' + width.toFixed(1) + '%"></div></div>'
     + '<div class="metric-sub">' + escapeHtml(sub) + '</div></div>';
 }
@@ -428,7 +428,11 @@ function trafficHTML(data, limit = 0) {
   const used = ready ? data.sent + data.recv : null;
   const value = used != null && limit > 0 ? used / limit * 100 : null;
   const usedText = used != null ? formatTrafficBytes(used) : (data?.available ? 'No data' : 'Not configured');
-  const text = usedText + ' / ' + (limit > 0 ? formatTrafficBytes(limit) : '♾️');
+  if (!(limit > 0)) {
+    return metricHTML('TRF', null, usedText + (used != null ? ' used' : ''),
+      'Monthly upload + download; no traffic allowance limit.', '♾️');
+  }
+  const text = usedText + ' / ' + formatTrafficBytes(limit);
   return metricHTML('TRF', value, text, 'Monthly upload + download; decimal GB/TB. Observed usage since monitoring began, not provider billing data.');
 }
 
@@ -496,11 +500,35 @@ function cardNetworkHTML(a) {
 
 function expiryBadge(a) {
   if (a.agent.billing_period === 'forever') {
-    return '<span class="expiry-days" title="No expiration" aria-label="No expiration">♾️</span>';
+    return '<span class="expiry-days" aria-label="No expiration">♾️</span>';
   }
-  const days = a.expiry_days || 0;
-  if (days <= 0) return '';
-  return '<span class="expiry-days' + (days < 7 ? ' expiry-urgent' : '') + '" title="Due ' + escapeAttr(a.expiry_date || '') + '">' + days + 'd</span>';
+  if (!a.expiry_date || !Number.isInteger(a.expiry_days)) return '';
+  const days = a.expiry_days;
+  const text = days <= 0 ? 'Due today' : days + 'd';
+  return '<span class="expiry-days' + (days < 7 ? ' expiry-urgent' : '') + '">' + text + '</span>';
+}
+
+function billingCostText(a) {
+  const cost = a.agent.billing_cost;
+  if (!cost || !/^[A-Z]{3}$/.test(cost.currency) || typeof cost.amount !== 'string'
+      || !/^[0-9]{1,12}(\.[0-9]{1,6})?$/.test(cost.amount)) return 'Not set';
+  if (/^0+(\.0+)?$/.test(cost.amount)) return 'Free';
+  const symbols = {USD:'US$',CNY:'CN¥',EUR:'€',GBP:'£',CAD:'CA$',HKD:'HK$',JPY:'JP¥',AUD:'AU$'};
+  const periods = {'1m':'/mo','3m':'/3mo','6m':'/6mo','12m':'/yr','24m':'/2yr','36m':'/3yr',forever:' · Lifetime'};
+  const [whole, fraction = ''] = cost.amount.split('.');
+  const precision = cost.currency === 'JPY' ? fraction.length : Math.max(2, fraction.length);
+  const amount = whole + (precision ? '.' + fraction.padEnd(precision, '0') : '');
+  return (symbols[cost.currency] || cost.currency + ' ') + amount + (periods[a.agent.billing_period] || '');
+}
+
+function cardBillingHTML(a) {
+  const cost = billingCostText(a);
+  const permanent = a.agent.billing_period === 'forever';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(a.expiry_date || '') ? a.expiry_date : '';
+  const due = permanent ? '<span class="card-due" aria-label="No expiration">♾️</span>'
+    : date ? '<time class="card-due" datetime="' + date + '" aria-label="Due ' + date + '">' + date + '</time>'
+    : '<span class="card-due">Not set</span>';
+  return '<span class="card-cost" title="' + escapeAttr(cost) + '">' + escapeHtml(cost) + '</span>' + due;
 }
 
 function updateExpiryBadge(node, a) {
@@ -531,6 +559,7 @@ function renderCard(a, isActive) {
     + '<div class="card-speeds" title="' + (seenTs ? 'Last report ' + escapeAttr(relativeTime(seenTs)) : 'No reports yet') + '">' + cardNetworkHTML(a) + '</div>'
     + (a.tcpping_enabled === false ? '<div class="card-probes-off"><span>TCP Ping · Off</span></div>'
       : '<div class="card-probes">' + cardProbesHTML(a) + '</div>')
+    + '<div class="card-billing" aria-label="Billing cost and next renewal date">' + cardBillingHTML(a) + '</div>'
   + '</div>';
 }
 
@@ -1304,6 +1333,8 @@ function updateLiveSummaries(data) {
       const seenEl = card.querySelector('.list-time');
       if (seenEl && seenTs) seenEl.textContent = relativeTime(seenTs);
       if (card.classList.contains('card')) {
+        const billing = card.querySelector('.card-billing');
+        if (billing) billing.innerHTML = cardBillingHTML(a);
         card.querySelector('.card-metrics').innerHTML = cardMetricsHTML(a);
         const probes = card.querySelector('.card-probes');
         if (probes) probes.innerHTML = cardProbesHTML(a);

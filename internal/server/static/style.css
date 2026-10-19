@@ -200,10 +200,10 @@ header {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border) / 0.7);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: 14px;
   cursor: pointer;
   transition: all 0.15s;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 8px;
   box-shadow: 0 1px 3px hsl(0 0% 0% / 0.05);
 }
 .dark .card {
@@ -243,8 +243,18 @@ header {
   display: flex; justify-content: space-between; align-items: center;
 }
 .card-sub > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.expiry-days { flex-shrink: 0; white-space: nowrap; line-height: 1; }
 
-.card-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; padding: 5px 0; }
+.card-billing {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-top: 1px solid hsl(var(--border) / 0.6); padding-top: 9px; margin-top: auto;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground));
+}
+.card-cost { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-due { flex-shrink: 0; white-space: nowrap; line-height: 1; }
+
+.card-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; padding: 3px 0; }
 .metric { min-width: 0; }
 .metric-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -272,22 +282,22 @@ header {
   font-family: var(--font-mono); font-size: 11px; font-weight: 400;
   color: hsl(var(--muted-foreground));
   margin-top: 3px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 16px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 14px;
 }
 
 .card-speeds {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px;
-  padding-top: 4px;
+  padding-top: 2px;
   font-family: var(--font-mono); font-size: 12px; font-weight: 500;
 }
-.card-speeds .net-rates, .card-speeds .net-totals { display: grid; gap: 5px; min-width: 0; }
+.card-speeds .net-rates, .card-speeds .net-totals { display: grid; gap: 4px; min-width: 0; }
 .card-speeds .net-totals { text-align: right; }
 .card-speeds span { white-space: nowrap; }
 .card-speeds .net-down { color: hsl(var(--foreground)); }
 .card-speeds .net-up { color: hsl(var(--muted-foreground)); }
 .card-probes, .card-probes-off {
-  min-height: 80px;
-  border-top: 1px solid hsl(var(--border) / 0.6); padding-top: 10px;
+  min-height: 72px;
+  border-top: 1px solid hsl(var(--border) / 0.6); padding-top: 8px;
   font-family: var(--font-mono); font-size: 11px;
 }
 .card-probes-off {
@@ -301,7 +311,7 @@ header {
 .probe-family-ipv4 { grid-column: 1; grid-row: 1; }
 .probe-family-ipv6 { grid-column: 2; grid-row: 1; }
 .probe-family-custom { grid-column: 1 / -1; }
-.probe-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 5px; min-height: 23px; }
+.probe-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 5px; min-height: 21px; }
 .probe-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .probe-lat, .probe-loss { font-variant-numeric: tabular-nums; }
 .card-probes > .ping-disabled { grid-column: 1 / -1; }

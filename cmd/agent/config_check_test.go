@@ -66,6 +66,8 @@ func TestCheckConfigExitsWithoutCollectingOrContactingServer(t *testing.T) {
 		{"bad YAML", "server: [\n", true},
 		{"missing token", "server: https://does-not-exist.invalid\n", true},
 		{"bad date", "server: https://does-not-exist.invalid\ntoken: test\nexpires_at: invalid\nbilling_period: 1m\n", true},
+		{"two year paid", "server: https://does-not-exist.invalid\ntoken: test\nbilling_period: 24m\nbilling_currency: CAD\nbilling_amount: '90.10'\nexpires_at: '2028-10-15'\nmonthly_traffic_limit_gb: 0\n", false},
+		{"bad amount", "server: https://does-not-exist.invalid\ntoken: test\nbilling_period: 1m\nbilling_amount: -5\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "agent.yaml")
