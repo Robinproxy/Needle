@@ -92,6 +92,9 @@ docker compose exec needle-server needle-server -db /data/needle.db allow-token 
 docker compose exec needle-server needle-server -db /data/needle.db list-agents
 docker compose exec needle-server needle-server -db /data/needle.db list-tokens
 
+# Move a node to position 1 (use its hostname or ID, not the POS column)
+docker compose exec needle-server needle-server -db /data/needle.db move-agent Router 1
+
 # Revoke a credential and delete its bound node and history
 docker compose exec needle-server needle-server -db /data/needle.db revoke-token YOUR_TOKEN
 # Delete a node, its history, and its bound token by ID or hostname
@@ -99,6 +102,8 @@ docker compose exec needle-server needle-server -db /data/needle.db delete-agent
 ```
 
 Deleting a registered node also removes its bound token. Allow the token again if you want that Agent to reconnect.
+
+`list-agents` shows the current position in `POS` and the stable node ID in `ID`. `move-agent HOSTNAME_OR_ID POSITION` shifts the other nodes automatically. Cards and list rows share this order across browsers, including offline nodes; new nodes appear last. Changes take effect on the next dashboard refresh without restarting the Server or changing Agent configuration, tokens, or history.
 
 ### Backup, restore, and removal
 
@@ -163,11 +168,14 @@ Run on the Server machine:
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token YOUR_TOKEN
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db move-agent Router 1
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db revoke-token YOUR_TOKEN
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent HOSTNAME_OR_ID
 ```
 
 Revoking a token deletes its bound node data. Deleting a node also removes its bound token; allow the token again before reconnecting the Agent.
+
+`list-agents` shows `POS` (current position) separately from `ID` (stable node ID). Use `move-agent HOSTNAME_OR_ID POSITION` to move a node to a one-based position; other nodes shift automatically. Cards and list rows use the same persistent order, offline nodes keep their positions, and new nodes appear last. The next dashboard refresh applies the change without a Server restart or Agent changes.
 
 ### Backup, restore, and removal
 

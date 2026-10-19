@@ -284,8 +284,8 @@ function filterAndSort(list) {
     arr = arr.filter(a => a.agent.region === filterRegion);
   }
   arr.sort((a, b) => {
-    if (a._online !== b._online) return a._online ? -1 : 1;
-    return a.agent.id - b.agent.id;
+    return (a.agent.display_order ?? a.agent.id) - (b.agent.display_order ?? b.agent.id)
+      || a.agent.id - b.agent.id;
   });
   return arr;
 }
@@ -509,7 +509,7 @@ function updateExpiryBadge(node, a) {
 }
 
 function dashboardLayoutSignature(list) {
-  return JSON.stringify(list.map(a => [a.agent.id, a.agent.hostname, a.agent.region, !!a._online, !!a.latest_metric, a.tcpping_enabled,
+  return JSON.stringify(list.map(a => [a.agent.id, a.agent.display_order, a.agent.hostname, a.agent.region, !!a._online, !!a.latest_metric, a.tcpping_enabled,
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 

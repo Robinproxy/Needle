@@ -203,6 +203,9 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN last_seen INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN monthly_traffic_limit INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
+	if err := s.migrateAgentOrder(); err != nil {
+		return err
+	}
 	if err := s.migrateTrafficAccounting(); err != nil {
 		return err
 	}
@@ -467,7 +470,8 @@ func (s *Store) UpsertAgent(hostname, region string, expiresAt *int64, billingPe
 
 func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPeriod string, lastSeen int64) (int64, error) {
 	_, err := x.Exec(
-		`INSERT INTO agents(hostname, region, expires_at, billing_period, last_seen) VALUES(?, ?, ?, ?, ?)
+		`INSERT INTO agents(hostname, region, expires_at, billing_period, last_seen, display_order)
+		 VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), 0) + 1 FROM agents))
 		 ON CONFLICT(hostname) DO UPDATE SET
 		   region = excluded.region,
 		   expires_at = excluded.expires_at,
@@ -622,7 +626,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 }
 
 func (s *Store) GetAgents() ([]AgentRow, error) {
-	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores FROM agents ORDER BY id")
+	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order FROM agents ORDER BY display_order, id")
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +635,7 @@ func (s *Store) GetAgents() ([]AgentRow, error) {
 	var agents []AgentRow
 	for rows.Next() {
 		var a AgentRow
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores); err != nil {
+		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)

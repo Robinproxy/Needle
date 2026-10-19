@@ -42,6 +42,24 @@ function harness() {
   ctx.fetch=async url=>response(url==='/api/info'?{}:[node]);
   await ctx.softRefresh();assert.equal(states.at(-1).state,'ready');
 
+  // Ordering is shared by both layouts, independent of online state, and
+  // changing only display_order must trigger a render on the next refresh.
+  const orderedNodes = [
+    {...node,agent:{...node.agent,id:1,region:'US',display_order:2},_online:true},
+    {...node,agent:{...node.agent,id:2,region:'CN',display_order:1},_online:false},
+  ];
+  assert.equal(ctx.filterAndSort(orderedNodes).map(a=>a.agent.id).join(','),'2,1');
+  vm.runInContext('filterRegion="US";',ctx);
+  assert.equal(ctx.filterAndSort(orderedNodes).map(a=>a.agent.id).join(','),'1');
+  vm.runInContext('filterRegion=null;',ctx);
+  assert.equal(ctx.filterAndSort([{...node,agent:{id:4}},{...node,agent:{id:3}}]).map(a=>a.agent.id).join(','),'3,4');
+  ctx.fetch=async url=>response(url==='/api/info'?{}:[{...node,agent:{...node.agent,display_order:2}}]);
+  await ctx.softRefresh();
+  const beforeMove=renders.length;
+  ctx.fetch=async url=>response(url==='/api/info'?{}:[{...node,agent:{...node.agent,display_order:1}}]);
+  await ctx.softRefresh();
+  assert.equal(renders.length,beforeMove+1,'position change must redraw cards and list rows');
+
   ctx.fetch=async url=>url==='/api/info'?response({}):{ok:true,json:async()=>{throw new SyntaxError('unexpected <');}};
   await ctx.softRefresh();
   assert(states.at(-1).message.includes('invalid data'));

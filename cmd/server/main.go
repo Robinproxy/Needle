@@ -44,6 +44,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "move-agent":
+			if err := runMoveAgent(*dbPath, args[1:]); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "delete-agent":
 			if len(args) < 2 {
 				log.Fatal("usage: needle-server -db <path> [-y] delete-agent <id|hostname>")
@@ -74,7 +79,7 @@ func main() {
 			}
 			return
 		default:
-			log.Fatalf("unknown command %q (supported: list-agents, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0])
+			log.Fatalf("unknown command %q (supported: list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0])
 		}
 	}
 
@@ -149,16 +154,36 @@ func runListAgents(dbPath string) error {
 		return nil
 	}
 
-	fmt.Printf("%-6s %-24s %-8s %s\n", "ID", "HOSTNAME", "REGION", "LAST_SEEN")
-	for _, a := range agents {
+	fmt.Printf("%-6s %-6s %-24s %-8s %s\n", "POS", "ID", "HOSTNAME", "REGION", "LAST_SEEN")
+	for i, a := range agents {
 		lastSeen := "-"
 		if a.LastSeen != nil {
 			lastSeen = time.Unix(*a.LastSeen, 0).UTC().Format(time.RFC3339)
 		} else if m, err := store.GetLatestMetric(a.ID); err == nil && m != nil {
 			lastSeen = time.Unix(m.CreatedAt, 0).UTC().Format(time.RFC3339)
 		}
-		fmt.Printf("%-6d %-24s %-8s %s\n", a.ID, a.Hostname, a.Region, lastSeen)
+		fmt.Printf("%-6d %-6d %-24s %-8s %s\n", i+1, a.ID, a.Hostname, a.Region, lastSeen)
 	}
+	return nil
+}
+
+func runMoveAgent(dbPath string, args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: needle-server -db <path> move-agent <id|hostname> <position>")
+	}
+	position, err := strconv.Atoi(args[1])
+	if err != nil || position < 1 {
+		return fmt.Errorf("position must be a positive integer")
+	}
+	store, err := openStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer store.Close()
+	if err := store.MoveAgent(args[0], position); err != nil {
+		return err
+	}
+	fmt.Printf("moved agent %q to position %d; dashboard updates on its next refresh\n", args[0], position)
 	return nil
 }
 
