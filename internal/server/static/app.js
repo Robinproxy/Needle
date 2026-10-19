@@ -842,7 +842,10 @@ function renderSparklines(id, metrics) {
 }
 
 function sparklineColor() {
-  return 'hsl(' + getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() + ')';
+  // ECharts 5's emphasis color parser requires comma-separated HSL, while
+  // browsers also accept the space-separated channels used by our CSS vars.
+  const channels = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim().split(/\s+/);
+  return 'hsl(' + channels.join(', ') + ')';
 }
 
 function tcpingChartTheme() {
@@ -891,6 +894,10 @@ function renderSparkline(elemId, data, isPercent) {
       type: 'line', data, smooth: true, symbol: 'none', sampling: 'lttb',
       lineStyle: { color, width: 1.5 },
       areaStyle: { color, opacity: 0.04 },
+      emphasis: {
+        lineStyle: { color, width: 1.5 },
+        areaStyle: { color, opacity: 0.04 },
+      },
     }]
   });
   sparkCharts[elemId] = chart;
