@@ -1,0 +1,38 @@
+name: Agent service security
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'cmd/agent/**'
+      - 'internal/agent/**'
+      - 'scripts/needle-agent.sh'
+      - 'scripts/test-*agent*'
+      - '.github/workflows/agent-security.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  linux-systemd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Unit and installer regression tests
+        run: |
+          go test -race ./...
+          bash -n scripts/needle-agent.sh
+          python3 scripts/test-linux-agent-installer.py
+          python3 scripts/test-agent-upgrade-config.py
+      - name: Build Agent and real Linux collector tests
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/needle-agent-security ./cmd/agent
+          CGO_ENABLED=0 go test -c -o /tmp/needle-collector-security.test ./internal/agent/collector
+      - name: Verify dedicated user, systemd sandbox and complete lifecycle
+        run: sudo env NEEDLE_DISPOSABLE_SYSTEMD_TEST=1 python3 scripts/test-linux-agent-systemd.py /tmp/needle-agent-security /tmp/needle-collector-security.test

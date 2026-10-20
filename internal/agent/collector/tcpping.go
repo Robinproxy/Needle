@@ -1,8 +1,11 @@
 package collector
 
 import (
+	"errors"
+	"log"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -29,6 +32,9 @@ func TCPing(targets []TCPingTarget) []TCPingResult {
 			start := time.Now()
 			conn, err := net.DialTimeout("tcp", target.Target, 5*time.Second)
 			if err != nil {
+				if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+					log.Printf("TCP Ping %q permission denied: %v", target.Name, err)
+				}
 				results[idx] = TCPingResult{
 					Name:      target.Name,
 					Target:    target.Target,

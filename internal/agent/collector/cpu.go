@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"fmt"
 	"runtime"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -23,5 +24,5 @@ func CollectCPU() (*CPUStats, error) {
 	if len(p) > 0 {
 		return &CPUStats{Percent: p[0], Cores: cores}, nil
 	}
-	return &CPUStats{Cores: cores}, nil
+	return nil, fmt.Errorf("CPU collector returned no utilization sample")
 }

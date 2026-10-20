@@ -208,6 +208,19 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 sudo bash /tmp/needle-agent.sh install
 ```
 
+Run the installer and service-management commands as root. The installer requires the standard Linux account tools (`useradd`, `groupadd`, `userdel`, `groupdel`, `getent`) and util-linux (`runuser`, `flock`). It creates a dedicated `needle-agent` system account with no home directory or interactive login. The service runs as that user, with no Linux capabilities, a read-only system filesystem, protected home directories, and private temporary/device namespaces. No writable application-state directory is needed. The Agent only collects and reports data; it does not execute Server commands or update itself.
+
+| Location | Owner | Mode |
+| --- | --- | --- |
+| `/opt/needle-agent/` | `root:needle-agent` | `750` |
+| `/opt/needle-agent/bin/` | `root:root` | `755` |
+| `/opt/needle-agent/bin/needle-agent` | `root:root` | `755` |
+| `/opt/needle-agent/agent.yaml` | `root:needle-agent` | `640` |
+| `/opt/needle-agent/agent.yaml.bak` (when present) | `root:root` | `600` |
+| `/etc/systemd/system/needle-agent.service` | `root:root` | `644` |
+
+The Agent can read its configuration but cannot modify it, its executable, the installation directory, or its service file. Edit configuration with `sudo`, then restart the service as root. Basic Linux collectors and TCP probes do not need elevated privileges; collection errors are logged and unavailable metric groups are reported as missing rather than healthy zero values. Swap totals are included in the memory report; this does not add a new dashboard chart.
+
 Enter the Server HTTPS URL and node details. Use a unique token per Agent; leaving the token empty generates one. Select `5) Permanent` for no expiry, or choose a finite billing period. Choose the TCP Ping mode and enter the monthly upload + download allowance in decimal GB (`1000` = 1 TB, `0` or Enter = no limit). Allow the printed token **on the Server** using the command in the matching Server section above. The first successful report binds the token to the hostname.
 
 ### Status, logs, and upgrades
@@ -237,10 +250,12 @@ Running `install` again with an existing Linux Agent configuration uses the upgr
 
 ```sh
 sudo systemctl stop needle-agent
-sudo /opt/needle-agent/bin/needle-agent /opt/needle-agent/agent.yaml
+sudo runuser -u needle-agent -- /opt/needle-agent/bin/needle-agent /opt/needle-agent/agent.yaml
 # Press Ctrl+C, then start the service again
 sudo systemctl start needle-agent
 ```
+
+Upgrading an older root-run installation automatically creates the service account and migrates permissions. Configuration is validated before replacement and checked again as the service user. Existing running and autostart states are preserved; a new installation starts immediately and at boot. A failed deployment restores the previous executable, configuration, permissions, and service. If rollback itself fails, root-only originals are retained in `/opt/needle-agent/recovery/` for manual recovery. An existing account with conflicting permissions or a systemd drop-in that changes the required user, group, capabilities, or sandbox settings is rejected rather than silently reused. Systems must support the listed systemd isolation settings.
 
 ### Uninstall
 
@@ -252,6 +267,8 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 ```
 
 Successful Server unregistration removes node history and the bound token. Allow a token on the Server before reconnecting a reinstalled Agent.
+
+Linux uninstall also removes the dedicated service account and group; it does not remove a home directory because none is created. These systemd/account changes do not apply to the separate OpenWrt / ImmortalWrt procd installer.
 
 </details>
 

@@ -145,11 +145,21 @@ BIN_DIR={shlex.quote(str(bindir))}
 TMP_DIR={shlex.quote(str(root/'download'))}
 mkdir "$TMP_DIR"
 require_root() {{ :; }}
+require_linux_runtime() {{ :; }}
 upgrade_interactive() {{ true; }}
 tcping_prompt() {{ IFS= read -r TCPING_ANSWER; }}
 download_release_agent() {{ VERSION=v9.9.9; printf 'new binary' > "$TMP_DIR/needle-agent"; }}
 write_systemd_unit() {{ :; }}
 systemctl() {{ :; }}
+deploy_agent() {{
+  if [ "$UPGRADE_RECONFIGURE" = true ]; then
+    cp -p "$AGENT_YAML" "$AGENT_YAML.bak"
+    chmod 600 "$AGENT_YAML.bak"
+  fi
+  cp "$TMP_DIR/agent.yaml" "$AGENT_YAML"
+  chmod 640 "$AGENT_YAML"
+  cp "$TMP_DIR/needle-agent" "$BIN_DIR/needle-agent"
+}}
 cmd_upgrade {option}
 '''
                 result=subprocess.run(['/bin/bash','-c',commands],input=answers,text=True,capture_output=True)
@@ -159,7 +169,7 @@ cmd_upgrade {option}
                     if not line.startswith(('tcpping:','  ')):self.assertIn(line+'\n',actual)
                 if changed:
                     self.assertEqual(Path(str(config)+'.bak').read_text(),OLD)
-                    self.assertEqual(config.stat().st_mode & 0o777,0o600)
+                    self.assertEqual(config.stat().st_mode & 0o777,0o640)
                     self.assertNotIn('old.example',actual)
                 else:self.assertEqual(actual,OLD)
                 self.assertEqual((bindir/'needle-agent').read_text(),'new binary')

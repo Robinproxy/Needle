@@ -23,6 +23,7 @@ jobs:
         run: |
           sh -n scripts/needle-agent-openwrt.sh
           bash -n scripts/needle-agent.sh
+          python3 scripts/test-linux-agent-installer.py
           python3 scripts/test-openwrt-installer.py
           python3 scripts/test-tcpping-selection.py
           python3 scripts/test-agent-upgrade-config.py
@@ -31,6 +32,11 @@ jobs:
           node scripts/test-dashboard-refresh.cjs
           node scripts/test-sparkline-hover.cjs
           node scripts/test-card-billing.cjs
+      - name: Verify real Linux Agent service isolation and lifecycle
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/needle-agent-security ./cmd/agent
+          CGO_ENABLED=0 go test -c -o /tmp/needle-collector-security.test ./internal/agent/collector
+          sudo env NEEDLE_DISPOSABLE_SYSTEMD_TEST=1 python3 scripts/test-linux-agent-systemd.py /tmp/needle-agent-security /tmp/needle-collector-security.test
 
   build:
     needs: installer-check

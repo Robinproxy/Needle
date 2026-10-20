@@ -5,6 +5,9 @@ REPO="Robinproxy/Needle"
 INSTALL_DIR="/opt/needle-agent"
 BIN_DIR="$INSTALL_DIR/bin"
 SERVICE_NAME="needle-agent"
+AGENT_USER="needle-agent"
+AGENT_GROUP="needle-agent"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 AGENT_YAML="$INSTALL_DIR/agent.yaml"
 SCRIPT_URL="https://raw.githubusercontent.com/$REPO/main/scripts/needle-agent.sh"
 
@@ -211,8 +214,50 @@ download_release_agent() {
   fi
 }
 
+require_linux_runtime() {
+  [ "$(uname -s)" = Linux ] || { echo 'ERROR: this installer requires Linux and systemd.' >&2; exit 1; }
+  local tool
+  for tool in systemctl getent useradd groupadd userdel groupdel runuser install stat flock; do
+    command -v "$tool" >/dev/null || { echo "ERROR: required command not found: $tool" >&2; exit 1; }
+  done
+  # Serialize installation, upgrades and removal. /run is managed by root.
+  umask 077
+  exec 9>"/run/${SERVICE_NAME}-install.lock"
+  flock -n 9 || { echo 'ERROR: another Needle Agent installer is running.' >&2; exit 1; }
+}
+
+validate_agent_account() {
+  local entry name password uid gid gecos home shell group_entry group_gid members
+  entry=$(getent passwd "$AGENT_USER") || return 1
+  IFS=: read -r name password uid gid gecos home shell <<< "$entry"
+  group_entry=$(getent group "$AGENT_GROUP") || return 1
+  IFS=: read -r name password group_gid members <<< "$group_entry"
+  case "$shell" in */nologin|/bin/false) ;; *) return 1 ;; esac
+  [ "$uid" -gt 0 ] && [ "$gid" -gt 0 ] && [ "$gid" = "$group_gid" ] &&
+    [ "$home" = /nonexistent ] && [ "$(id -G "$AGENT_USER")" = "$gid" ] || return 1
+  # Other users must not inherit access to this Agent's token.
+  [ -z "$members" ] || [ "$members" = "$AGENT_USER" ]
+}
+
+ensure_agent_account() {
+  local shell
+  if ! getent passwd "$AGENT_USER" >/dev/null; then
+    if getent group "$AGENT_GROUP" >/dev/null; then
+      echo 'ERROR: an existing needle-agent group has no matching service user; refusing to reuse it.' >&2
+      return 1
+    fi
+    shell=$(command -v nologin) || { echo 'ERROR: nologin is required.' >&2; return 1; }
+    groupadd --system "$AGENT_GROUP"
+    if ! useradd --system --gid "$AGENT_GROUP" --home-dir /nonexistent --no-create-home --shell "$shell" "$AGENT_USER"; then
+      groupdel "$AGENT_GROUP"
+      return 1
+    fi
+  fi
+  validate_agent_account || { echo 'ERROR: needle-agent is not an isolated service account; refusing to alter it.' >&2; return 1; }
+}
+
 write_systemd_unit() {
-  cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<UNIT
+  cat > "$1" <<UNIT
 [Unit]
 Description=Needle Agent
 After=network-online.target
@@ -220,6 +265,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=${AGENT_USER}
+Group=${AGENT_GROUP}
+SupplementaryGroups=
 ExecStart=${BIN_DIR}/needle-agent ${AGENT_YAML}
 Restart=always
 RestartSec=10
@@ -229,7 +277,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=${INSTALL_DIR}
+PrivateDevices=true
 RestrictNamespaces=true
 LockPersonality=true
 RestrictRealtime=true
@@ -242,6 +290,142 @@ AmbientCapabilities=
 WantedBy=multi-user.target
 UNIT
 }
+
+validate_systemd_sandbox() {
+  local property expected actual setting
+  for setting in "User=$AGENT_USER" "Group=$AGENT_GROUP" 'SupplementaryGroups=' \
+      'NoNewPrivileges=yes' 'ProtectSystem=strict' 'ProtectHome=yes' \
+      'PrivateTmp=yes' 'PrivateDevices=yes' 'RestrictSUIDSGID=yes' \
+      'CapabilityBoundingSet=' 'AmbientCapabilities='; do
+    property=${setting%%=*}
+    expected=${setting#*=}
+    actual=$(systemctl show -p "$property" --value "$SERVICE_NAME")
+    if [ "$actual" != "$expected" ]; then
+      echo "ERROR: effective systemd $property differs from the required sandbox; check drop-in overrides and systemd support." >&2
+      return 1
+    fi
+  done
+}
+
+wait_agent_active() {
+  local attempt
+  # Allow immediate ExecStart/config failures to surface before reporting success.
+  for attempt in 1 2 3 4 5; do
+    sleep 1
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+      local pid actual_uid
+      pid=$(systemctl show -p MainPID --value "$SERVICE_NAME")
+      actual_uid=$(ps -o uid= -p "$pid" | tr -d ' ')
+      [ "$actual_uid" = "$(id -u "$AGENT_USER")" ] && [ "$actual_uid" != 0 ] && return 0
+    fi
+  done
+  echo "ERROR: Agent did not remain active as $AGENT_USER; inspect journalctl -u $SERVICE_NAME." >&2
+  return 1
+}
+
+# Both install and upgrade commit through this path. Originals stay root-only
+# in TMP_DIR until validation and service startup have succeeded.
+deploy_agent() (
+  set -e
+  # Subshell variables intentionally aren't local: EXIT runs after a function's
+  # local scope unwinds, and rollback must still see the saved deployment state.
+  had_binary=false had_config=false had_unit=false had_backup=false
+  was_active=false was_enabled=false changed=false had_user=false
+  old_install_mode= old_bin_mode= staged_binary= staged_config= staged_unit=
+  for path in "$INSTALL_DIR" "$BIN_DIR" "$BIN_DIR/needle-agent" "$AGENT_YAML" "$AGENT_YAML.bak" "$SERVICE_FILE"; do
+    [ ! -L "$path" ] || { echo "ERROR: refusing to replace symlink: $path" >&2; exit 1; }
+  done
+  chmod 755 "$TMP_DIR/needle-agent"
+  "$TMP_DIR/needle-agent" -check-config "$TMP_DIR/agent.yaml"
+  write_systemd_unit "$TMP_DIR/needle-agent.service"
+  [ -s "$TMP_DIR/needle-agent.service" ] || { echo 'ERROR: empty systemd unit.' >&2; exit 1; }
+  getent passwd "$AGENT_USER" >/dev/null && had_user=true
+  ensure_agent_account
+
+  if [ -d "$INSTALL_DIR" ]; then old_install_mode=$(stat -c '%u:%g:%a' "$INSTALL_DIR"); fi
+  if [ -d "$BIN_DIR" ]; then old_bin_mode=$(stat -c '%u:%g:%a' "$BIN_DIR"); fi
+  if [ -f "$BIN_DIR/needle-agent" ]; then cp -p "$BIN_DIR/needle-agent" "$TMP_DIR/old-binary"; had_binary=true; fi
+  if [ -f "$AGENT_YAML" ]; then cp -p "$AGENT_YAML" "$TMP_DIR/old-config"; had_config=true; fi
+  if [ -f "$SERVICE_FILE" ]; then cp -p "$SERVICE_FILE" "$TMP_DIR/old-unit"; had_unit=true; fi
+  if [ -f "$AGENT_YAML.bak" ]; then cp -p "$AGENT_YAML.bak" "$TMP_DIR/old-backup"; had_backup=true; fi
+  systemctl is-active --quiet "$SERVICE_NAME" && was_active=true
+  systemctl is-enabled --quiet "$SERVICE_NAME" && was_enabled=true
+
+  deployment_exit() {
+    local result=$?
+    trap - EXIT
+    if [ "$result" -ne 0 ] && [ "$changed" = true ]; then
+      set +e
+      echo 'ERROR: deployment failed; restoring previous binary, configuration and service.' >&2
+      local restore_failed=false
+      if [ -f "$SERVICE_FILE" ]; then systemctl stop "$SERVICE_NAME" || restore_failed=true; fi
+      if [ "$had_binary" = true ]; then
+        rm -f "$BIN_DIR/needle-agent"
+        cp -p "$TMP_DIR/old-binary" "$BIN_DIR/needle-agent" || restore_failed=true
+      else rm -f "$BIN_DIR/needle-agent"; fi
+      if [ "$had_config" = true ]; then cp -p "$TMP_DIR/old-config" "$AGENT_YAML" || restore_failed=true
+      else rm -f "$AGENT_YAML"; fi
+      if [ "$had_backup" = true ]; then cp -p "$TMP_DIR/old-backup" "$AGENT_YAML.bak" || restore_failed=true
+      else rm -f "$AGENT_YAML.bak"; fi
+      if [ "$had_unit" = true ]; then cp -p "$TMP_DIR/old-unit" "$SERVICE_FILE" || restore_failed=true
+      else rm -f "$SERVICE_FILE"; fi
+      if [ -n "$old_install_mode" ]; then
+        chown "${old_install_mode%:*}" "$INSTALL_DIR" && chmod "${old_install_mode##*:}" "$INSTALL_DIR" || restore_failed=true
+      fi
+      if [ -n "$old_bin_mode" ]; then
+        chown "${old_bin_mode%:*}" "$BIN_DIR" && chmod "${old_bin_mode##*:}" "$BIN_DIR" || restore_failed=true
+      fi
+      systemctl daemon-reload || restore_failed=true
+      if [ "$was_enabled" = true ]; then systemctl enable "$SERVICE_NAME" || restore_failed=true
+      else systemctl disable "$SERVICE_NAME" 2>/dev/null; fi
+      if [ "$was_active" = true ]; then systemctl start "$SERVICE_NAME" || restore_failed=true; fi
+      if [ "$restore_failed" = true ]; then
+        # Do not let the download cleanup erase the only remaining originals.
+        install -d -o root -g root -m 700 "$INSTALL_DIR/recovery"
+        cp -p "$TMP_DIR"/old-* "$INSTALL_DIR/recovery/"
+        echo "ERROR: rollback needs attention; originals preserved in $INSTALL_DIR/recovery (root only)." >&2
+      elif [ "$had_user" = false ]; then
+        userdel "$AGENT_USER"
+        if getent group "$AGENT_GROUP" >/dev/null; then groupdel "$AGENT_GROUP"; fi
+      fi
+    fi
+    rm -f "$staged_binary" "$staged_config" "$staged_unit"
+    exit "$result"
+  }
+  trap deployment_exit EXIT
+  # A stop failure must not lead to replacing a still-running service.
+  changed=true
+  if [ "$had_unit" = true ] || [ "$was_active" = true ]; then systemctl stop "$SERVICE_NAME"; fi
+  install -d -o root -g "$AGENT_GROUP" -m 750 "$INSTALL_DIR"
+  install -d -o root -g root -m 755 "$BIN_DIR"
+  staged_binary=$(mktemp "$BIN_DIR/.needle-agent.XXXXXX")
+  install -o root -g root -m 755 "$TMP_DIR/needle-agent" "$staged_binary"
+  staged_config=$(mktemp "$INSTALL_DIR/.agent.yaml.XXXXXX")
+  install -o root -g "$AGENT_GROUP" -m 640 "$TMP_DIR/agent.yaml" "$staged_config"
+  staged_unit=$(mktemp "${SERVICE_FILE}.XXXXXX")
+  install -o root -g root -m 644 "$TMP_DIR/needle-agent.service" "$staged_unit"
+  mv -f "$staged_binary" "$BIN_DIR/needle-agent"
+  mv -f "$staged_config" "$AGENT_YAML"
+  mv -f "$staged_unit" "$SERVICE_FILE"
+  if [ "${UPGRADE_RECONFIGURE:-false}" = true ] && [ "$had_config" = true ]; then
+    install -o root -g root -m 600 "$TMP_DIR/old-config" "$AGENT_YAML.bak"
+  elif [ "$had_backup" = true ]; then
+    chown root:root "$AGENT_YAML.bak"
+    chmod 600 "$AGENT_YAML.bak"
+  fi
+  # Catch config-read/parent-directory permissions as the actual service user.
+  runuser -u "$AGENT_USER" -- "$BIN_DIR/needle-agent" -check-config "$AGENT_YAML"
+  systemctl daemon-reload
+  validate_systemd_sandbox
+  if [ "$had_config" = false ]; then
+    systemctl enable "$SERVICE_NAME"
+    systemctl start "$SERVICE_NAME"
+    wait_agent_active
+  elif [ "$was_active" = true ]; then
+    systemctl start "$SERVICE_NAME"
+    wait_agent_active
+  fi
+)
 
 unregister_from_server() {
   local server token hostname
@@ -515,15 +699,9 @@ cmd_install() {
     cmd_upgrade
     return
   fi
+  require_linux_runtime
   require_tty_for_install
   download_release_agent interactive
-
-  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-
-  mkdir -p "$BIN_DIR"
-  rm -f "$BIN_DIR/needle-agent"
-  cp "$TMP_DIR/needle-agent" "$BIN_DIR/"
-  chmod +x "$BIN_DIR/needle-agent"
 
   read_prompt HOSTNAME "Hostname (leave empty for auto-detection) []: "
   HOSTNAME="${HOSTNAME:-}"
@@ -593,7 +771,7 @@ cmd_install() {
   configure_tcping
   configure_monthly_traffic
 
-  cat > "$AGENT_YAML" <<YAML
+  cat > "$TMP_DIR/agent.yaml" <<YAML
 hostname: "${HOSTNAME}"
 server: ${SERVER_URL}
 token: ${TOKEN}
@@ -602,13 +780,11 @@ interval: ${INTERVAL}
 tls_skip_verify: false
 allow_plain_http: ${ALLOW_PLAIN_HTTP}
 YAML
-  cat "$TMP_DIR/billing.yaml" "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$AGENT_YAML"
-  chmod 600 "$AGENT_YAML"
+  cat "$TMP_DIR/billing.yaml" "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"
+  chmod 600 "$TMP_DIR/agent.yaml"
 
-  echo "Installing systemd service..."
-  write_systemd_unit
-  systemctl daemon-reload
-  systemctl enable --now "$SERVICE_NAME"
+  echo "Installing Agent and unprivileged systemd service..."
+  deploy_agent
 
   echo
   echo "========================================="
@@ -618,6 +794,7 @@ YAML
   echo " Region:   $REGION"
   echo " Server:   $SERVER_URL"
   echo " Config:   $AGENT_YAML"
+  echo " Run as:   $AGENT_USER (root manages installation and systemd)"
   echo "========================================="
   echo
   echo ">>> IMPORTANT: allow this agent on the Server (whitelist) <<<"
@@ -642,6 +819,7 @@ cmd_upgrade() {
     echo "Run: sudo bash needle-agent.sh install"
     exit 1
   fi
+  require_linux_runtime
 
   UPGRADE_CONFIG_MODE=ask
   while [ $# -gt 0 ]; do
@@ -657,33 +835,17 @@ cmd_upgrade() {
   done
   download_release_agent
   choose_upgrade_config "$AGENT_YAML"
-  if [ "$UPGRADE_RECONFIGURE" = true ]; then
-    cp -p "$AGENT_YAML" "$AGENT_YAML.bak"
-    chmod 600 "$AGENT_YAML.bak"
-    cp "$TMP_DIR/agent.yaml" "$AGENT_YAML.new"
-    chmod 600 "$AGENT_YAML.new"
+  if [ "$UPGRADE_RECONFIGURE" != true ]; then
+    cp "$AGENT_YAML" "$TMP_DIR/agent.yaml"
   fi
-
-  echo "Stopping $SERVICE_NAME..."
-  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-
-  echo "Installing new binary..."
-  mkdir -p "$BIN_DIR"
-  cp "$TMP_DIR/needle-agent" "$BIN_DIR/"
-  chmod +x "$BIN_DIR/needle-agent"
-
-  if [ "$UPGRADE_RECONFIGURE" = true ]; then
-    mv -f "$AGENT_YAML.new" "$AGENT_YAML"
-  fi
-
-  echo "Updating systemd service..."
-  write_systemd_unit
-  systemctl daemon-reload
-  systemctl enable --now "$SERVICE_NAME"
+  chmod 600 "$TMP_DIR/agent.yaml"
+  echo "Updating Agent, permissions and unprivileged systemd service..."
+  deploy_agent
 
   echo
   echo "========================================="
   echo " Needle Agent upgraded to $VERSION!"
+  echo " Run as: $AGENT_USER; existing running/autostart state preserved."
   if [ "$UPGRADE_RECONFIGURE" = true ]; then
     echo " Selected settings updated; token and identity preserved. Backup: $AGENT_YAML.bak"
   else
@@ -720,18 +882,25 @@ cmd_uninstall() {
     esac
   fi
 
+  require_linux_runtime
+  if getent passwd "$AGENT_USER" >/dev/null; then
+    validate_agent_account || { echo 'ERROR: refusing to remove an unrelated needle-agent account.' >&2; exit 1; }
+  fi
+
   if [ "$do_unregister" = true ]; then
     unregister_from_server
   fi
 
   echo "Stopping service..."
-  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  if [ -f "$SERVICE_FILE" ] || systemctl is-active --quiet "$SERVICE_NAME"; then systemctl stop "$SERVICE_NAME"; fi
   systemctl disable "$SERVICE_NAME" 2>/dev/null || true
-  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  rm -f "$SERVICE_FILE"
   systemctl daemon-reload 2>/dev/null || true
 
   echo "Removing $INSTALL_DIR ..."
   rm -rf "$INSTALL_DIR"
+  if getent passwd "$AGENT_USER" >/dev/null; then userdel "$AGENT_USER"; fi
+  if getent group "$AGENT_GROUP" >/dev/null; then groupdel "$AGENT_GROUP"; fi
 
   echo
   echo "========================================="
