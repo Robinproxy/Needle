@@ -24,7 +24,9 @@ REPO = Path(__file__).resolve().parent.parent
 ISOLATED = os.environ.get('NEEDLE_SYSTEMD_TEST_ISOLATED') == '1'
 SERVICE = 'needle-agent-security-test' if ISOLATED else 'needle-agent'
 ACCOUNT = SERVICE
-INSTALL = Path('/opt') / SERVICE
+# /opt may be runner-writable on hosted CI. Use a root-managed parent for the
+# disposable instance without changing the production installer's /opt default.
+INSTALL = Path('/var/lib') / SERVICE
 UNIT = Path('/etc/systemd/system') / f'{SERVICE}.service'
 TOKEN = 'isolated-systemd-test-token'
 

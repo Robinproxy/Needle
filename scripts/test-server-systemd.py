@@ -5,7 +5,10 @@ if os.environ.get('NEEDLE_DISPOSABLE_SYSTEMD_TEST') != '1' or os.geteuid() != 0:
     raise SystemExit('Run as root only in a disposable systemd CI runner with NEEDLE_DISPOSABLE_SYSTEMD_TEST=1')
 binary=pathlib.Path(sys.argv[1]).resolve()
 script=pathlib.Path(__file__).with_name('needle-server.sh').resolve()
-base=pathlib.Path('/opt/needle-server-security-test'); name='needle-server-security-test'
+# Hosted runners can make /opt writable by the runner account. Keep the
+# disposable instance under a root-managed parent; never relax installer checks
+# or change permissions on a shared runner directory to accommodate this test.
+base=pathlib.Path('/var/lib/needle-server-security-test'); name='needle-server-security-test'
 unit=pathlib.Path('/etc/systemd/system/'+name+'.service'); db=base/'data/needle.db'
 if base.exists() or unit.exists() or subprocess.run(['getent','passwd',name],capture_output=True).returncode==0:
     raise SystemExit('Refusing to overwrite an existing test namespace')
@@ -102,6 +105,9 @@ read_prompt() {{ printf -v "$1" '%s' '127.0.0.1:18928'; }}
         run('bash','-c',prefix+'cmd_uninstall --purge --yes')
         assert not base.exists()
     print('PASS: root migration, non-root startup/restart, consistent backup, CLI followed by writes, DB/WAL/SHM permissions, retained uninstall/reinstall, explicit node deletion and purge')
+except Exception:
+    subprocess.run(['journalctl','-u',name,'-n','80','--no-pager'],check=False)
+    raise
 finally:
     subprocess.run(['systemctl','disable','--now',name],capture_output=True)
     unit.unlink(missing_ok=True);subprocess.run(['systemctl','daemon-reload'],capture_output=True)
