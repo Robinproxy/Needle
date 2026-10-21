@@ -24,7 +24,7 @@ curl -fsS "http://$port/api/health"
 docker exec "$container_id" needle-server -db /data/needle.db allow-token docker-test-only
 docker exec -u root "$container_id" needle-server -db /data/needle.db list-agents
 curl -fsS -H 'Authorization: Bearer docker-test-only' -H 'Content-Type: application/json' --data '{"hostname":"docker-ci","uptime":100}' "http://$port/api/report"
-docker exec "$container_id" needle-server -db /data/needle.db list-agents | rg docker-ci
+docker exec "$container_id" needle-server -db /data/needle.db list-agents | grep -F docker-ci
 sudo find "$test_dir/data" -type f -exec stat -c '%u:%g:%a' {} \; | while read -r actual; do
   [ "$actual" = '1000:1000:600' ] || { echo "unexpected DB/sidecar ownership: $actual" >&2; exit 1; }
 done
