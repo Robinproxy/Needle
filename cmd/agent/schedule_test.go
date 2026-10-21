@@ -57,7 +57,7 @@ func TestHistoryQueueDoesNotUseLatestOnlyAndLogsOverflow(t *testing.T) {
 		t.Fatal("queue overflow was silent")
 	}
 	close(release)
-	for expected := int64(1); expected <= historyQueueSize+1; expected++ {
+	for expected := int64(1); expected <= historyQueueSize; expected++ {
 		select {
 		case got := <-delivered:
 			if got != expected {
@@ -234,4 +234,39 @@ func TestProbeSchedulingDoesNotWaitForHistoricalTransport(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestHistoryBudgetIncludesInflightAndBoundsBytes(t *testing.T) {
+	b := &historyBudget{}
+	if !b.reserve(100, 1) || b.reserve(1, 1) {
+		t.Fatal("in-flight capacity not enforced")
+	}
+	b.release(100)
+	if b.reserve(historyReportByteLimit+1, 64) {
+		t.Fatal("oversized report accepted")
+	}
+	for range 8 {
+		if !b.reserve(historyReportByteLimit, 64) {
+			t.Fatal("valid reservation refused")
+		}
+	}
+	if b.reserve(1, 64) {
+		t.Fatal("total byte budget exceeded")
+	}
+}
+func TestHistoryAdvancedConfigValidation(t *testing.T) {
+	for _, text := range []string{"history_queue_capacity: -1", "history_queue_capacity: 1025", "history_retry_max_age_seconds: -1", "history_retry_max_age_seconds: 86401", "history_queue_capacity: 1.5", "history_retry_max_age_seconds: '20'"} {
+		var c Config
+		err := yaml.Unmarshal([]byte(text), &c)
+		if err == nil {
+			err = c.validateProbesAndInterval()
+		}
+		if err == nil {
+			t.Fatal(text)
+		}
+	}
+	var old Config
+	if old.queueCapacity() != 64 || old.retryMaxAge() != 1800 {
+		t.Fatal("advanced defaults changed")
+	}
 }

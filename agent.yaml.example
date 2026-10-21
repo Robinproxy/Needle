@@ -23,3 +23,7 @@ tcpping:
     target: "sh-cu-v4.ip.zstaticcdn.com:80"
   - name: "CTv4"
     target: "sh-ct-v4.ip.zstaticcdn.com:80"
+
+# Advanced in-memory history reliability; capacity includes the in-flight report.
+# history_queue_capacity: 64          # 1–1024; also bounded by 8 MiB total
+# history_retry_max_age_seconds: 1800 # 1–86400, measured from original sample time

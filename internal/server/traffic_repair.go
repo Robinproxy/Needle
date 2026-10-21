@@ -57,6 +57,14 @@ func (s *Store) RepairTrafficUsage(agentID, since int64, apply bool) (*TrafficRe
 	}
 	defer tx.Rollback()
 	result := &TrafficRepairResult{AgentID: agentID}
+	var strong bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM traffic_counter_identity WHERE agent_id=?)`, agentID).Scan(&strong); err != nil {
+		return nil, err
+	}
+	if strong {
+		result.Reason = "strong counter identity is active; legacy replay requires manual review"
+		return result, nil
+	}
 	var expiry sql.NullInt64
 	var period string
 	if err = tx.QueryRow("SELECT expires_at,billing_period FROM agents WHERE id=?", agentID).Scan(&expiry, &period); err != nil {
@@ -215,6 +223,9 @@ func (s *Store) RepairTrafficUsage(agentID, since int64, apply bool) (*TrafficRe
 	}
 	_, err = tx.Exec(`UPDATE traffic_accounting_legacy SET repaired_at=?,correction_sent=?,correction_recv=? WHERE agent_id=? AND boundary=? AND repaired_at IS NULL`, s.now().Unix(), result.CorrectionSent, result.CorrectionRecv, agentID, result.Boundary)
 	if err != nil {
+		return nil, err
+	}
+	if err = bumpAdminRevision(tx); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {

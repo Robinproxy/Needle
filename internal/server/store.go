@@ -49,7 +49,7 @@ func NewStoreCLI(path string) (*Store, error) {
 }
 
 func newStore(path string, purge bool) (*Store, error) {
-	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open(sqliteDriverName, path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,13 @@ func (s *Store) migrate() error {
 	if err := s.migrateTrafficAccounting(); err != nil {
 		return err
 	}
-	return s.migrateAccountingAudit()
+	if err := s.migrateAccountingAudit(); err != nil {
+		return err
+	}
+	if err := s.migrateReportReceipts(); err != nil {
+		return err
+	}
+	return s.migrateAdminRevision()
 }
 
 // migrateDropAutoIncrement rebuilds tables that historically used AUTOINCREMENT.
@@ -405,50 +411,48 @@ func (s *Store) BindToken(token, hostname string) error {
 	return tx.Commit()
 }
 
+// RevokeToken revokes only this credential; deleting monitoring data is an
+// explicit, separate local administrator operation (DeleteAgent).
 func (s *Store) RevokeToken(token string) error {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return fmt.Errorf("token is required")
-	}
+	_, err := s.revokeToken(token, "")
+	return err
+}
 
+func (s *Store) revokeToken(token, requiredHost string) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
-
+	var id int64
 	var hostname sql.NullString
-	err = tx.QueryRow(`SELECT hostname FROM agent_tokens WHERE token = ?`, token).Scan(&hostname)
+	err = tx.QueryRow(`SELECT id,hostname FROM agent_tokens WHERE token=?`, strings.TrimSpace(token)).Scan(&id, &hostname)
 	if err == sql.ErrNoRows {
-		return ErrTokenNotFound
+		return 0, ErrTokenNotFound
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
-
-	var deletedID int64
-	if hostname.Valid && hostname.String != "" {
-		var agentID int64
-		err = tx.QueryRow(`SELECT id FROM agents WHERE hostname = ?`, hostname.String).Scan(&agentID)
-		if err == nil {
-			deletedID = agentID
-			if err := deleteAgentTx(tx, agentID); err != nil {
-				return err
-			}
-		} else if err != sql.ErrNoRows {
-			return err
+	if requiredHost != "" && (!hostname.Valid || hostname.String != requiredHost) {
+		return 0, ErrTokenNotFound
+	}
+	if _, err = tx.Exec(`DELETE FROM agent_tokens WHERE token=?`, token); err != nil {
+		return 0, err
+	}
+	if err = bumpAdminRevision(tx); err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	s.live.mu.Lock()
+	for agentID, entry := range s.live.nodes {
+		if entry.token == token {
+			delete(s.live.nodes, agentID)
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM agent_tokens WHERE token = ?`, token); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	if deletedID > 0 {
-		s.live.remove(deletedID)
-	}
-	return nil
+	s.live.mu.Unlock()
+	return id, nil
 }
 
 func (s *Store) ListTokens() ([]TokenRow, error) {
@@ -558,6 +562,12 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
+	ReportID  string
+	Digest    string
+	Duplicate bool
+
+	Token string // HTTP-only authorization recheck within the write transaction.
+
 	TCPingCreatedAt     int64
 	Interval            int
 	RealtimeInterval    int
@@ -582,8 +592,37 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
+	if r.Token != "" {
+		var host sql.NullString
+		if err := tx.QueryRow(`SELECT hostname FROM agent_tokens WHERE token=?`, r.Token).Scan(&host); err == sql.ErrNoRows {
+			return 0, ErrTokenNotFound
+		} else if err != nil {
+			return 0, err
+		}
+		if host.Valid && host.String != "" && host.String != r.Hostname {
+			return 0, ErrTokenAlreadyBound
+		}
+		if !host.Valid || host.String == "" {
+			var taken bool
+			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM agent_tokens WHERE hostname=? AND token!=?)`, r.Hostname, r.Token).Scan(&taken); err != nil {
+				return 0, err
+			}
+			if taken {
+				return 0, ErrHostnameTaken
+			}
+			if _, err := tx.Exec(`UPDATE agent_tokens SET hostname=?,bound_at=? WHERE token=?`, r.Hostname, s.now().Unix(), r.Token); err != nil {
+				return 0, err
+			}
+		}
+	}
 
 	now := s.now()
+	if id, duplicate, err := checkReceipt(tx, r, now); err != nil {
+		return 0, err
+	} else if duplicate {
+		r.Duplicate = true
+		return id, tx.Commit()
+	}
 	createdAt := r.CreatedAt
 	if createdAt <= 0 || createdAt > now.Unix() {
 		createdAt = now.Unix()
@@ -627,7 +666,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 		}
 	}
 	if !metadataCurrent {
-		return agentID, tx.Commit()
+		return commitReport(tx, r, agentID, now)
 	}
 	// Keep the current report independent of history timestamps. Empty results
 	// explicitly disable probing, even when two reports arrive in one second.
@@ -643,10 +682,7 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 		ON CONFLICT(agent_id) DO UPDATE SET results_json = excluded.results_json`, agentID, string(encoded)); err != nil {
 		return 0, err
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return agentID, nil
+	return commitReport(tx, r, agentID, now)
 }
 
 const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0)"
@@ -1158,6 +1194,9 @@ func (s *Store) DeleteAgent(id int64) error {
 	if err := deleteAgentTx(tx, id); err != nil {
 		return err
 	}
+	if err := bumpAdminRevision(tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -1199,7 +1238,7 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 	if _, err := tx.Exec("DELETE FROM agent_tcpping_current WHERE agent_id = ?", id); err != nil {
 		return err
 	}
-	for _, table := range []string{"traffic_cycle_transition", "metrics_rollup_legacy", "metrics_hourly_rollup_legacy", "tcpping_results_rollup_legacy", "tcpping_hourly_rollup_legacy"} {
+	for _, table := range []string{"traffic_boot_epochs", "traffic_counter_identity", "report_receipts", "traffic_cycle_transition", "metrics_rollup_legacy", "metrics_hourly_rollup_legacy", "tcpping_results_rollup_legacy", "tcpping_hourly_rollup_legacy"} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE agent_id=?", id); err != nil {
 			return err
 		}

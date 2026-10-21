@@ -1,0 +1,30 @@
+name: Server security and lifecycle
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['cmd/server/**', 'internal/server/**', 'scripts/needle-server.sh', 'scripts/test-server*', 'Dockerfile', 'docker-compose.yml', '.github/workflows/server-security.yml']
+permissions:
+  contents: read
+jobs:
+  linux-systemd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: |
+          go test -race ./...
+          bash -n scripts/needle-server.sh
+          python3 scripts/test-server-installer.py
+          go build -o /tmp/needle-server-security ./cmd/server
+          sudo env NEEDLE_DISPOSABLE_SYSTEMD_TEST=1 python3 scripts/test-server-systemd.py /tmp/needle-server-security
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t needle-security-test --build-arg VERSION=ci --build-arg COMMIT="$GITHUB_SHA" .
+      - run: bash scripts/test-docker.sh needle-security-test

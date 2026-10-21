@@ -107,7 +107,7 @@ func TestRevokeTokenTransaction(t *testing.T) {
 	if err := store.RevokeToken(seed.token); err != nil {
 		t.Fatal(err)
 	}
-	assertAgentDataCounts(t, store, seed.id, 0, 0, 0, 0)
+	assertAgentDataCounts(t, store, seed.id, 1, 1, 1, 0)
 }
 
 func TestRevokeTokenRollsBackOnFailure(t *testing.T) {

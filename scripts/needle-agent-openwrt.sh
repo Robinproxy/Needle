@@ -64,7 +64,7 @@ Usage: sh needle-agent-openwrt.sh [install|upgrade|status|uninstall] [options]
   --reconfigure    Upgrade and reselect probes, allowance, and optional billing; preserve token
   --version vX.Y.Z  Install a specific release (default: latest stable)
   --configure-intervals  Upgrade and change only realtime/history intervals
-  --unregister     With uninstall: remove the node from the Server first
+  --unregister     With uninstall: revoke this Agent credential; keep Server data
   --purge          With uninstall: also delete local configuration
   -y, --yes        Skip uninstall confirmation
 Installation requires an interactive terminal. Interactive upgrades offer a config choice;
@@ -179,6 +179,7 @@ download() {
     tar xOzf "$TMP_DIR/$ARCHIVE" needle-agent > "$TMP_DIR/needle-agent"
     [ -s "$TMP_DIR/needle-agent" ] && [ ! -L "$TMP_DIR/needle-agent" ] || fail 'Agent binary missing or empty.'
     chmod 755 "$TMP_DIR/needle-agent"
+    "$TMP_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 ' || fail 'Release binary is older than this installer protocol; use its packaged installer or wait for a compatible release. Existing Agent unchanged.'
     "$TMP_DIR/needle-agent" -h > "$TMP_DIR/agent-help" 2>&1 || fail 'Agent binary cannot execute on this router.'
 }
 
@@ -723,6 +724,7 @@ uninstall_agent() {
     validate_paths
     if [ "$UNREGISTER" = true ]; then
         [ -x "$BINARY" ] && [ -f "$CONFIG" ] || fail 'Binary and configuration are needed to unregister.'
+        "$BINARY" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 ' || fail 'Upgrade Server and Agent before --unregister; older Agents may delete Server history. Plain local uninstall remains available.'
         UNREGISTER_WAS_RUNNING=false
         if [ -x "$SERVICE" ] && "$SERVICE" running >/dev/null 2>&1; then UNREGISTER_WAS_RUNNING=true; fi
         UNREGISTER_PENDING=true
@@ -748,7 +750,7 @@ uninstall_agent() {
             mv -f "$BACKUP_LIST.needle.tmp" "$BACKUP_LIST"
         fi
     fi
-    echo 'Agent removed. Server history is retained unless --unregister was used.'
+    echo 'Agent removed. Server history is retained; --unregister only revokes this credential.'
 }
 
 main() {

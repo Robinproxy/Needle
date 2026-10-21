@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -34,6 +35,35 @@ func TestResponseReadsAreBoundedAndBodiesClosed(t *testing.T) {
 			if err != nil && len(err.Error()) > maxResponseBytes+32 {
 				t.Fatal("unbounded error log")
 			}
+		}
+	}
+}
+
+func TestUnregisterRequiresHistoryPreservingCapability(t *testing.T) {
+	for _, safe := range []bool{false, true} {
+		posts := 0
+		r := NewReporter("http://localhost", "private-test", false)
+		r.client.Transport = transportFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method == "GET" {
+				body := `{"unregister_retains_history":false}`
+				if safe {
+					body = `{"unregister_retains_history":true}`
+				}
+				return response(200, body), nil
+			}
+			posts++
+			body, _ := io.ReadAll(req.Body)
+			if strings.Contains(string(body), "private-test") {
+				t.Error("token duplicated into unregister body")
+			}
+			return response(200, `{"status":"ok"}`), nil
+		})
+		err := r.Unregister(context.Background(), `node "quoted"`)
+		if safe && (err != nil || posts != 1) {
+			t.Fatal(err, posts)
+		}
+		if !safe && (err == nil || posts != 0) {
+			t.Fatal("unsafe old unregister was called", err, posts)
 		}
 	}
 }

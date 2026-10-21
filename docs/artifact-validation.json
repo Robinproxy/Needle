@@ -1,0 +1,107 @@
+{
+  "recorded_at": "2026-10-21T04:39:33.412719+00:00",
+  "host": "macOS 26.6.2 arm64 / Go 1.26.4",
+  "base_commit": "a3f485ef60fa5fb2becd525628141166436898a2",
+  "official_release": false,
+  "source_dirty": true,
+  "native_archives": [
+    {
+      "file": "needle-agent-darwin-arm64.tar.gz",
+      "sha256": "e18e960b02f9bc947f5e37112d40221c4800b5a2b96638086334d72479038b49",
+      "manifest": {
+        "source_tree_sha256": "93a069010566c91bf9d3f8fc771cd3bd22de30a973e587424d17da2eff7820d7",
+        "source_dirty": true,
+        "version": "candidate-a3f485ef60fa5fb2becd525628141166436898a2",
+        "commit": "a3f485ef60fa5fb2becd525628141166436898a2",
+        "os": "darwin",
+        "arch": "arm64",
+        "installer_protocol": "needle-install-v2",
+        "report_protocol": "persistent-report-v1",
+        "files": {
+          "needle-server": "b269e4b61f455be338d72d1be2662536269ef067155e645ddadf89a435dfb8cd",
+          "needle-agent": "c48cb3c8ab060246652ba010fd76ed76f9e8b23d643102636346ce04556ce672",
+          "needle-server.sh": "6929aec2e0a6a48dfb9bd88ab36c224fc0b4a6afc9954a94e0059a26429c1ef2",
+          "needle-agent.sh": "f2a7daf47e1c2d7d7f48f2ee6e4deaba4c3c35de3240a667edcf68311f69088c",
+          "needle-agent-openwrt.sh": "02d1ea3312eb8e8451de59bcd35625b69318b8147b739c0ab1ac85181129994e",
+          "agent.yaml.example": "45d114507367187ec8c585335717d89ee924ab13fd3ab95d229c985d600904f7",
+          "release-notes.md": "0f968ba842f89bbc3015d6c961b86b07a673403e54e47e369328a3926e2684e5"
+        },
+        "app_js_sha256": "9f9f7ca5f6c20221fa430a8a2ab96e5d44447543fadd1180abdae75084ce7930"
+      },
+      "checks": [
+        "archive checksum and safe entries",
+        "required components and component hashes",
+        "binary version and commit executed",
+        "installer protocol executed",
+        "offline Agent configuration executed"
+      ]
+    },
+    {
+      "file": "needle-darwin-arm64.tar.gz",
+      "sha256": "4e5ec5b5a9a36fee93a6dc2347063f4bf7607decee063f73548c0e698a9bc57c",
+      "manifest": {
+        "source_tree_sha256": "93a069010566c91bf9d3f8fc771cd3bd22de30a973e587424d17da2eff7820d7",
+        "source_dirty": true,
+        "version": "candidate-a3f485ef60fa5fb2becd525628141166436898a2",
+        "commit": "a3f485ef60fa5fb2becd525628141166436898a2",
+        "os": "darwin",
+        "arch": "arm64",
+        "installer_protocol": "needle-install-v2",
+        "report_protocol": "persistent-report-v1",
+        "files": {
+          "needle-server": "b269e4b61f455be338d72d1be2662536269ef067155e645ddadf89a435dfb8cd",
+          "needle-agent": "c48cb3c8ab060246652ba010fd76ed76f9e8b23d643102636346ce04556ce672",
+          "needle-server.sh": "6929aec2e0a6a48dfb9bd88ab36c224fc0b4a6afc9954a94e0059a26429c1ef2",
+          "needle-agent.sh": "f2a7daf47e1c2d7d7f48f2ee6e4deaba4c3c35de3240a667edcf68311f69088c",
+          "needle-agent-openwrt.sh": "02d1ea3312eb8e8451de59bcd35625b69318b8147b739c0ab1ac85181129994e",
+          "agent.yaml.example": "45d114507367187ec8c585335717d89ee924ab13fd3ab95d229c985d600904f7",
+          "release-notes.md": "0f968ba842f89bbc3015d6c961b86b07a673403e54e47e369328a3926e2684e5"
+        },
+        "app_js_sha256": "9f9f7ca5f6c20221fa430a8a2ab96e5d44447543fadd1180abdae75084ce7930"
+      },
+      "checks": [
+        "archive checksum and safe entries",
+        "required components and component hashes",
+        "binary version and commit executed",
+        "installer protocol executed",
+        "offline Agent configuration executed",
+        "Server started with temporary DB; served frontend hash matched"
+      ]
+    }
+  ],
+  "linux_agents": [
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "file": "needle-agent",
+      "sha256": "2b1fbbdbb5283a0ead923d66b5fd940f434fc6e126750e066e869959509feb3d",
+      "checks": [
+        "ELF64 machine type",
+        "no PT_INTERP",
+        "CGO_ENABLED=0",
+        "VCS base revision and embedded candidate version string"
+      ],
+      "executed": false
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "file": "needle-agent",
+      "sha256": "650d950314540428923e172a1fc997d0676897731dcd27359e77849901efe14a",
+      "checks": [
+        "ELF64 machine type",
+        "no PT_INTERP",
+        "CGO_ENABLED=0",
+        "VCS base revision and embedded candidate version string"
+      ],
+      "executed": false
+    }
+  ],
+  "pending": [
+    "Real Linux systemd Server/Agent lifecycle",
+    "Docker runtime tests",
+    "Linux amd64/arm64 CGO Server archive build and execution",
+    "Linux Agent packaged execution in CI"
+  ],
+  "publication": "No commit, push, tag, Release or deployment performed"
+}

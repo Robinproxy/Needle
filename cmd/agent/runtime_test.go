@@ -49,6 +49,10 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 	}
 	reports := make(chan agentpkg.ReportData, 20)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/report-capabilities" {
+			fmt.Fprint(w, `{"protocol":"persistent-report-v1"}`)
+			return
+		}
 		if r.URL.Path != "/api/report" || r.Header.Get("Authorization") != "Bearer isolated-runtime-token" {
 			http.Error(w, "invalid report identity", http.StatusUnauthorized)
 			return
@@ -59,7 +63,7 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 			return
 		}
 		reports <- report
-		fmt.Fprint(w, "ok")
+		json.NewEncoder(w).Encode(map[string]string{"protocol": "persistent-report-v1", "report_id": report.ReportID})
 	}))
 	defer receiver.Close()
 	config := filepath.Join(t.TempDir(), "agent.yaml")

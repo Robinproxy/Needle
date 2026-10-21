@@ -20,6 +20,9 @@ import (
 )
 
 type Config struct {
+	HistoryQueueCapacity      int `yaml:"history_queue_capacity"`
+	HistoryRetryMaxAgeSeconds int `yaml:"history_retry_max_age_seconds"`
+
 	BillingCurrency       string                   `yaml:"billing_currency"`
 	BillingAmount         *string                  `yaml:"billing_amount"`
 	MonthlyTrafficLimitGB float64                  `yaml:"monthly_traffic_limit_gb"`
@@ -45,8 +48,8 @@ func (c *Config) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == "realtime_interval" && node.Content[i+1].Tag != "!!int" {
-			return fmt.Errorf("realtime_interval must be an integer number of seconds")
+		if (node.Content[i].Value == "realtime_interval" || node.Content[i].Value == "history_queue_capacity" || node.Content[i].Value == "history_retry_max_age_seconds") && node.Content[i+1].Tag != "!!int" {
+			return fmt.Errorf("%s must be an integer", node.Content[i].Value)
 		}
 	}
 	*c = Config(decoded)
@@ -100,10 +103,23 @@ func (c Config) expiryUnix() (*int64, error) {
 	return &unix, nil
 }
 
+var Version = "dev"
+var BuildCommit = "unknown"
+
 func main() {
 	unregister := flag.Bool("unregister", false, "unregister this agent from server and exit")
 	checkConfig := flag.Bool("check-config", false, "validate configuration without collecting metrics or contacting the server")
+	showVersion := flag.Bool("version", false, "show binary version and source commit")
+	installerProtocol := flag.Bool("installer-protocol", false, "show supported installer protocol")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("needle-agent %s commit=%s\n", Version, BuildCommit)
+		return
+	}
+	if *installerProtocol {
+		fmt.Println("needle-install-v2 persistent-report-v1 realtime-v1")
+		return
+	}
 	if *unregister && *checkConfig {
 		log.Fatal("choose either -unregister or -check-config")
 	}
@@ -126,6 +142,9 @@ func main() {
 		cfg.Interval = 30
 	}
 
+	if err := cfg.validateToken(); err != nil {
+		log.Fatal(err)
+	}
 	if cfg.Insecure != nil {
 		log.Println("WARNING: config field 'insecure' is deprecated; use 'tls_skip_verify' instead.")
 	}
@@ -134,9 +153,6 @@ func main() {
 		log.Fatalf("invalid server configuration: %v", err)
 	}
 	if *checkConfig {
-		if strings.TrimSpace(cfg.Token) == "" {
-			log.Fatal("Agent token is required")
-		}
 		if err := cfg.validateProbesAndInterval(); err != nil {
 			log.Fatal(err)
 		}
@@ -211,7 +227,12 @@ func main() {
 		defer ticker.Stop()
 		realtimeTicks = ticker.C
 	}
+	bootID, bootErr := collector.BootID()
+	if bootErr != nil {
+		log.Printf("system boot identity unavailable; traffic continuity uses conservative compatibility: %v", bootErr)
+	}
 	decorate := func(data *agentpkg.ReportData) {
+		data.BootID = bootID
 		data.Hostname, data.Region = hostname, cfg.Region
 		data.ExpiresAt, data.BillingPeriod = expiresAtUnix, cfg.BillingPeriod
 		data.MonthlyTrafficLimit, data.BillingCost = monthlyLimit, billingCost
@@ -225,9 +246,10 @@ func main() {
 			return data
 		}
 	}
-	runSampling(ctx, historyTicker.C, realtimeTicks, sample(), sample(),
+	historySender := agentpkg.NewHistorySender(reporter, time.Duration(cfg.retryMaxAge())*time.Second, log.Printf)
+	runSamplingWithPolicy(historyPolicy{Capacity: cfg.queueCapacity()}, ctx, historyTicker.C, realtimeTicks, sample(), sample(),
 		func(ctx context.Context, data *agentpkg.ReportData) error {
-			return reporter.Send(ctx, data)
+			return historySender.Send(ctx, data)
 		}, func(ctx context.Context, data *agentpkg.ReportData) error {
 			return reporter.SendRealtime(ctx, agentpkg.RealtimeFromReport(data))
 		}, log.Printf, newProbeSampler(cfg.TCPing))

@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,7 +15,30 @@ import (
 
 const historyQueueSize = 64
 
+const historyQueueByteLimit = 8 << 20
+const historyReportByteLimit = 1 << 20
+
+type historyPolicy struct{ Capacity int }
+type historyBudget struct {
+	sync.Mutex
+	count, bytes int
+}
+
+func (b *historyBudget) reserve(size, capacity int) bool {
+	b.Lock()
+	defer b.Unlock()
+	if size > historyReportByteLimit || b.count >= capacity || b.bytes+size > historyQueueByteLimit {
+		return false
+	}
+	b.count++
+	b.bytes += size
+	return true
+}
+func (b *historyBudget) release(size int)    { b.Lock(); defer b.Unlock(); b.count--; b.bytes -= size }
+func (b *historyBudget) pending() (int, int) { b.Lock(); defer b.Unlock(); return b.count, b.bytes }
+
 type historyJob struct {
+	bytes int
 	data  *agentpkg.ReportData
 	ready <-chan struct{}
 }
@@ -24,12 +51,32 @@ func runSampling(ctx context.Context, historyTicks, realtimeTicks <-chan time.Ti
 	historySample, realtimeSample func() *agentpkg.ReportData,
 	sendHistory, sendRealtime func(context.Context, *agentpkg.ReportData) error,
 	logf func(string, ...any), prepare ...func(context.Context, *agentpkg.ReportData) (<-chan struct{}, error)) {
-	history := make(chan historyJob, historyQueueSize)
+	runSamplingWithPolicy(historyPolicy{Capacity: historyQueueSize}, ctx, historyTicks, realtimeTicks, historySample, realtimeSample, sendHistory, sendRealtime, logf, prepare...)
+}
+
+func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTicks, realtimeTicks <-chan time.Time,
+	historySample, realtimeSample func() *agentpkg.ReportData,
+	sendHistory, sendRealtime func(context.Context, *agentpkg.ReportData) error,
+	logf func(string, ...any), prepare ...func(context.Context, *agentpkg.ReportData) (<-chan struct{}, error)) {
+	if policy.Capacity <= 0 {
+		policy.Capacity = historyQueueSize
+	}
+	instanceBytes := make([]byte, 16)
+	if _, err := rand.Read(instanceBytes); err != nil {
+		logf("cannot create report instance: %v", err)
+		return
+	}
+	instance := hex.EncodeToString(instanceBytes)
+	var sequence uint64
+	budget := &historyBudget{}
+	history := make(chan historyJob, policy.Capacity)
 	realtime := make(chan *agentpkg.ReportData, 1)
 	var workers sync.WaitGroup
 	workers.Add(2)
 	go func() {
 		defer workers.Done()
+		lastHistoryError := time.Time{}
+		failures := 0
 		for {
 			select {
 			case <-ctx.Done():
@@ -46,8 +93,16 @@ func runSampling(ctx context.Context, historyTicks, realtimeTicks <-chan time.Ti
 					}
 				}
 				if err := sendHistory(ctx, job.data); err != nil && ctx.Err() == nil {
-					logf("history report failed: %v", err)
+					failures++
+					if time.Since(lastHistoryError) >= time.Minute {
+						lastHistoryError = time.Now()
+						pending, bytes := budget.pending()
+						logf("history report failed: queued_including_inflight=%d reserved_bytes=%d oldest_age=%s error=%v", pending, bytes, time.Since(time.Unix(job.data.CreatedAt, 0)).Round(time.Second), err)
+						logf("history discarded/failed samples since last notice=%d", failures)
+						failures = 0
+					}
 				}
+				budget.release(job.bytes)
 			}
 		}
 	}()
@@ -79,11 +134,25 @@ func runSampling(ctx context.Context, historyTicks, realtimeTicks <-chan time.Ti
 	}()
 	defer workers.Wait()
 	makeJob := func(data *agentpkg.ReportData) (historyJob, error) {
-		job := historyJob{data: data}
+		sequence++
+		data.ReportID = fmt.Sprintf("%s:%d", instance, sequence)
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			return historyJob{}, err
+		}
+		// Reserve room for the bounded (32 target) asynchronous probe batch before it
+		// mutates the report. Capacity includes the in-flight/retrying head.
+		size := len(encoded) + 32*1024
+		if !budget.reserve(size, policy.Capacity) {
+			return historyJob{}, fmt.Errorf("history queue full: count/byte bound reached")
+		}
+		job := historyJob{data: data, bytes: size}
 		if len(prepare) > 0 {
-			ready, err := prepare[0](ctx, data)
-			job.ready = ready
-			return job, err
+			job.ready, err = prepare[0](ctx, data)
+			if err != nil {
+				budget.release(size)
+				return historyJob{}, err
+			}
 		}
 		return job, nil
 	}
@@ -91,7 +160,7 @@ func runSampling(ctx context.Context, historyTicks, realtimeTicks <-chan time.Ti
 	if err == nil {
 		history <- first
 	} else {
-		logf("startup probe scheduling failed: %v", err)
+		logf("startup sample not queued: %v", err)
 	}
 	if realtimeTicks != nil {
 		realtimeSample()
@@ -100,28 +169,25 @@ func runSampling(ctx context.Context, historyTicks, realtimeTicks <-chan time.Ti
 	for {
 		select {
 		case <-ctx.Done():
-			if len(history) > 0 {
-				logf("shutdown: %d unsent historical samples remain in the bounded memory queue", len(history))
+			if pending, bytes := budget.pending(); pending > 0 {
+				logf("shutdown: discarding %d unsent/in-flight historical samples (%d reserved bytes); memory queue is not persisted", pending, bytes)
 			}
 			return
 		case <-historyTicks:
 			data := historySample()
 			job, err := makeJob(data)
 			if err != nil {
-				logf("history probe scheduling failed; sample not queued: %v", err)
+				dropped++
+				if dropped == 1 || dropped%64 == 0 {
+					n, bytes := budget.pending()
+					logf("history queue full or preparation failed: dropped=%d queued_including_inflight=%d reserved_bytes=%d reason=%v", dropped, n, bytes, err)
+				}
 				continue
 			}
-			select {
-			case history <- job:
-				if dropped > 0 {
-					logf("history queue recovered; %d samples could not be queued", dropped)
-					dropped = 0
-				}
-			default:
-				dropped++
-				if dropped == 1 {
-					logf("history queue full (%d samples); new historical samples cannot be retained until transport recovers", historyQueueSize)
-				}
+			history <- job // Reservation guarantees a free FIFO slot.
+			if dropped > 0 {
+				logf("history queue recovered: samples_not_queued=%d", dropped)
+				dropped = 0
 			}
 		case <-realtimeTicks:
 			data := realtimeSample()

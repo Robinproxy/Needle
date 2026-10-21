@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -122,19 +121,12 @@ type agentWithMetric struct {
 }
 
 func (h *Handler) nodeSnapshot(a AgentRow) (*agentWithMetric, error) {
-	m, err := h.store.GetLatestMetric(a.ID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	probes, err := h.store.GetLatestTCPing(a.ID)
+	base, err := h.committedNode(a)
 	if err != nil {
 		return nil, err
 	}
-	traffic, err := h.store.GetTrafficUsage(a.ID)
-	if err != nil {
-		return nil, err
-	}
-	result := &agentWithMetric{Agent: a, Metric: m, LatestTCPing: probes, TCPingEnabled: len(probes) > 0, Traffic: traffic}
+	result := &base
+	probes := result.LatestTCPing
 	if a.ExpiresAt != nil {
 		result.ExpiryDays, result.ExpiryDate = calcRenewalDue(*a.ExpiresAt, a.BillingPeriod, h.now())
 	}
@@ -193,6 +185,9 @@ func (h *Handler) snapshots() ([]agentWithMetric, error) {
 	// Realtime counter order remains independent and never advances DB ordering.
 	h.fullMu.Lock()
 	defer h.fullMu.Unlock()
+	if err := h.syncAdminRevision(); err != nil {
+		return nil, err
+	}
 	agents, err := h.store.GetAgents()
 	if err != nil {
 		return nil, err
@@ -212,6 +207,16 @@ func (h *Handler) snapshots() ([]agentWithMetric, error) {
 }
 
 func (h *Handler) publishNode(id int64, kind string) {
+	l := h.store.live
+	l.mu.Lock()
+	hasClients := len(l.clients) > 0
+	l.mu.Unlock()
+	if !hasClients && cacheCommittedSnapshots {
+		return
+	}
+	if err := h.syncAdminRevision(); err != nil {
+		return
+	}
 	a, err := h.store.GetAgent(id)
 	if err != nil {
 		return
@@ -220,7 +225,7 @@ func (h *Handler) publishNode(id int64, kind string) {
 	if err != nil {
 		return
 	}
-	l := h.store.live
+	l = h.store.live
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var present bool

@@ -26,7 +26,7 @@ class InstallerTests(unittest.TestCase):
         self.config = self.config_dir / 'agent.yaml'
         self.config.write_text("token: 'keep-me'\nbilling_period: 'forever'\n")
         self.binary = self.root / 'needle-agent'
-        self.binary.write_text('#!/bin/sh\nexit 0\n')
+        self.binary.write_text('#!/bin/sh\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1\"; fi\nexit 0\n')
         self.binary.chmod(0o755)
         self.service = self.root / 'service'
         self.backup = self.root / 'sysupgrade.conf'
@@ -40,7 +40,7 @@ class InstallerTests(unittest.TestCase):
         self.service.chmod(0o755)
         self.archive = self.root / 'fixture.tar.gz'
         with tarfile.open(self.archive, 'w:gz') as tar:
-            data = b'#!/bin/sh\n# new agent\nexit 0\n'
+            data = b'#!/bin/sh\n# new agent\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1\"; fi\nexit 0\n'
             entry = tarfile.TarInfo('needle-agent')
             entry.size = len(data)
             entry.mode = 0o755
@@ -140,6 +140,19 @@ configure
                 for path, data in before.items():
                     self.assertEqual(path.read_bytes(), data)
                 self.assertFalse(self.log.exists())
+
+    def test_incompatible_release_protocol_does_not_touch_installation(self):
+        with tarfile.open(self.archive, 'w:gz') as archive:
+            data=b'#!/bin/sh\nexit 0\n'
+            entry=tarfile.TarInfo('needle-agent');entry.size=len(data);entry.mode=0o755
+            archive.addfile(entry,io.BytesIO(data))
+        self.checksum.write_text(hashlib.sha256(self.archive.read_bytes()).hexdigest()+'  fixture.tar.gz\n')
+        before={p:p.read_bytes() for p in [self.binary,self.config,self.service]}
+        result=self.run_shell('main upgrade --version v9.9.9')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('older than this installer protocol',result.stderr)
+        self.assertFalse(self.log.exists())
+        for path,content in before.items():self.assertEqual(path.read_bytes(),content)
 
     def test_upgrade_preserves_config_and_restarts(self):
         before = self.config.read_bytes()
@@ -349,6 +362,7 @@ main upgrade --version v9.9.9
         checked_path = self.root / 'checked-config'
         script = f'''#!/bin/sh
 case "$1" in
+    -installer-protocol) echo "needle-install-v2 persistent-report-v1 realtime-v1"; exit 0 ;;
     -h) printf '  -check-config string\\n'; exit 0 ;;
     -check-config) printf '%s' "$2" > {shlex.quote(str(checked_path))}; exit 1 ;;
 esac
@@ -447,7 +461,7 @@ main upgrade --version v9.9.9
         self.assertEqual([line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')], ['stop','disable'])
 
     def test_failed_unregister_restores_service(self):
-        self.binary.write_text('#!/bin/sh\nexit 1\n')
+        self.binary.write_text('#!/bin/sh\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1\"; exit 0; fi\nexit 1\n')
         result = self.run_shell('main uninstall --yes --unregister')
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(self.binary.exists())
@@ -455,7 +469,7 @@ main upgrade --version v9.9.9
         self.assertEqual([line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')], ['stop','start'])
 
     def test_failed_unregister_does_not_start_previously_stopped_service(self):
-        self.binary.write_text('#!/bin/sh\nexit 1\n')
+        self.binary.write_text('#!/bin/sh\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1\"; exit 0; fi\nexit 1\n')
         self.service.write_text(f'''#!/bin/sh
 echo "$1" >> {shlex.quote(str(self.log))}
 case "$1" in running|enabled) exit 1 ;; esac
@@ -468,7 +482,7 @@ case "$1" in running|enabled) exit 1 ;; esac
         self.assertFalse(self.lock.exists())
 
     def test_interrupted_unregister_restores_original_running_state(self):
-        self.binary.write_text('#!/bin/sh\nkill -TERM "$PPID"\nsleep 0.1\nexit 1\n')
+        self.binary.write_text('#!/bin/sh\nif [ "$1" = -installer-protocol ]; then echo "needle-install-v2 persistent-report-v1 realtime-v1"; exit 0; fi\nkill -TERM "$PPID"\nsleep 0.1\nexit 1\n')
         before = {path: path.read_bytes() for path in [self.binary, self.config, self.service]}
         result = self.run_shell('main uninstall --yes --unregister')
         self.assertNotEqual(result.returncode, 0)
@@ -477,6 +491,7 @@ case "$1" in running|enabled) exit 1 ;; esac
         actions = [line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')]
         self.assertEqual(actions, ['stop', 'start'])
         self.assertFalse(self.lock.exists())
+
 
     def test_uninstall_waits_for_process_exit_before_disabling_and_removing(self):
         stopping = self.root / 'stopping'

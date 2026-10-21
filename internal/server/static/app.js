@@ -818,6 +818,23 @@ function sparkValueHTML(current, peak) {
   return escapeHtml(current) + '<span class="spark-peak">peak ' + escapeHtml(peak) + '</span>';
 }
 
+// Explicit nulls break missing history instead of bridging an outage with a line.
+function historyGaps(points, id, range) {
+  const node = agents.find(a => a.agent.id === Number(id));
+  let step = node?.agent.interval || 30;
+  if (!currentHistoryDay) {
+    const hours = parseInt(range, 10) || 24;
+    if (hours > 168) step = Math.max(step, 3600);
+    else if (hours >= 168) step = Math.max(step, Math.ceil(Math.max(900, hours * 3600 / 720) / 60) * 60);
+  }
+  const result = [];
+  points.forEach((point, i) => {
+    if (i && point[0] - points[i - 1][0] > step * 3000) result.push([points[i - 1][0] + step * 1000, null]);
+    result.push(point);
+  });
+  return result;
+}
+
 function renderSparklines(id, metrics) {
   if (!metrics || !metrics.length) {
     ['spark-cpu', 'spark-mem', 'spark-netin', 'spark-netout'].forEach(key => {
@@ -864,10 +881,10 @@ function renderSparklines(id, metrics) {
   memAlerts.forEach(p => recordDayAlert(p[0], 'Memory peak ' + p[1].toFixed(1) + '%'));
   netInAlerts.forEach(p => recordDayAlert(p[0], 'Net In peak ' + formatSpeed(p[1]) + '/s'));
   netOutAlerts.forEach(p => recordDayAlert(p[0], 'Net Out peak ' + formatSpeed(p[1]) + '/s'));
-  renderSparkline('spark-cpu', cpuData, true);
-  renderSparkline('spark-mem', memData, true);
-  renderSparkline('spark-netin', netInData, false);
-  renderSparkline('spark-netout', netOutData, false);
+  renderSparkline('spark-cpu', historyGaps(cpuData, id, currentMetricsRange), true);
+  renderSparkline('spark-mem', historyGaps(memData, id, currentMetricsRange), true);
+  renderSparkline('spark-netin', historyGaps(netInData, id, currentMetricsRange), false);
+  renderSparkline('spark-netout', historyGaps(netOutData, id, currentMetricsRange), false);
 }
 
 function sparklineColor() {
@@ -920,7 +937,7 @@ function renderSparkline(elemId, data, isPercent) {
     },
     series: [{
       name: 'Average',
-      type: 'line', data, smooth: true, symbol: 'none', sampling: 'lttb',
+      type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, sampling: 'lttb',
       lineStyle: { color, width: 1.5 },
       areaStyle: { color, opacity: 0.04 },
       emphasis: {
@@ -982,7 +999,7 @@ function renderTCPingChart(id, results) {
 
   const series = names.map((name) => {
     const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
-    return { name, type: 'line', data, smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
+    return { name, type: 'line', data: historyGaps(data, id, currentTcppingRange), smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
   });
 
   const chartEl = document.getElementById('tcpping-chart-' + id);

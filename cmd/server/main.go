@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,21 +19,49 @@ import (
 	"needle/internal/server"
 )
 
+var BuildCommit = "unknown"
+
 func main() {
+	privateDatabaseUmask()
 	addr := flag.String("l", func() string {
 		if env := os.Getenv("NEEDLE_LISTEN"); env != "" {
 			return env
 		}
-		return ":8008"
+		return "127.0.0.1:8008"
 	}(), "listen address")
 	dbPath := flag.String("db", "./data/needle.db", "database path")
 	certFile := flag.String("cert", "", "TLS certificate file")
 	keyFile := flag.String("key", "", "TLS key file")
 	yes := flag.Bool("y", false, "skip confirmation for delete-agent / revoke-token")
+	showVersion := flag.Bool("version", false, "show binary version and source commit")
+	installerProtocol := flag.Bool("installer-protocol", false, "show supported installer protocol")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("needle-server %s commit=%s\n", server.Version, BuildCommit)
+		return
+	}
+	if *installerProtocol {
+		fmt.Println("needle-install-v2 persistent-report-v1 realtime-v1")
+		return
+	}
 
+	if (*certFile == "") != (*keyFile == "") {
+		log.Fatal("both -cert and -key are required for TLS")
+	}
 	args := flag.Args()
 	if len(args) > 0 {
+		unlock, err := lockDatabaseAdministration(*dbPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer unlock()
+		handled, err := databaseOwnerCommand(*dbPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if handled {
+			return
+		}
 		switch args[0] {
 		case "repair-traffic":
 			if err := runRepairTraffic(*dbPath, args[1:]); err != nil {
@@ -87,6 +116,11 @@ func main() {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			log.Fatalf("create data dir: %v", err)
 		}
+	}
+
+	host, _, _ := net.SplitHostPort(*addr)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		log.Printf("WARNING: %s may expose the dashboard and API on public interfaces; use a reverse proxy with access controls as needed", *addr)
 	}
 
 	store, err := server.NewStore(*dbPath)

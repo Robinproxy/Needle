@@ -20,6 +20,9 @@ type AgentRow struct {
 }
 
 type MetricRow struct {
+	BootID  string `json:"boot_id,omitempty"`
+	ScopeID string `json:"network_scope_id,omitempty"`
+
 	MissingMetrics  int     `json:"missing_metrics,omitempty"`
 	ID              int64   `json:"id"`
 	AgentID         int64   `json:"agent_id"`

@@ -84,6 +84,11 @@ func SecurityHeaders(next http.Handler) http.Handler {
 }
 
 type Handler struct {
+	committedMu    sync.Mutex
+	committed      map[int64]committedEntry
+	adminRevision  int64
+	schemaRevision int64
+
 	store           *Store
 	globalLimiter   globalLimiter
 	tokenLimiter    *tokenLimiter
@@ -95,11 +100,12 @@ type Handler struct {
 }
 
 func NewHandler(store *Store) *Handler {
-	return &Handler{store: store, tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now}
+	return &Handler{store: store, committed: make(map[int64]committedEntry), tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/report", h.handleReport)
+	mux.HandleFunc("/api/report-capabilities", h.handleReportCapabilities)
 	mux.HandleFunc("/api/realtime", h.handleRealtime)
 	mux.HandleFunc("/api/events", h.handleEvents)
 	mux.HandleFunc("/api/unregister", h.handleUnregister)
@@ -162,7 +168,7 @@ func bearerToken(r *http.Request) (string, bool) {
 }
 
 // authorizeAgent checks whitelist token and hostname binding rules.
-// On first report with unbound token, binds hostname.
+// First binding is committed atomically with the report in SaveReport.
 func (h *Handler) authorizeAgent(token, hostname string) (*TokenRow, error) {
 	if token == "" {
 		return nil, errors.New("missing token")
@@ -178,12 +184,6 @@ func (h *Handler) authorizeAgent(token, hostname string) (*TokenRow, error) {
 		return nil, err
 	}
 	if row.Hostname == "" {
-		if err := h.store.BindToken(token, hostname); err != nil {
-			log.Printf("report: bind failed for hostname %q: %v", hostname, err)
-			return nil, err
-		}
-		log.Printf("agent registered: hostname=%q", hostname)
-		row.Hostname = hostname
 		return row, nil
 	}
 	if row.Hostname != hostname {
@@ -244,29 +244,19 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := h.store.LookupToken(token)
-	if err != nil || row.Hostname == "" || row.Hostname != req.Hostname {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	agentID, found, err := h.store.AgentIDByHostname(req.Hostname)
+	h.fullMu.Lock()
+	id, err := h.store.revokeToken(token, req.Hostname)
+	h.fullMu.Unlock()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		if errors.Is(err, ErrTokenNotFound) {
+			http.Error(w, "unauthorized", 401)
+		} else {
+			http.Error(w, "internal error", 500)
+		}
 		return
 	}
-	if !found {
-		// agent row gone but token still bound
-		_ = h.store.RevokeToken(token)
-		http.Error(w, "agent not found", http.StatusNotFound)
-		return
-	}
-	if err := h.store.DeleteAgent(agentID); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	h.tokenLimiter.Delete(row.ID)
-	h.realtimeLimiter.Delete(row.ID)
+	h.tokenLimiter.Delete(id)
+	h.realtimeLimiter.Delete(id)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -329,11 +319,15 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	if req.CreatedAt != nil {
 		createdAt = *req.CreatedAt
 	}
-	if createdAt < now.Add(-30*24*time.Hour).Unix() || createdAt > now.Add(5*time.Minute).Unix() {
+	if req.ReportID == "" && (createdAt < now.Add(-30*24*time.Hour).Unix() || createdAt > now.Add(5*time.Minute).Unix()) {
 		createdAt = now.Unix()
 	}
 
+	encodedReport, _ := json.Marshal(req)
+	digest := sha256.Sum256(encodedReport)
 	write := &ReportWrite{
+		ReportID: req.ReportID, Digest: hex.EncodeToString(digest[:]),
+		Token:    token,
 		Interval: req.Interval, RealtimeInterval: req.RealtimeInterval,
 		BillingCost:         req.BillingCost,
 		Hostname:            req.Hostname,
@@ -345,6 +339,12 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	write.Metric, write.CPUCores = metricFromReport(&req)
+	if write.Metric != nil {
+		write.Metric.BootID = req.BootID
+		if req.Network != nil {
+			write.Metric.ScopeID = req.Network.ScopeID
+		}
+	}
 	if req.TCPingCreatedAt != nil {
 		write.TCPingCreatedAt = *req.TCPingCreatedAt
 	}
@@ -366,15 +366,34 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	id, err := h.store.SaveReport(write)
 	if err != nil {
 		h.fullMu.Unlock()
+		if errors.Is(err, ErrTokenNotFound) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if errors.Is(err, ErrHostnameTaken) || errors.Is(err, ErrTokenAlreadyBound) {
+			http.Error(w, "credential/hostname binding conflict", 409)
+			return
+		}
+		if errors.Is(err, ErrReportConflict) {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		if errors.Is(err, ErrReportExpired) {
+			http.Error(w, err.Error(), 422)
+			return
+		}
 		log.Printf("report: save for agent %q: %v", req.Hostname, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	h.publishNode(id, "history")
+	if !write.Duplicate {
+		h.invalidateCommitted(id)
+		h.publishNode(id, "history")
+	}
 	h.fullMu.Unlock()
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "report_id": req.ReportID, "protocol": reportProtocol, "duplicate": write.Duplicate})
 }
 
 func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
@@ -412,6 +431,12 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 {
+		h.fullMu.Lock()
+		defer h.fullMu.Unlock()
+		if err := h.syncAdminRevision(); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
 		a, err := h.store.GetAgent(agentID)
 		if err != nil {
 			http.Error(w, "agent not found", 404)
@@ -597,4 +622,26 @@ func metricFromReport(req *reportRequest) (*MetricRow, int) {
 	}
 
 	return write.Metric, write.CPUCores
+}
+
+func (h *Handler) handleReportCapabilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	token, ok := bearerToken(r)
+	if !ok {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+	if _, err := h.store.LookupToken(token); err != nil {
+		if errors.Is(err, ErrTokenNotFound) {
+			http.Error(w, "unauthorized", 401)
+		} else {
+			http.Error(w, "internal error", 500)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"protocol": reportProtocol, "max_report_age_seconds": int(reportAcceptAge.Seconds()), "unregister_retains_history": true})
 }

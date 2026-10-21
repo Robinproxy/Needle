@@ -58,12 +58,16 @@ def main():
     reports = queue.Queue()
 
     class Receiver(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers()
+            self.wfile.write(b'{"protocol":"persistent-report-v1"}')
+
         def do_POST(self):
             data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             reports.put((self.path, self.headers.get('Authorization'), data))
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b'ok')
+            self.wfile.write(json.dumps({'protocol':'persistent-report-v1','report_id':data.get('report_id','')}).encode())
 
         def log_message(self, *args):
             pass

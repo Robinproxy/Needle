@@ -1,8 +1,12 @@
 package collector
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
+	stdnet "net"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,6 +14,8 @@ import (
 )
 
 type NetworkStats struct {
+	ScopeID string `json:"network_scope_id,omitempty"`
+
 	Up        int64 `json:"up"`
 	Down      int64 `json:"down"`
 	TotalSent int64 `json:"total_sent"`
@@ -26,6 +32,8 @@ var virtualIfacePrefixes = []string{
 }
 
 type NetworkCollector struct {
+	scope    string
+	indexOf  func(string) int
 	include  map[string]bool // nil: default virtual-interface filter
 	prevUp   uint64
 	prevDown uint64
@@ -36,7 +44,12 @@ type NetworkCollector struct {
 // NewNetworkCollector counts traffic on physical interfaces only. A non-empty
 // interfaces list replaces the default filter with an exact-name whitelist.
 func NewNetworkCollector(interfaces []string) *NetworkCollector {
-	nc := &NetworkCollector{first: true}
+	nc := &NetworkCollector{first: true, indexOf: func(name string) int {
+		if iface, err := stdnet.InterfaceByName(name); err == nil {
+			return iface.Index
+		}
+		return 0
+	}}
 	include := make(map[string]bool, len(interfaces))
 	for _, name := range interfaces {
 		if name = strings.TrimSpace(name); name != "" {
@@ -71,10 +84,13 @@ func (nc *NetworkCollector) Collect() (*NetworkStats, error) {
 
 func (nc *NetworkCollector) collect(counters []net.IOCountersStat, now time.Time) (*NetworkStats, error) {
 	var curSent, curRecv uint64
+	var identities []string
 	matched := false
 	for _, c := range counters {
 		if nc.counted(c.Name) {
 			matched = true
+			index := nc.indexOf(c.Name)
+			identities = append(identities, fmt.Sprintf("%d:%s:%d", len(c.Name), c.Name, index))
 			if c.BytesSent > math.MaxInt64-curSent || c.BytesRecv > math.MaxInt64-curRecv {
 				return nil, fmt.Errorf("network counters exceed supported range")
 			}
@@ -87,12 +103,16 @@ func (nc *NetworkCollector) collect(counters []net.IOCountersStat, now time.Time
 		return nil, fmt.Errorf("no network interfaces matched the configured filter")
 	}
 
-	if nc.first {
+	sort.Strings(identities)
+	digest := sha256.Sum256([]byte(strings.Join(identities, "\n")))
+	scope := hex.EncodeToString(digest[:])
+	if nc.first || nc.scope != scope {
+		nc.scope = scope
 		nc.prevUp = curSent
 		nc.prevDown = curRecv
 		nc.prevTime = now
 		nc.first = false
-		return &NetworkStats{TotalSent: int64(curSent), TotalRecv: int64(curRecv)}, nil
+		return &NetworkStats{ScopeID: scope, TotalSent: int64(curSent), TotalRecv: int64(curRecv)}, nil
 	}
 
 	elapsed := now.Sub(nc.prevTime).Seconds()
@@ -122,5 +142,5 @@ func (nc *NetworkCollector) collect(counters []net.IOCountersStat, now time.Time
 		down = 0
 	}
 
-	return &NetworkStats{Up: up, Down: down, TotalSent: int64(curSent), TotalRecv: int64(curRecv)}, nil
+	return &NetworkStats{ScopeID: scope, Up: up, Down: down, TotalSent: int64(curSent), TotalRecv: int64(curRecv)}, nil
 }

@@ -11,6 +11,10 @@ import (
 )
 
 type reportRequest struct {
+	BootID string `json:"boot_id,omitempty"`
+
+	ReportID string `json:"report_id,omitempty"`
+
 	TCPingCreatedAt     *int64        `json:"tcpping_created_at"`
 	Interval            int           `json:"interval"`
 	RealtimeInterval    int           `json:"realtime_interval"`
@@ -33,10 +37,11 @@ type reportRequest struct {
 		Used  uint64 `json:"used"`
 	} `json:"disk"`
 	Network *struct {
-		Up        int64 `json:"up"`
-		Down      int64 `json:"down"`
-		TotalSent int64 `json:"total_sent"`
-		TotalRecv int64 `json:"total_recv"`
+		ScopeID   string `json:"network_scope_id,omitempty"`
+		Up        int64  `json:"up"`
+		Down      int64  `json:"down"`
+		TotalSent int64  `json:"total_sent"`
+		TotalRecv int64  `json:"total_recv"`
 	} `json:"network"`
 	Load *struct {
 		Load1  float64 `json:"load1"`
@@ -54,8 +59,17 @@ type reportRequest struct {
 }
 
 func validateReport(req *reportRequest, now time.Time) error {
+	if req.ReportID != "" && (!reportIDPattern.MatchString(req.ReportID) || req.CreatedAt == nil || *req.CreatedAt <= 0) {
+		return fmt.Errorf("invalid report identity/sample time")
+	}
 	if req.TCPingCreatedAt != nil && (*req.TCPingCreatedAt < now.Add(-30*24*time.Hour).Unix() || *req.TCPingCreatedAt > now.Add(5*time.Minute).Unix()) {
 		return fmt.Errorf("invalid TCP Ping sample time")
+	}
+	if req.BootID != "" && (len(req.BootID) != 36 || !bootIDPattern.MatchString(req.BootID)) {
+		return fmt.Errorf("invalid boot identity")
+	}
+	if req.Network != nil && req.Network.ScopeID != "" && !scopeIDPattern.MatchString(req.Network.ScopeID) {
+		return fmt.Errorf("invalid network scope identity")
 	}
 	interval := req.Interval
 	if interval == 0 {

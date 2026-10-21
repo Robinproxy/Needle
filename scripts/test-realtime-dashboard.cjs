@@ -17,6 +17,11 @@ const context={EventSource,AbortController,localStorage:{getItem:()=>null},conso
   renders:0,updates:0,historyLoads:0};
 vm.createContext(context);
 vm.runInContext(source.slice(0,source.indexOf('let themeMode =')),context);
+const broken = context.historyGaps([[0,1],[30000,2],[600000,3]],1,'24h');
+assert.equal(broken.length,4,'missing raw history must insert an explicit break');
+assert.equal(broken[2][1],null);
+assert.equal(context.historyGaps([[0,1],[900000,2]],1,'168h').length,2,'normal aggregated spacing must remain connected');
+
 vm.runInContext(`renderAll=()=>renders++;renderInfoBar=()=>{};setDashboardState=()=>{};
 updateLiveSummaries=()=>updates++;updateDetailCharts=()=>{if(!currentHistoryDay)historyLoads++;};`,context);
 const node=(sample,history,revision,cpu=10)=>({agent:{id:1,hostname:'test',last_seen:sample,interval:30},

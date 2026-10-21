@@ -36,7 +36,7 @@ Options:
   --reconfigure        With upgrade: reselect probes, allowance, and optional billing; preserve token
   --configure-intervals
                        With upgrade: change only realtime/history intervals
-  --unregister         With uninstall: also notify Server to delete this node
+  --unregister         With uninstall: revoke this Agent credential; keep Server data
 
 Examples:
   sudo bash needle-agent.sh
@@ -206,14 +206,21 @@ download_release_agent() {
     fi
     echo "Checksum verified successfully."
   else
-    echo "WARNING: Could not fetch checksum. Skipping verification."
+    echo "ERROR: checksum is required; download aborted." >&2
+ exit 1
   fi
 
-  tar xzf "$TGZ" -C "$TMP_DIR"
+  tar xOzf "$TGZ" needle-agent > "$TMP_DIR/needle-agent"
   if [ ! -f "$TMP_DIR/needle-agent" ]; then
     echo "ERROR: needle-agent binary not found in archive"
     exit 1
   fi
+  chmod 755 "$TMP_DIR/needle-agent"
+  if ! "$TMP_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 '; then
+    echo 'ERROR: latest release binary is older than this installer protocol. Use the installer packaged with that release, or wait for a compatible release. Existing installation unchanged.' >&2
+    exit 1
+  fi
+
 }
 
 require_linux_runtime() {
@@ -430,45 +437,19 @@ deploy_agent() (
 )
 
 unregister_from_server() {
-  local server token hostname
-  if [ ! -f "$AGENT_YAML" ]; then
-    echo "WARNING: $AGENT_YAML not found, skip unregister."
-    return 0
+  if [ ! -x "$BIN_DIR/needle-agent" ] || [ ! -r "$AGENT_YAML" ]; then
+    echo 'ERROR: binary and configuration required to revoke this Agent credential. Local installation retained.' >&2
+    return 1
   fi
-  server=$(yaml_value server "$AGENT_YAML")
-  token=$(yaml_value token "$AGENT_YAML")
-  hostname=$(yaml_value hostname "$AGENT_YAML")
-  if [ -z "$hostname" ]; then
-    hostname=$(hostname 2>/dev/null || true)
+  if ! "$BIN_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 '; then
+    echo 'ERROR: upgrade Server and Agent before using --unregister; an older Agent may call the destructive legacy endpoint. Plain local uninstall remains available.' >&2
+    return 1
   fi
-  if [ -z "$server" ] || [ -z "$token" ] || [ -z "$hostname" ]; then
-    echo "WARNING: missing server/token/hostname in config, skip unregister."
-    return 0
+  if ! "$BIN_DIR/needle-agent" -unregister "$AGENT_YAML"; then
+    echo 'ERROR: unregister failed or safe Server semantics were not confirmed. Local installation retained; use plain uninstall only if credential revocation is not required.' >&2
+    return 1
   fi
-
-  echo "Unregistering hostname '$hostname' from $server ..."
-  if command -v curl >/dev/null 2>&1; then
-    if curl -fsS -X POST "$server/api/unregister" \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $token" \
-      --data-binary "{\"hostname\":\"$hostname\"}" >/dev/null; then
-      echo "Unregistered from server."
-    else
-      echo "WARNING: unregister request failed (will still remove local agent)."
-    fi
-  elif command -v wget >/dev/null 2>&1; then
-    if wget -qO- --method=POST \
-      --header="Content-Type: application/json" \
-      --header="Authorization: Bearer $token" \
-      --body-data="{\"hostname\":\"$hostname\"}" \
-      "$server/api/unregister" >/dev/null 2>&1; then
-      echo "Unregistered from server."
-    else
-      echo "WARNING: unregister request failed (will still remove local agent)."
-    fi
-  else
-    echo "WARNING: no curl/wget, skip unregister."
-  fi
+  echo 'Agent credential revoked; Server monitoring data retained.'
 }
 
 tcping_prompt() { read_prompt TCPING_ANSWER "$1"; }
@@ -930,7 +911,7 @@ cmd_uninstall() {
     if [ "$do_unregister" = true ]; then
       echo "and also call Server /api/unregister (if config allows)."
     else
-      echo "(local only; Server DB entry is kept unless you pass --unregister)"
+      echo "(local only; Server data is always kept; --unregister revokes this credential)"
     fi
     read_prompt ans "Continue? [y/N] "
     case "$ans" in
