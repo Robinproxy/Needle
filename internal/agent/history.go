@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"needle/internal/logging"
 )
 
 const ReportProtocol = "persistent-report-v1"
@@ -28,12 +30,12 @@ type HistorySender struct {
 	now               func() time.Time
 	wait              func(context.Context, time.Duration) error
 	confirmed, legacy bool
-	lastLog           time.Time
+	logs              *logging.Tracker
 	authCooldown      time.Time
 }
 
 func NewHistorySender(r *Reporter, age time.Duration, logf func(string, ...any)) *HistorySender {
-	return &HistorySender{reporter: r, maxAge: age, logf: logf, now: time.Now, wait: func(ctx context.Context, d time.Duration) error {
+	return &HistorySender{reporter: r, maxAge: age, logf: logf, logs: logging.NewTracker("history.transport", logf), now: time.Now, wait: func(ctx context.Context, d time.Duration) error {
 		t := time.NewTimer(d)
 		defer t.Stop()
 		select {
@@ -111,7 +113,7 @@ func (s *HistorySender) negotiate(ctx context.Context) error {
 	}
 	if resp.StatusCode == 404 || resp.StatusCode == 405 || resp.StatusCode == 501 || resp.StatusCode == 200 {
 		s.legacy = true
-		s.logf("Server lacks persistent report deduplication; history retries disabled until Agent restart. Upgrade Server first.")
+		logging.Write(s.logf, "WARN", "history", "legacy_server", "action", "retries disabled until Agent restart; upgrade Server first")
 		return nil
 	}
 	return &HTTPStatusError{Status: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), s.now())}
@@ -128,7 +130,7 @@ func (s *HistorySender) sendFrozen(ctx context.Context, body []byte, id string) 
 		return err
 	}
 	if resp.StatusCode != 200 {
-		return s.reporter.redact(readReportResponse(resp))
+		return readReportResponse(resp)
 	}
 	defer resp.Body.Close()
 	// Explicit tags are required for snake_case wire names.
@@ -158,7 +160,6 @@ func (s *HistorySender) Send(ctx context.Context, data *ReportData) error {
 	for {
 		remaining := expires.Sub(s.now())
 		if remaining <= 0 {
-			s.notice("history sample expired; retries=%d", retries)
 			return ErrHistoryExpired
 		}
 		attempt, cancel := context.WithTimeout(ctx, min(15*time.Second, remaining))
@@ -176,9 +177,7 @@ func (s *HistorySender) Send(ctx context.Context, data *ReportData) error {
 		}
 		cancel()
 		if err == nil {
-			if retries > 0 {
-				s.logf("history recovered: backfilled=1 retries=%d sample_age=%s", retries, s.now().Sub(time.Unix(data.CreatedAt, 0)).Round(time.Second))
-			}
+			s.logs.Check("send", "WARN", nil, "retries", retries, "sample_age", s.now().Sub(time.Unix(data.CreatedAt, 0)).Round(time.Second))
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -190,7 +189,6 @@ func (s *HistorySender) Send(ctx context.Context, data *ReportData) error {
 			if errors.As(err, &status) && (status.Status == 401 || status.Status == 403) {
 				s.authCooldown = s.now().Add(time.Minute)
 			}
-			s.notice("history permanent error; sample discarded: %v", err)
 			return err
 		}
 		// Retrying read-only capability negotiation is safe before confirmation;
@@ -203,15 +201,9 @@ func (s *HistorySender) Send(ctx context.Context, data *ReportData) error {
 			delay = max(delay, status.RetryAfter)
 		}
 		delay = min(delay, 30*time.Second, expires.Sub(s.now()))
-		s.notice("history retry pending: retries=%d oldest_age=%s next=%s", retries, s.now().Sub(time.Unix(data.CreatedAt, 0)).Round(time.Second), delay.Round(time.Millisecond))
+		s.logs.Check("send", "WARN", err, "retries", retries, "oldest_age", s.now().Sub(time.Unix(data.CreatedAt, 0)).Round(time.Second), "next", delay.Round(time.Millisecond))
 		if err = s.wait(ctx, max(time.Duration(0), delay)); err != nil {
 			return err
 		}
-	}
-}
-func (s *HistorySender) notice(format string, args ...any) {
-	if s.now().Sub(s.lastLog) >= time.Minute {
-		s.logf(format, args...)
-		s.lastLog = s.now()
 	}
 }

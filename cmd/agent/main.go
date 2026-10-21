@@ -15,6 +15,7 @@ import (
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
 	"needle/internal/billing"
+	"needle/internal/logging"
 
 	"gopkg.in/yaml.v3"
 )
@@ -121,7 +122,7 @@ func main() {
 		return
 	}
 	if *unregister && *checkConfig {
-		log.Fatal("choose either -unregister or -check-config")
+		logging.Fatal("agent", "arguments_invalid", fmt.Errorf("choose either -unregister or -check-config"))
 	}
 
 	cfgPath := "agent.yaml"
@@ -131,45 +132,45 @@ func main() {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		log.Fatalf("read config %s: %v", cfgPath, err)
+		logging.Fatal("agent", "config_read_failed", fmt.Errorf("read config %s: %w", cfgPath, err))
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("parse config: %v", err)
+		logging.Fatal("agent", "config_parse_failed", err)
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 30
 	}
 
 	if err := cfg.validateToken(); err != nil {
-		log.Fatal(err)
+		logging.Fatal("agent", "config_invalid", err)
 	}
 	if cfg.Insecure != nil {
-		log.Println("WARNING: config field 'insecure' is deprecated; use 'tls_skip_verify' instead.")
+		logging.Print("WARN", "agent", "deprecated_setting", "field", "insecure", "replacement", "tls_skip_verify")
 	}
 	serverURL, err := agentpkg.ValidateServerURL(cfg.Server, cfg.AllowPlainHTTP)
 	if err != nil {
-		log.Fatalf("invalid server configuration: %v", err)
+		logging.Fatal("agent", "server_url_invalid", err)
 	}
 	if *checkConfig {
 		if err := cfg.validateProbesAndInterval(); err != nil {
-			log.Fatal(err)
+			logging.Fatal("agent", "config_invalid", err)
 		}
 		if _, err := cfg.monthlyTrafficLimitBytes(); err != nil {
-			log.Fatal(err)
+			logging.Fatal("agent", "config_invalid", err)
 		}
 		if _, err := cfg.expiryUnix(); err != nil {
-			log.Fatalf("invalid expiry date: %v", err)
+			logging.Fatal("agent", "expiry_invalid", err)
 		}
 		if _, err := cfg.billingCost(); err != nil {
-			log.Fatal(err)
+			logging.Fatal("agent", "config_invalid", err)
 		}
 		fmt.Println("Configuration is valid.")
 		return
 	}
 	if cfg.AllowPlainHTTP && strings.HasPrefix(serverURL, "http://") {
-		log.Printf("SECURITY WARNING: allow_plain_http is enabled; the Agent token may be transmitted without encryption to %s", serverURL)
+		logging.Print("WARN", "agent", "plaintext_http", "action", "Token is transmitted without encryption; use HTTPS")
 	}
 
 	reporter := agentpkg.NewReporter(serverURL, cfg.Token, cfg.effectiveTLSSkipVerify())
@@ -182,29 +183,30 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := reporter.Unregister(ctx, hostname); err != nil {
-			log.Fatalf("unregister failed: %v", err)
+			logging.Fatal("agent", "unregister_failed", err)
 		}
-		log.Println("unregistered successfully")
+		logging.Print("INFO", "agent", "unregistered")
 		return
 	}
 	if err := cfg.validateProbesAndInterval(); err != nil {
-		log.Fatal(err)
+		logging.Fatal("agent", "config_invalid", err)
 	}
 
-	log.Printf("Needle Agent - server: %s, history interval: %ds, realtime interval: %ds (0=disabled)", serverURL, cfg.Interval, cfg.RealtimeInterval)
+	logging.Print("INFO", "agent", "started", "version", Version, "commit", BuildCommit,
+		"hostname", hostname, "history_interval_seconds", cfg.Interval, "realtime_interval_seconds", cfg.RealtimeInterval)
 
 	expiresAtUnix, err := cfg.expiryUnix()
 	if err != nil {
-		log.Fatalf("invalid expires_at %q (expected YYYY-MM-DD): %v", cfg.ExpiresAt, err)
+		logging.Fatal("agent", "expiry_invalid", fmt.Errorf("invalid expires_at (expected YYYY-MM-DD): %w", err))
 	}
 
 	monthlyLimit, err := cfg.monthlyTrafficLimitBytes()
 	if err != nil {
-		log.Fatalf("invalid traffic configuration: %v", err)
+		logging.Fatal("agent", "traffic_config_invalid", err)
 	}
 	billingCost, err := cfg.billingCost()
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatal("agent", "config_invalid", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -229,7 +231,7 @@ func main() {
 	}
 	bootID, bootErr := collector.BootID()
 	if bootErr != nil {
-		log.Printf("system boot identity unavailable; traffic continuity uses conservative compatibility: %v", bootErr)
+		logging.Print("WARN", "traffic", "boot_identity_unavailable", "error", bootErr)
 	}
 	decorate := func(data *agentpkg.ReportData) {
 		data.BootID = bootID
@@ -238,16 +240,17 @@ func main() {
 		data.MonthlyTrafficLimit, data.BillingCost = monthlyLimit, billingCost
 		data.Interval, data.RealtimeInterval = cfg.Interval, cfg.RealtimeInterval
 	}
-	sample := func() func() *agentpkg.ReportData {
+	sample := func(channel string) func() *agentpkg.ReportData {
 		c := newWindowCollectors(cfg.Interfaces)
+		logs := logging.NewTracker("collect."+channel, log.Printf)
 		return func() *agentpkg.ReportData {
-			data := collectReport(c, log.Printf)
+			data := collectReport(c, logs)
 			decorate(data)
 			return data
 		}
 	}
 	historySender := agentpkg.NewHistorySender(reporter, time.Duration(cfg.retryMaxAge())*time.Second, log.Printf)
-	runSamplingWithPolicy(historyPolicy{Capacity: cfg.queueCapacity()}, ctx, historyTicker.C, realtimeTicks, sample(), sample(),
+	runSamplingWithPolicy(historyPolicy{Capacity: cfg.queueCapacity()}, ctx, historyTicker.C, realtimeTicks, sample("history"), sample("realtime"),
 		func(ctx context.Context, data *agentpkg.ReportData) error {
 			return historySender.Send(ctx, data)
 		}, func(ctx context.Context, data *agentpkg.ReportData) error {

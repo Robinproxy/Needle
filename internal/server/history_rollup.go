@@ -3,7 +3,6 @@ package server
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -177,19 +176,17 @@ func (s *Store) maintainHistory(purge bool) error {
 }
 
 func (s *Store) PurgeOldData() {
-	if _, err := s.db.Exec(`DELETE FROM traffic_boot_epochs WHERE observed_at<? AND NOT EXISTS(SELECT 1 FROM traffic_counter_identity i WHERE i.agent_id=traffic_boot_epochs.agent_id AND i.boot_id=traffic_boot_epochs.boot_id)`, s.now().Add(-receiptRetention).Unix()); err != nil {
-		log.Printf("boot evidence cleanup: %v", err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM report_receipts WHERE committed_at < ?`, s.now().Add(-receiptRetention).Unix()); err != nil {
-		log.Printf("receipt cleanup: %v", err)
-	}
+	_, err := s.db.Exec(`DELETE FROM traffic_boot_epochs WHERE observed_at<? AND NOT EXISTS(SELECT 1 FROM traffic_counter_identity i WHERE i.agent_id=traffic_boot_epochs.agent_id AND i.boot_id=traffic_boot_epochs.boot_id)`, s.now().Add(-receiptRetention).Unix())
+	s.logs.Check("boot_evidence_cleanup", "ERROR", err)
+	_, err = s.db.Exec(`DELETE FROM report_receipts WHERE committed_at < ?`, s.now().Add(-receiptRetention).Unix())
+	s.logs.Check("receipt_cleanup", "ERROR", err)
 	// Rollups, ingestion checkpoints and deletions commit together. A failed
 	// aggregation or deletion preserves both the raw data and the old checkpoint.
-	if err := s.maintainHistory(true); err != nil {
-		log.Printf("history maintenance: %v", err)
+	err = s.maintainHistory(true)
+	s.logs.Check("history_cleanup", "ERROR", err)
+	if err != nil {
 		return
 	}
-	if _, err := s.db.Exec("PRAGMA incremental_vacuum"); err != nil {
-		log.Printf("incremental vacuum: %v", err)
-	}
+	_, err = s.db.Exec("PRAGMA incremental_vacuum")
+	s.logs.Check("incremental_vacuum", "ERROR", err)
 }

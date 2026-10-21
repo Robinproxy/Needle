@@ -3,10 +3,11 @@ package server
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"math"
 	"regexp"
 	"strings"
+
+	"needle/internal/logging"
 )
 
 // Keep the old accumulator and its final metric id once, before accepting any
@@ -178,7 +179,7 @@ func accumulateTrafficUsage(x execer, stampedAt, agentID int64, cycle trafficCyc
 			}
 			if seen {
 				if oldReason != "old_boot_identity" {
-					log.Printf("traffic continuity: agent=%d reason=old_boot_identity; current epoch retained", agentID)
+					logging.Print("WARN", "traffic", "continuity_changed", "agent_id", agentID, "reason", "old_boot_identity")
 				}
 				_, err := x.Exec(`UPDATE traffic_counter_identity SET reason='old_boot_identity' WHERE agent_id=?`, agentID)
 				return err
@@ -189,7 +190,7 @@ func accumulateTrafficUsage(x execer, stampedAt, agentID int64, cycle trafficCyc
 		}
 		if m.BootID == "" || m.ScopeID == "" {
 			if oldReason != "identity_missing" {
-				log.Printf("traffic continuity: agent=%d reason=identity_missing; strong baseline retained", agentID)
+				logging.Print("WARN", "traffic", "continuity_changed", "agent_id", agentID, "reason", "identity_missing")
 			}
 			if _, err := x.Exec(`UPDATE traffic_counter_identity SET reason='identity_missing' WHERE agent_id=?`, agentID); err != nil {
 				return err
@@ -256,7 +257,7 @@ func accumulateTrafficUsage(x execer, stampedAt, agentID int64, cycle trafficCyc
 			return err
 		}
 		if state.Reason != "continuous" && state.Reason != oldReason {
-			log.Printf("traffic continuity: agent=%d reason=%s", agentID, state.Reason)
+			logging.Print("WARN", "traffic", "continuity_changed", "agent_id", agentID, "reason", state.Reason)
 		}
 		if _, err := x.Exec(`INSERT INTO traffic_counter_identity(agent_id,boot_id,network_scope_id,sample_at,reason) VALUES(?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET boot_id=excluded.boot_id,network_scope_id=excluded.network_scope_id,sample_at=excluded.sample_at,reason=excluded.reason`, agentID, state.BootID, state.ScopeID, state.SampleAt, state.Reason); err != nil {
 			return err

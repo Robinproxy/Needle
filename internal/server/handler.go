@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"needle/internal/logging"
 )
 
 var regionCodeRe = regexp.MustCompile(`(?i)^[a-z]{2}$`)
@@ -97,10 +99,11 @@ type Handler struct {
 	realtimeLimiter *tokenLimiter
 	fullMu          sync.Mutex
 	realtimeSlots   chan struct{}
+	logs            *logging.Tracker
 }
 
 func NewHandler(store *Store) *Handler {
-	return &Handler{store: store, committed: make(map[int64]committedEntry), tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now}
+	return &Handler{store: store, committed: make(map[int64]committedEntry), tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now, logs: logging.NewTracker("server.api", log.Printf)}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -201,8 +204,8 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats, err := h.store.GetStats()
+	h.logs.Check("stats", "ERROR", err)
 	if err != nil {
-		log.Printf("info: stats: %v", err)
 		stats = &ServerStats{}
 	}
 	info := map[string]interface{}{
@@ -292,14 +295,18 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	tokenRow, err := h.authorizeAgent(token, req.Hostname)
 	if err != nil {
 		if errors.Is(err, ErrTokenNotFound) || errors.Is(err, ErrTokenAlreadyBound) {
-			log.Printf("report: unauthorized for hostname %q", req.Hostname)
+			h.logs.Check("credential_lookup", "ERROR", nil)
+			// Aggregate rejections across untrusted hostnames; never retain a
+			// map entry or print a new line for every presented credential.
+			h.logs.Check("authorization", "WARN", err, "hostname", req.Hostname, "status", 401)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		} else {
-			log.Printf("report: credential lookup for hostname %q: %v", req.Hostname, err)
+			h.logs.Check("credential_lookup", "ERROR", err, "hostname", req.Hostname)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 		return
 	}
+	h.logs.Check("credential_lookup", "ERROR", nil)
 	if !h.tokenLimiter.Allow(tokenRow.ID, now) {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
@@ -370,10 +377,11 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 422)
 			return
 		}
-		log.Printf("report: save for agent %q: %v", req.Hostname, err)
+		h.logs.Check("save_report", "ERROR", err, "hostname", req.Hostname)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.logs.Check("save_report", "ERROR", nil, "hostname", req.Hostname)
 
 	if !write.Duplicate {
 		h.invalidateCommitted(id)
@@ -390,8 +398,8 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := h.snapshots()
+	h.logs.Check("snapshots", "ERROR", err)
 	if err != nil {
-		log.Printf("agents: snapshot: %v", err)
 		http.Error(w, "internal error", 500)
 		return
 	}

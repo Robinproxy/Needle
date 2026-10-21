@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"needle/internal/agent/collector"
+	"needle/internal/logging"
 	"needle/internal/server"
 )
 
@@ -52,7 +53,7 @@ func TestCollectionFailuresKeepIndependentMetricsAndProbes(t *testing.T) {
 				},
 				uptime: func() (uint64, error) { return 100, failure("uptime") },
 			}
-			report := collectReport(c, logf)
+			report := collectReport(c, logging.NewTracker("collect", logf))
 			if report.CreatedAt <= 0 || report.CreatedAt > time.Now().Unix() {
 				t.Fatalf("sample timestamp unavailable: %d", report.CreatedAt)
 			}
@@ -107,6 +108,28 @@ func TestCollectionFailuresKeepIndependentMetricsAndProbes(t *testing.T) {
 	}
 }
 
+func TestCollectorLoggingRetainsFailuresUntilAValidSample(t *testing.T) {
+	var lines []string
+	logs := logging.NewTracker("collect.history", func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
+	for i := 0; i < 20; i++ {
+		got := collectValue("cpu", func() (int, error) { return 42, errors.New("permission denied") }, logs)
+		if got != 0 {
+			t.Fatal("failed collector returned a healthy value")
+		}
+	}
+	collectValue("cpu", func() (int, error) { return 0, collector.ErrBaseline }, logs)
+	if len(lines) != 1 {
+		t.Fatalf("failures flooded logs or a baseline falsely recovered: %v", lines)
+	}
+	if got := collectValue("cpu", func() (int, error) { return 42, nil }, logs); got != 42 {
+		t.Fatal("valid sample changed")
+	}
+	collectValue("cpu", func() (int, error) { return 42, nil }, logs)
+	if len(lines) != 2 || !strings.Contains(lines[1], "event=recovered") || !strings.Contains(lines[1], "count=20 suppressed=19") {
+		t.Fatalf("missing recovery: %v", lines)
+	}
+}
+
 func TestPartialCollectionWireReportKeepsTrafficAccounting(t *testing.T) {
 	store, err := server.NewStoreCLI(filepath.Join(t.TempDir(), "needle.db"))
 	if err != nil {
@@ -130,7 +153,7 @@ func TestPartialCollectionWireReportKeepsTrafficAccounting(t *testing.T) {
 		uptime: func() (uint64, error) { return uint64(sent), nil },
 	}
 	for i := 0; i < 2; i++ {
-		report := collectReport(c, func(string, ...any) {})
+		report := collectReport(c, logging.NewTracker("collect", func(string, ...any) {}))
 		report.Hostname = "partial-wire"
 		report.BillingPeriod = "forever"
 		encoded, err := json.Marshal(report)

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"needle/internal/logging"
 )
 
 func TestHandleAgentsIncludesTrafficAvailability(t *testing.T) {
@@ -122,6 +124,8 @@ func TestHandleReportCredentialRejectionAndBindingConflict(t *testing.T) {
 
 func TestHandleReportCredentialStorageFailureIsRetryable(t *testing.T) {
 	h, store := newTestHandler(t)
+	var lines []string
+	h.logs = logging.NewTracker("server.api", func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
 	store.now = h.now
 	if err := store.AllowToken("test-token"); err != nil {
 		t.Fatal(err)
@@ -135,6 +139,14 @@ func TestHandleReportCredentialStorageFailureIsRetryable(t *testing.T) {
 	w := sendReport(t, h, "Bearer test-token", body)
 	if w.Code != http.StatusInternalServerError || w.Body.String() != "internal error\n" {
 		t.Fatalf("storage failure response = %d %q, want generic retryable 500", w.Code, w.Body.String())
+	}
+	for i := 0; i < 10; i++ {
+		if repeat := sendReport(t, h, "Bearer test-token", body); repeat.Code != http.StatusInternalServerError {
+			t.Fatalf("logging changed a repeated failure's response: %d", repeat.Code)
+		}
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], `issue="credential_lookup"`) || strings.Contains(lines[0], "test-token") {
+		t.Fatalf("storage errors flooded logs or exposed a token: %v", lines)
 	}
 	for _, table := range []string{"agents", "metrics", "tcpping_results", "traffic_baselines", "report_receipts"} {
 		var count int
@@ -151,6 +163,33 @@ func TestHandleReportCredentialStorageFailureIsRetryable(t *testing.T) {
 	}
 	if retry := sendReport(t, h, "Bearer test-token", body); retry.Code != http.StatusOK {
 		t.Fatalf("same report did not recover: status=%d body=%s", retry.Code, retry.Body.String())
+	}
+	if len(lines) != 2 || !strings.Contains(lines[1], "event=recovered") || !strings.Contains(lines[1], "count=11 suppressed=10") {
+		t.Fatalf("storage recovery lost failure counts: %v", lines)
+	}
+}
+
+func TestUnauthorizedReportsAggregateAcrossUntrustedHostnames(t *testing.T) {
+	h, store := newTestHandler(t)
+	var lines []string
+	h.logs = logging.NewTracker("server.api", func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
+	for i := 0; i < 100; i++ {
+		body := fmt.Sprintf(`{"hostname":"unknown-%d","cpu":{"percent":10}}`, i)
+		if w := sendReport(t, h, fmt.Sprintf("Bearer private-credential-%d", i), body); w.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthorized status changed: %d", w.Code)
+		}
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], `issue="authorization"`) || strings.Contains(lines[0], "private-credential") {
+		t.Fatalf("untrusted requests flooded logs or exposed credentials: %v", lines)
+	}
+	if err := store.AllowToken("legitimate"); err != nil {
+		t.Fatal(err)
+	}
+	if w := sendReport(t, h, "Bearer legitimate", `{"hostname":"legitimate-node"}`); w.Code != http.StatusOK {
+		t.Fatal(w.Code)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("another node's valid request falsely recovered rejected credentials: %v", lines)
 	}
 }
 

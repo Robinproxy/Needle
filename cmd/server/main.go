@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"needle/internal/logging"
 	"needle/internal/server"
 )
 
@@ -46,18 +46,18 @@ func main() {
 	}
 
 	if (*certFile == "") != (*keyFile == "") {
-		log.Fatal("both -cert and -key are required for TLS")
+		logging.Fatal("server", "tls_config_invalid", fmt.Errorf("both -cert and -key are required for TLS"))
 	}
 	args := flag.Args()
 	if len(args) > 0 {
 		unlock, err := lockDatabaseAdministration(*dbPath)
 		if err != nil {
-			log.Fatal(err)
+			logging.Fatal("server", "command_failed", err)
 		}
 		defer unlock()
 		handled, err := databaseOwnerCommand(*dbPath)
 		if err != nil {
-			log.Fatal(err)
+			logging.Fatal("server", "command_failed", err)
 		}
 		if handled {
 			return
@@ -65,67 +65,67 @@ func main() {
 		switch args[0] {
 		case "repair-traffic":
 			if err := runRepairTraffic(*dbPath, args[1:]); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "list-agents":
 			if err := runListAgents(*dbPath); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "move-agent":
 			if err := runMoveAgent(*dbPath, args[1:]); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "delete-agent":
 			if len(args) < 2 {
-				log.Fatal("usage: needle-server -db <path> [-y] delete-agent <id|hostname>")
+				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> [-y] delete-agent <id|hostname>"))
 			}
 			if err := runDeleteAgent(*dbPath, args[1], *yes); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "allow-token":
 			if len(args) < 2 {
-				log.Fatal("usage: needle-server -db <path> allow-token <token>")
+				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> allow-token <token>"))
 			}
 			if err := runAllowToken(*dbPath, args[1]); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "list-tokens":
 			if err := runListTokens(*dbPath); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "revoke-token":
 			if len(args) < 2 {
-				log.Fatal("usage: needle-server -db <path> [-y] revoke-token <token>")
+				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> [-y] revoke-token <token>"))
 			}
 			if err := runRevokeToken(*dbPath, args[1], *yes); err != nil {
-				log.Fatal(err)
+				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		default:
-			log.Fatalf("unknown command %q (supported: list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0])
+			logging.Fatal("server", "command_invalid", fmt.Errorf("unknown command %q (supported: list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0]))
 		}
 	}
 
 	if dir := filepath.Dir(*dbPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0700); err != nil {
-			log.Fatalf("create data dir: %v", err)
+			logging.Fatal("server", "data_directory_failed", err)
 		}
 	}
 
 	host, _, _ := net.SplitHostPort(*addr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
-		log.Printf("WARNING: %s may expose the dashboard and API on public interfaces; use a reverse proxy with access controls as needed", *addr)
+		logging.Print("WARN", "server", "public_listener", "listen", *addr, "action", "use a reverse proxy with access controls as needed")
 	}
 
 	store, err := server.NewStore(*dbPath)
 	if err != nil {
-		log.Fatalf("open db: %v", err)
+		logging.Fatal("server", "database_open_failed", err)
 	}
 	defer store.Close()
 
@@ -143,15 +143,14 @@ func main() {
 	}
 
 	go func() {
+		logging.Print("INFO", "server", "started", "version", server.Version, "commit", BuildCommit, "listen", *addr, "tls", *certFile != "")
 		if *certFile != "" && *keyFile != "" {
-			log.Printf("Needle Server listening on %s (TLS)", *addr)
 			if err := srv.ListenAndServeTLS(*certFile, *keyFile); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("server: %v", err)
+				logging.Fatal("server", "listen_failed", err)
 			}
 		} else {
-			log.Printf("Needle Server listening on %s", *addr)
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("server: %v", err)
+				logging.Fatal("server", "listen_failed", err)
 			}
 		}
 	}()
@@ -159,13 +158,13 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
-	log.Println("shutting down...")
+	logging.Print("INFO", "server", "stopping")
 	handler.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("shutdown error: %v", err)
+		logging.Print("ERROR", "server", "shutdown_failed", "error", err)
 	}
 }
 

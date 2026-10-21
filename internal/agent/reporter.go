@@ -5,11 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"needle/internal/agent/collector"
@@ -59,10 +57,13 @@ func RealtimeFromReport(r *ReportData) *RealtimeData {
 type HTTPStatusError struct {
 	Status     int
 	RetryAfter time.Duration
-	Body       string
 }
 
-func (e *HTTPStatusError) Error() string { return fmt.Sprintf("server %d: %s", e.Status, e.Body) }
+// Upstream bodies can echo credentials, configuration, or proxy HTML. Keep
+// them out of runtime errors entirely; status and operation identify failures.
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("server %d: %s", e.Status, http.StatusText(e.Status))
+}
 
 type Reporter struct {
 	serverURL string
@@ -76,9 +77,9 @@ const maxResponseBytes = 4096
 // Draining small success bodies also permits HTTP connection reuse.
 func readReportResponse(resp *http.Response) error {
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	_, err := io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode != http.StatusOK {
-		return &HTTPStatusError{Status: resp.StatusCode, Body: string(body), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		return &HTTPStatusError{Status: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	if err != nil {
 		return fmt.Errorf("read server response: %w", err)
@@ -118,7 +119,7 @@ func (r *Reporter) send(ctx context.Context, path string, data any) error {
 	if err != nil {
 		return fmt.Errorf("send: %w", err)
 	}
-	return r.redact(readReportResponse(resp))
+	return readReportResponse(resp)
 }
 
 func (r *Reporter) Unregister(ctx context.Context, hostname string) error {
@@ -146,12 +147,4 @@ func (r *Reporter) Unregister(ctx context.Context, hostname string) error {
 		Hostname string `json:"hostname"`
 	}{Hostname: hostname}
 	return r.send(ctx, "/api/unregister", payload)
-}
-
-func (r *Reporter) redact(err error) error {
-	var status *HTTPStatusError
-	if r.token != "" && errors.As(err, &status) {
-		status.Body = strings.ReplaceAll(status.Body, r.token, "[redacted]")
-	}
-	return err
 }

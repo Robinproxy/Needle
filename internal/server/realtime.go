@@ -289,9 +289,11 @@ func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.store.LookupToken(token)
 	if err != nil && !errors.Is(err, ErrTokenNotFound) {
+		h.logs.Check("realtime_credential_lookup", "ERROR", err, "hostname", req.Hostname)
 		http.Error(w, "internal error", 500)
 		return
 	}
+	h.logs.Check("realtime_credential_lookup", "ERROR", nil)
 	if err != nil || row.Hostname == "" || row.Hostname != req.Hostname {
 		http.Error(w, "registered token and matching hostname required", 401)
 		return
@@ -301,6 +303,7 @@ func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, found, err := h.store.AgentIDByHostname(req.Hostname)
+	h.logs.Check("realtime_node_lookup", "ERROR", err, "hostname", req.Hostname)
 	if err != nil {
 		http.Error(w, "internal error", 500)
 		return
@@ -322,9 +325,11 @@ func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	entry, exists := l.nodes[id]
 	if err != nil {
 		l.mu.Unlock()
+		h.logs.Check("realtime_binding_lookup", "ERROR", err, "agent_id", id)
 		http.Error(w, "internal error", 500)
 		return
 	}
+	h.logs.Check("realtime_binding_lookup", "ERROR", nil)
 	if !valid {
 		delete(l.nodes, id)
 		l.mu.Unlock()

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
 
 	"needle/internal/billing"
+	"needle/internal/logging"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -30,6 +32,7 @@ type Store struct {
 	path string
 	now  func() time.Time
 	live *liveState
+	logs *logging.Tracker
 }
 
 // execer is the shared subset of *sql.DB and *sql.Tx, so single-statement
@@ -55,7 +58,7 @@ func newStore(path string, purge bool) (*Store, error) {
 	}
 	// Restrict DB file perms (tokens live here). Best-effort for existing files.
 	_ = os.Chmod(path, 0600)
-	s := &Store{db: db, path: path, now: time.Now, live: newLiveState()}
+	s := &Store{db: db, path: path, now: time.Now, live: newLiveState(), logs: logging.NewTracker("server.maintenance", log.Printf)}
 	if err := s.enableIncrementalVacuum(); err != nil {
 		_ = db.Close()
 		return nil, err

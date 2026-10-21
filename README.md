@@ -68,6 +68,7 @@ Run from `~/needle`. Adjust the health-check port if you changed `NEEDLE_PORT`.
 docker compose ps
 docker compose logs --tail=100 needle-server
 docker compose logs -f --tail=100 needle-server
+docker compose logs --since=1h --tail=100 needle-server
 curl -fsS http://127.0.0.1:8008/api/health
 docker compose exec needle-server needle-server -version
 
@@ -85,6 +86,8 @@ docker compose start needle-server
 ```
 
 Upgrade retains the mounted database, registered tokens, and node settings. It does not upgrade remote Agents.
+
+The supplied Compose file rotates this container's logs at `10m` per file, retaining three files (about 30 MB). For an existing deployment, add the `logging` block shown under **Configuration** to the local Compose file, then run `docker compose up -d --force-recreate needle-server`. A binary/image upgrade alone does not edit your Compose file. Rotation applies to the recreated container; export any old container logs you need before recreation. Database/history retention is independent of log rotation.
 
 ### Agents and tokens
 
@@ -449,6 +452,8 @@ Custom database paths remain in the service's `ExecStart`; inspect with `sudo sy
 
 The configuration contains the Token; root manages the file and the service user can only read it. Historical data lives on the Server; the Agent retry queue is memory-only.
 
+Linux Server and Agent logs use the existing system journal and its retention policy; Needle creates no separate log files and does not change global journald settings. Use `sudo journalctl -u needle-agent --since "1 hour ago" --no-pager` (or `-u needle-server`) for recent logs.
+
 </details>
 
 <details>
@@ -466,6 +471,8 @@ The configuration contains the Token; root manages the file and the service user
 | Logs | `logread -e needle-agent` |
 
 The configuration contains the Token. Normal uninstall retains it; `--purge` removes it. Recovery snapshots are temporary; a failed recovery prints the retained path.
+
+The Agent sends output to the system logger. With OpenWrt's default memory ring buffer, old entries are overwritten and logs do not survive reboot. Needle does not enable persistent flash logging or change the router's global log buffer. Use `logread -e needle-agent` or `logread -f -e needle-agent` to view or follow entries.
 
 </details>
 
@@ -512,6 +519,11 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8008/api/health"]
       interval: 30s
@@ -528,6 +540,9 @@ services:
 | `NEEDLE_LISTEN` | Container listener, `:8008`; keep aligned with the mapping and health check |
 | `volumes` | `./data` on the host maps to `/data`; database persists across recreation |
 | `restart` | `unless-stopped`: restart unless explicitly stopped |
+| `logging.driver` | `json-file`; logs remain available through `docker compose logs` |
+| `logging.options.max-size` | Rotate after `10m` per file; use a quoted string |
+| `logging.options.max-file` | Keep `"3"` files, including the current file; oldest files are removed on rotation |
 | `healthcheck` | Internal `/api/health` check; does not verify a public proxy or Agent connectivity |
 
 For host port 8088:
@@ -806,6 +821,10 @@ Use compatible binaries and installers from the same release. After database mig
 The dashboard uses SSE, with 30-second polling while SSE is unavailable. A failed refresh retains the last successful data. Retry requests a new render; ordinary requests time out after 15 seconds.
 
 If failures recur, check the failing endpoint in browser developer tools, Server logs, and `/api/health`; then check proxy / Tunnel connectivity. The proxy must permit the long-lived `/api/events` stream. A healthy internal endpoint does not prove public access is working. History panels have independent Retry controls.
+
+Runtime messages use `INFO`, `WARN`, or `ERROR` with `module` and `event` fields. Startup includes version and source commit. Healthy samples/reports are silent. Continuous failures log immediately, then at most once a minute per tracked operation; `count` is the outage's total failures and `suppressed` counts repeats omitted since the previous message. The same operation's next success emits one `event=recovered` entry. History/realtime collectors are tracked separately; TCP Ping recovery means its permission issue cleared, not that a target became reachable. Rejected credentials are aggregated across hostnames and do not emit recovery on another Agent's successful request.
+
+Tracking is bounded in memory and resets when the process restarts. Minute summaries are emitted on the next failed attempt, without a background timer. Levels are plain-text labels, not a promise of matching system-journal priority filters. Token headers, full configuration, and upstream HTTP response bodies are not logged; HTTP errors include the status instead. Error text is quoted and length-limited. Existing `journalctl`, `logread`, and `docker compose logs` commands remain the way to inspect logs.
 
 </details>
 

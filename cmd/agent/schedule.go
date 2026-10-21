@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agentpkg "needle/internal/agent"
+	"needle/internal/logging"
 )
 
 const historyQueueSize = 64
@@ -63,7 +64,7 @@ func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTic
 	}
 	instanceBytes := make([]byte, 16)
 	if _, err := rand.Read(instanceBytes); err != nil {
-		logf("cannot create report instance: %v", err)
+		logging.Write(logf, "ERROR", "agent", "report_instance_failed", "error", err)
 		return
 	}
 	instance := hex.EncodeToString(instanceBytes)
@@ -75,8 +76,7 @@ func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTic
 	workers.Add(2)
 	go func() {
 		defer workers.Done()
-		lastHistoryError := time.Time{}
-		failures := 0
+		logs := logging.NewTracker("history", logf)
 		for {
 			select {
 			case <-ctx.Done():
@@ -92,15 +92,11 @@ func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTic
 						return
 					}
 				}
-				if err := sendHistory(ctx, job.data); err != nil && ctx.Err() == nil {
-					failures++
-					if time.Since(lastHistoryError) >= time.Minute {
-						lastHistoryError = time.Now()
-						pending, bytes := budget.pending()
-						logf("history report failed: queued_including_inflight=%d reserved_bytes=%d oldest_age=%s error=%v", pending, bytes, time.Since(time.Unix(job.data.CreatedAt, 0)).Round(time.Second), err)
-						logf("history discarded/failed samples since last notice=%d", failures)
-						failures = 0
-					}
+				err := sendHistory(ctx, job.data)
+				if ctx.Err() == nil {
+					pending, bytes := budget.pending()
+					logs.Check("discarded_samples", "ERROR", err, "queued_including_inflight", pending, "reserved_bytes", bytes,
+						"sample_age", time.Since(time.Unix(job.data.CreatedAt, 0)).Round(time.Second))
 				}
 				budget.release(job.bytes)
 			}
@@ -109,7 +105,7 @@ func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTic
 	go func() {
 		defer workers.Done()
 		unsupported := false
-		lastError := time.Time{}
+		logs := logging.NewTracker("realtime", logf)
 		for {
 			select {
 			case <-ctx.Done():
@@ -124,10 +120,10 @@ func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTic
 				var status *agentpkg.HTTPStatusError
 				if errors.As(err, &status) && (status.Status == 404 || status.Status == 405 || status.Status == 501) {
 					unsupported = true
-					logf("Server does not support realtime reports; paused until Agent restart. Full history reports continue; upgrade Server first.")
-				} else if err != nil && ctx.Err() == nil && time.Since(lastError) >= time.Minute {
-					logf("realtime report failed (further errors limited to once per minute): %v", err)
-					lastError = time.Now()
+					logging.Write(logf, "WARN", "realtime", "unsupported", "status", status.Status,
+						"action", "paused until Agent restart; full history continues; upgrade Server first")
+				} else if ctx.Err() == nil {
+					logs.Check("send", "WARN", err)
 				}
 			}
 		}
@@ -156,39 +152,33 @@ func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTic
 		}
 		return job, nil
 	}
+	queueLogs := logging.NewTracker("history.queue", logf)
 	first, err := makeJob(historySample())
 	if err == nil {
 		history <- first
 	} else {
-		logf("startup sample not queued: %v", err)
+		queueLogs.Check("sample_not_queued", "WARN", err)
 	}
 	if realtimeTicks != nil {
 		realtimeSample()
 	} // Seed its independent CPU/NIC window.
-	dropped := 0
 	for {
 		select {
 		case <-ctx.Done():
 			if pending, bytes := budget.pending(); pending > 0 {
-				logf("shutdown: discarding %d unsent/in-flight historical samples (%d reserved bytes); memory queue is not persisted", pending, bytes)
+				logging.Write(logf, "WARN", "history.queue", "shutdown_discard", "unsent_inflight", pending, "reserved_bytes", bytes, "persisted", false)
 			}
 			return
 		case <-historyTicks:
 			data := historySample()
 			job, err := makeJob(data)
 			if err != nil {
-				dropped++
-				if dropped == 1 || dropped%64 == 0 {
-					n, bytes := budget.pending()
-					logf("history queue full or preparation failed: dropped=%d queued_including_inflight=%d reserved_bytes=%d reason=%v", dropped, n, bytes, err)
-				}
+				n, bytes := budget.pending()
+				queueLogs.Check("sample_not_queued", "WARN", err, "queued_including_inflight", n, "reserved_bytes", bytes)
 				continue
 			}
 			history <- job // Reservation guarantees a free FIFO slot.
-			if dropped > 0 {
-				logf("history queue recovered: samples_not_queued=%d", dropped)
-				dropped = 0
-			}
+			queueLogs.Check("sample_not_queued", "WARN", nil)
 		case <-realtimeTicks:
 			data := realtimeSample()
 			select {

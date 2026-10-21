@@ -6,6 +6,7 @@ import (
 
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
+	"needle/internal/logging"
 )
 
 type reportCollectors struct {
@@ -19,15 +20,16 @@ type reportCollectors struct {
 
 // Discard failed results even if a collector returns a partial value. Nil
 // metric pointers and uptime zero carry the existing unavailable semantics.
-func collectValue[T any](name string, collect func() (T, error), logf func(string, ...any)) T {
+func collectValue[T any](name string, collect func() (T, error), logs *logging.Tracker) T {
 	value, err := collect()
 	if err != nil {
 		if !errors.Is(err, collector.ErrBaseline) {
-			logf("collect %s: %v", name, err)
+			logs.Check(name, "WARN", err)
 		}
 		var unavailable T
 		return unavailable
 	}
+	logs.Check(name, "WARN", nil)
 	return value
 }
 
@@ -51,16 +53,16 @@ func newWindowCollectors(interfaces []string) reportCollectors {
 	}
 }
 
-func collectReport(c reportCollectors, logf func(string, ...any)) *agentpkg.ReportData {
+func collectReport(c reportCollectors, logs *logging.Tracker) *agentpkg.ReportData {
 	return &agentpkg.ReportData{
 		// Timestamp the sample before collection/probing and transport delay.
 		// The Server can then reject old counter/config updates by sample time.
 		CreatedAt: time.Now().Unix(),
-		CPU:       collectValue("cpu", c.cpu, logf),
-		Memory:    collectValue("memory", c.memory, logf),
-		Disk:      collectValue("disk", c.disk, logf),
-		Network:   collectValue("network", c.network, logf),
-		Load:      collectValue("load", c.load, logf),
-		Uptime:    collectValue("uptime", c.uptime, logf),
+		CPU:       collectValue("cpu", c.cpu, logs),
+		Memory:    collectValue("memory", c.memory, logs),
+		Disk:      collectValue("disk", c.disk, logs),
+		Network:   collectValue("network", c.network, logs),
+		Load:      collectValue("load", c.load, logs),
+		Uptime:    collectValue("uptime", c.uptime, logs),
 	}
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -37,9 +39,9 @@ func TestHistoryQueueDoesNotUseLatestOnlyAndLogsOverflow(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSampling(ctx, ticks, nil, sample, sample, send, send, func(format string, _ ...any) {
+		runSampling(ctx, ticks, nil, sample, sample, send, send, func(format string, args ...any) {
 			select {
-			case logs <- format:
+			case logs <- fmt.Sprintf(format, args...):
 			default:
 			}
 		})
@@ -50,7 +52,7 @@ func TestHistoryQueueDoesNotUseLatestOnlyAndLogsOverflow(t *testing.T) {
 	}
 	select {
 	case line := <-logs:
-		if !strings.Contains(line, "queue full") {
+		if !strings.Contains(line, `issue="sample_not_queued"`) || !strings.Contains(line, "queue full") {
 			t.Fatal(line)
 		}
 	case <-time.After(time.Second):
@@ -69,6 +71,73 @@ func TestHistoryQueueDoesNotUseLatestOnlyAndLogsOverflow(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestReportFailuresRecoverWithoutLoggingHealthySamples(t *testing.T) {
+	for _, channel := range []string{"history", "realtime"} {
+		t.Run(channel, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			historyTicks, realtimeTicks := make(chan time.Time), make(chan time.Time)
+			lines := make(chan string, 16)
+			attempts := make(chan struct{}, 16)
+			n := 0
+			send := func(context.Context, *agentpkg.ReportData) error {
+				n++
+				attempts <- struct{}{}
+				if n <= 2 {
+					return errors.New("temporary failure")
+				}
+				return nil
+			}
+			otherSend := func(context.Context, *agentpkg.ReportData) error { return nil }
+			historySend, realtimeSend := send, otherSend
+			if channel == "realtime" {
+				historySend, realtimeSend = otherSend, send
+			}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				sample := func() *agentpkg.ReportData { return &agentpkg.ReportData{CreatedAt: time.Now().Unix()} }
+				runSampling(ctx, historyTicks, realtimeTicks, sample, sample, historySend, realtimeSend,
+					func(format string, args ...any) { lines <- fmt.Sprintf(format, args...) })
+			}()
+			ticks := historyTicks
+			if channel == "realtime" {
+				ticks = realtimeTicks
+				ticks <- time.Now()
+			}
+			for i := 0; i < 3; i++ {
+				select {
+				case <-attempts:
+				case <-time.After(time.Second):
+					t.Fatal("report worker stalled")
+				}
+				ticks <- time.Now()
+			}
+			for _, event := range []string{"failed", "recovered"} {
+				select {
+				case line := <-lines:
+					if !strings.Contains(line, "module="+channel+" event="+event) {
+						t.Fatalf("unexpected transition: %s", line)
+					}
+					if event == "recovered" && !strings.Contains(line, "count=2 suppressed=1") {
+						t.Fatalf("missing suppressed failure count: %s", line)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("missing failure or recovery message")
+				}
+			}
+			cancel()
+			<-done
+			for len(lines) > 0 {
+				line := <-lines
+				if !strings.Contains(line, "event=shutdown_discard") {
+					t.Fatalf("healthy reports produced logs: %s", line)
+				}
+			}
+		})
+	}
 }
 
 func TestOldServerFallbackDoesNotTreatAuthenticationAsUnsupported(t *testing.T) {
