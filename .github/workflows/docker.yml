@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
@@ -19,13 +20,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Verify source and disposable service lifecycles before publishing
+      - name: Verify source and installer regressions
         run: |
           go test -race ./...
+          go test -race -run '^TestUnprivilegedLinuxCollectors$' -count=20 ./internal/agent/collector
           go vet ./...
           python3 scripts/test-server-installer.py
+      - name: Verify Server migration, CLI permissions and complete lifecycle
+        run: |
           go build -o /tmp/needle-server-security ./cmd/server
           sudo env NEEDLE_DISPOSABLE_SYSTEMD_TEST=1 python3 scripts/test-server-systemd.py /tmp/needle-server-security
+      - name: Verify Agent collection, sandbox and complete lifecycle
+        run: |
           CGO_ENABLED=0 go build -o /tmp/needle-agent-security ./cmd/agent
           CGO_ENABLED=0 go test -c -o /tmp/needle-collector-security.test ./internal/agent/collector
           sudo env NEEDLE_DISPOSABLE_SYSTEMD_TEST=1 python3 scripts/test-linux-agent-systemd.py /tmp/needle-agent-security /tmp/needle-collector-security.test

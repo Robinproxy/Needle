@@ -21,8 +21,20 @@ func TestUnprivilegedLinuxCollectors(t *testing.T) {
 	if _, err := cpuWindow.Collect(); !errors.Is(err, ErrBaseline) {
 		t.Fatalf("CPU baseline: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	cpu, err := cpuWindow.Collect()
+	// A hosted VM may not advance its aggregate counters in a 20 ms window.
+	// Require a real valid sample within a bounded window rather than assuming
+	// every immediate read has a usable delta. Permission failures at baseline
+	// still fail above, and persistent collection failures still fail below.
+	var cpu *CPUStats
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		time.Sleep(250 * time.Millisecond)
+		cpu, err = cpuWindow.Collect()
+		if err == nil {
+			break
+		}
+		t.Logf("CPU sample not ready on attempt %d: %v", attempt+1, err)
+	}
 	if err != nil || cpu == nil || cpu.Cores < 1 {
 		t.Fatalf("CPU: %+v %v", cpu, err)
 	}
