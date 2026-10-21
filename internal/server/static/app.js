@@ -43,15 +43,7 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
-function escapeAttr(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
+const escapeAttr = escapeHtml;
 
 function mapCarrier(name) {
   return name.replace(/^移动/, 'CM').replace(/^联通/, 'CU').replace(/^电信/, 'CT');
@@ -303,7 +295,7 @@ function switchCardFormat(mode) {
 
 const VIEW_ICONS = {
   card: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
-  list: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="21" y2="6"/></svg>',
+  list: '<svg id="view-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
 };
 const THEME_ICONS = {
   light: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>',
@@ -678,8 +670,8 @@ function renderDetailContent(id) {
         + '</div>'
         + (probesEnabled ? '<div class="tcpping-controls">'
           + '<div class="theme-btn-group">'
-            + '<button class="theme-btn active" onclick="tcppingSelectAll(\'' + id + '\')">Show</button>'
-            + '<button class="theme-btn" onclick="tcppingSelectNone(\'' + id + '\')">Hide</button>'
+            + '<button class="theme-btn active" onclick="setTcppingSelection(\'' + id + '\',true)">Show</button>'
+            + '<button class="theme-btn" onclick="setTcppingSelection(\'' + id + '\',false)">Hide</button>'
           + '</div>'
         + '</div>' : '')
       + '</div>'
@@ -1225,33 +1217,18 @@ function applyTcppingSelections(id, names) {
   });
 }
 
-function tcppingSelectAll(id) {
+function setTcppingSelection(id, visible) {
   if (!tcppingChart) return;
   const selected = {};
-  tcppingChart.getOption().series.forEach(s => { selected[s.name] = true; });
+  tcppingChart.getOption().series.forEach(s => { selected[s.name] = visible; });
   tcppingChart.setOption({ legend: { selected } });
   document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
-    r.classList.remove('hidden');
-    r.setAttribute('aria-pressed', 'true');
+    r.classList.toggle('hidden', !visible);
+    r.setAttribute('aria-pressed', String(visible));
   });
   saveTcppingSelections(id);
   document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
-    b.classList.toggle('active', i === 0);
-  });
-}
-
-function tcppingSelectNone(id) {
-  if (!tcppingChart) return;
-  const selected = {};
-  tcppingChart.getOption().series.forEach(s => { selected[s.name] = false; });
-  tcppingChart.setOption({ legend: { selected } });
-  document.querySelectorAll('#tcpping-rows-' + id + ' .tcpping-stat-row').forEach(r => {
-    r.classList.add('hidden');
-    r.setAttribute('aria-pressed', 'false');
-  });
-  saveTcppingSelections(id);
-  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
-    b.classList.toggle('active', i === 1);
+    b.classList.toggle('active', i === (visible ? 0 : 1));
   });
 }
 

@@ -38,13 +38,12 @@ type NetworkCollector struct {
 	prevUp   uint64
 	prevDown uint64
 	prevTime time.Time
-	first    bool
 }
 
 // NewNetworkCollector counts traffic on physical interfaces only. A non-empty
 // interfaces list replaces the default filter with an exact-name whitelist.
 func NewNetworkCollector(interfaces []string) *NetworkCollector {
-	nc := &NetworkCollector{first: true, indexOf: func(name string) int {
+	nc := &NetworkCollector{indexOf: func(name string) int {
 		if iface, err := stdnet.InterfaceByName(name); err == nil {
 			return iface.Index
 		}
@@ -106,12 +105,11 @@ func (nc *NetworkCollector) collect(counters []net.IOCountersStat, now time.Time
 	sort.Strings(identities)
 	digest := sha256.Sum256([]byte(strings.Join(identities, "\n")))
 	scope := hex.EncodeToString(digest[:])
-	if nc.first || nc.scope != scope {
+	if nc.scope != scope {
 		nc.scope = scope
 		nc.prevUp = curSent
 		nc.prevDown = curRecv
 		nc.prevTime = now
-		nc.first = false
 		return &NetworkStats{ScopeID: scope, TotalSent: int64(curSent), TotalRecv: int64(curRecv)}, nil
 	}
 

@@ -14,6 +14,9 @@ const ctx = {
 vm.createContext(ctx);
 const source = fs.readFileSync(path.join(__dirname, '../internal/server/static/app.js'), 'utf8');
 vm.runInContext(source.slice(0, source.indexOf('let themeMode =')), ctx);
+const escapeAttribute = vm.runInContext('escapeAttr',ctx);
+assert.equal(escapeAttribute('<img src="x">&\''),'&lt;img src=&quot;x&quot;&gt;&amp;&#39;');
+for(const value of [null,undefined,0,'A&B',"'\"<>"])assert.equal(escapeAttribute(value),ctx.escapeHtml(value));
 const node = { agent: {id:1, hostname:'node',region:'CN'}, tcpping_enabled:true, latest_tcpping:[{name:'CMv6',target:'v6.example:80',success:true,latency_ms:12}] };
 ctx.fixture = [node];
 vm.runInContext('agents = fixture',ctx);
@@ -77,6 +80,34 @@ assert(!nodes.get('detail-1').innerHTML.includes('metrics-days-1'));
 assert.equal((nodes.get('detail-1').innerHTML.match(/data-range=/g)||[]).length,3);
 ctx.loadDetailData = loadDetailData;
 
+// Show/Hide must keep chart, rows, keyboard accessibility and saved preferences
+// in sync. Individual route toggling must still work after either bulk action.
+const selectionNames=['CMv4','CUv6'];
+const selectable=()=>{
+  const classes=new Set(),attributes=new Map();
+  return {classes,attributes,classList:{toggle:(name,on)=>on?classes.add(name):classes.delete(name)},setAttribute:(name,value)=>attributes.set(name,value)};
+};
+const selectionRows=selectionNames.map(name=>({...selectable(),dataset:{name}}));
+const selectionButtons=[selectable(),selectable()];
+const queryAll=ctx.document.querySelectorAll;
+ctx.document.querySelectorAll=selector=>selector.includes('tcpping-rows-1')?selectionRows:selector.includes('tcpping-controls')?selectionButtons:[];
+const selectionOption={series:selectionNames.map(name=>({name})),legend:[{selected:{}}]};
+ctx.fixtureSelectionChart={getOption:()=>selectionOption,setOption:options=>{selectionOption.legend[0].selected=options.legend.selected;}};
+vm.runInContext('tcppingChart = fixtureSelectionChart',ctx);
+ctx.setTcppingSelection(1,false);
+assert.deepEqual(JSON.parse(storage.get('tcppingSel_1')),{CMv4:false,CUv6:false});
+assert(selectionRows.every(row=>row.classes.has('hidden')&&row.attributes.get('aria-pressed')==='false'));
+assert(!selectionButtons[0].classes.has('active')&&selectionButtons[1].classes.has('active'));
+ctx.setTcppingSelection(1,true);
+assert.deepEqual(JSON.parse(storage.get('tcppingSel_1')),{CMv4:true,CUv6:true});
+assert(selectionRows.every(row=>!row.classes.has('hidden')&&row.attributes.get('aria-pressed')==='true'));
+assert(selectionButtons[0].classes.has('active')&&!selectionButtons[1].classes.has('active'));
+ctx.tcppingToggleLine(1,'CMv4');
+assert.deepEqual(JSON.parse(storage.get('tcppingSel_1')),{CMv4:false,CUv6:true});
+assert(selectionRows[0].classes.has('hidden')&&!selectionRows[1].classes.has('hidden'));
+ctx.document.querySelectorAll=queryAll;
+vm.runInContext('tcppingChart = null',ctx);
+
 // Monthly quotas use the same decimal units for both usage and allowance.
 const traffic = {available:true,has_data:true,sent:100_000_000_000,recv:296_000_000_000};
 assert(ctx.trafficHTML(traffic,1_000_000_000_000).includes('396 GB / 1 TB'));
@@ -110,6 +141,19 @@ assert(!ctx.cardProbesHTML(node).includes('probe-family-ipv4'));
 const css = fs.readFileSync(path.join(__dirname, '../internal/server/static/style.css'), 'utf8');
 assert.match(css, /\.probe-family-ipv4\s*\{[^}]*grid-column:\s*1;[^}]*grid-row:\s*1;/);
 assert.match(css, /\.probe-family-ipv6\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*1;/);
+// Every supported flag class must resolve to a shipped rectangular asset.
+const staticDirectory=path.join(__dirname,'../internal/server/static');
+const flagCSS=fs.readFileSync(path.join(staticDirectory,'vendor/flag-icons.min.css'),'utf8');
+const flagCodes=fs.readdirSync(path.join(staticDirectory,'flags/4x3')).filter(name=>name.endsWith('.svg')).map(name=>name.slice(0,-4)).sort();
+const cssFlagCodes=[...flagCSS.matchAll(/url\(([^)]+)\)/g)].map(([,url])=>{
+  assert(fs.existsSync(path.resolve(staticDirectory,'vendor',url)),url);
+  return path.basename(url,'.svg');
+}).sort();
+assert.deepEqual(cssFlagCodes,flagCodes);
+for(const code of flagCodes){
+  assert.match(code,/^[a-z]{2}$/);
+  assert(ctx.flagEmoji(code.toUpperCase()).includes('fi-'+code));
+}
 // Retained history includes all six routes; detail rows follow the current three.
 ctx.fixture=[{...node,latest_tcpping:['CM','CU','CT'].map(name=>({name:name+'v4'}))}];
 vm.runInContext('agents = fixture',ctx);

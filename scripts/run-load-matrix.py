@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sequential, repeatable matrix; all targets/DBs are disposable loopback children."""
-import argparse, hashlib, json, pathlib, subprocess
+import argparse, json, pathlib, subprocess
 p=argparse.ArgumentParser();p.add_argument('binary');p.add_argument('output');p.add_argument('--duration',default='35s');p.add_argument('--stability',default='180s');a=p.parse_args()
 out=pathlib.Path(a.output);out.mkdir(parents=True,exist_ok=True)
 for pattern in ['spread','burst','recovery']:

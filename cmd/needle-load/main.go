@@ -149,7 +149,6 @@ type metrics struct {
 	sync.Mutex
 	latency                             map[string][]float64
 	status                              map[string]map[int]int
-	attempts                            int64
 	sseDelay                            []float64
 	connections, disconnects, endClosed int
 	created, acked, dropped, retries    atomic.Int64
@@ -165,7 +164,6 @@ func (m *metrics) record(path string, status int, d time.Duration) {
 		m.status[path] = map[int]int{}
 	}
 	m.status[path][status]++
-	m.attempts++
 }
 
 type measuredTransport struct {

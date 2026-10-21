@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Portable, isolated preflight and WAL-backup regressions (no service changes)."""
-import os
 import pathlib
 import sqlite3
 import subprocess

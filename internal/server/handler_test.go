@@ -74,6 +74,86 @@ func TestHandleReportRequiresStrictBearerScheme(t *testing.T) {
 	}
 }
 
+func TestHandleReportCredentialRejectionAndBindingConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name, requestToken, boundHostname string
+		hostnameTaken                     bool
+		status                            int
+	}{
+		{"unknown token", "missing-token", "", false, http.StatusUnauthorized},
+		{"wrong binding", "test-token", "original-node", false, http.StatusUnauthorized},
+		{"hostname occupied", "test-token", "", true, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store := newTestHandler(t)
+			if err := store.AllowToken("test-token"); err != nil {
+				t.Fatal(err)
+			}
+			if tc.boundHostname != "" {
+				if err := store.BindToken("test-token", tc.boundHostname); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.hostnameTaken {
+				if err := store.AllowToken("existing-token"); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.BindToken("existing-token", "node-1"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			w := sendReport(t, h, "Bearer "+tc.requestToken, `{"hostname":"node-1","cpu":{"percent":10}}`)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, want %d; body=%s", w.Code, tc.status, w.Body.String())
+			}
+			for _, table := range []string{"agents", "metrics", "report_receipts"} {
+				var count int
+				if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("rejected report changed %s: count=%d, err=%v", table, count, err)
+				}
+			}
+			token, err := store.LookupToken("test-token")
+			if err != nil || token.Hostname != tc.boundHostname {
+				t.Fatalf("rejected report changed binding: %+v / %v", token, err)
+			}
+		})
+	}
+}
+
+func TestHandleReportCredentialStorageFailureIsRetryable(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.now = h.now
+	if err := store.AllowToken("test-token"); err != nil {
+		t.Fatal(err)
+	}
+	// Make just the credential lookup unavailable while keeping business tables
+	// readable, so the response and absence of partial writes can both be checked.
+	if _, err := store.db.Exec("ALTER TABLE agent_tokens RENAME TO unavailable_tokens"); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"hostname":"node-1","report_id":"0123456789abcdef0123456789abcdef:1","created_at":%d,"billing_period":"forever","cpu":{"percent":10},"network":{"total_sent":100,"total_recv":200},"tcpping":[{"name":"local","target":"127.0.0.1:80","success":true,"latency_ms":1}]}`, h.now().Unix())
+	w := sendReport(t, h, "Bearer test-token", body)
+	if w.Code != http.StatusInternalServerError || w.Body.String() != "internal error\n" {
+		t.Fatalf("storage failure response = %d %q, want generic retryable 500", w.Code, w.Body.String())
+	}
+	for _, table := range []string{"agents", "metrics", "tcpping_results", "traffic_baselines", "report_receipts"} {
+		var count int
+		if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("storage failure changed %s: count=%d, err=%v", table, count, err)
+		}
+	}
+	if _, err := store.db.Exec("ALTER TABLE unavailable_tokens RENAME TO agent_tokens"); err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.LookupToken("test-token")
+	if err != nil || token.Hostname != "" {
+		t.Fatalf("storage failure bound token: %+v / %v", token, err)
+	}
+	if retry := sendReport(t, h, "Bearer test-token", body); retry.Code != http.StatusOK {
+		t.Fatalf("same report did not recover: status=%d body=%s", retry.Code, retry.Body.String())
+	}
+}
+
 func TestHandleReportRejectsTrailingJSON(t *testing.T) {
 	h, store := newTestHandler(t)
 	if err := store.AllowToken("test-token"); err != nil {

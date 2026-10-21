@@ -2,21 +2,14 @@
   --background: 216 33% 97%;
   --foreground: 216 24% 17%;
   --card: 0 0% 100%;
-  --card-foreground: 216 24% 17%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 216 24% 17%;
   --primary: 215 35% 48%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 215 28% 94%;
-  --secondary-foreground: 216 24% 17%;
   --muted: 215 22% 88%;
   --muted-foreground: 215 13% 42%;
   --accent: 213 44% 95%;
   --accent-foreground: 216 24% 17%;
   --destructive: 0 60% 52%;
-  --destructive-foreground: 0 0% 100%;
   --border: 215 27% 91%;
-  --input: 215 20% 82%;
   --ring: 215 55% 48%;
   --radius: 0.65rem;
   --success: 150 45% 38%;
@@ -29,21 +22,14 @@
   --background: 217 24% 11%;
   --foreground: 215 20% 92%;
   --card: 217 23% 15%;
-  --card-foreground: 215 20% 92%;
-  --popover: 217 23% 15%;
-  --popover-foreground: 215 20% 92%;
   --primary: 215 40% 68%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 216 23% 19%;
-  --secondary-foreground: 215 20% 92%;
   --muted: 216 21% 24%;
   --muted-foreground: 215 15% 72%;
   --accent: 216 23% 22%;
   --accent-foreground: 215 20% 92%;
   --destructive: 0 60% 52%;
-  --destructive-foreground: 0 0% 100%;
   --border: 215 20% 24%;
-  --input: 215 20% 30%;
   --ring: 215 65% 62%;
   --success: 150 42% 52%;
   --warning: 32 75% 54%;
@@ -532,7 +518,6 @@ footer {
 /* RESPONSIVE */
 @media (max-width: 1279px) {
   .card-grid { grid-template-columns: repeat(3, 1fr); }
-  .spark-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 1023px) {
   .card-grid { grid-template-columns: repeat(2, 1fr); }
@@ -545,7 +530,6 @@ footer {
 }
 @media (max-width: 639px) {
   .card-grid { grid-template-columns: 1fr; }
-  .spark-grid { grid-template-columns: repeat(2, 1fr); }
   .list-hostname { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .list-bars { gap: 6px; }
   .list-bar .metric-bar { width: 36px; }

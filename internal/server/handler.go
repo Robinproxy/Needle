@@ -170,24 +170,18 @@ func bearerToken(r *http.Request) (string, bool) {
 // authorizeAgent checks whitelist token and hostname binding rules.
 // First binding is committed atomically with the report in SaveReport.
 func (h *Handler) authorizeAgent(token, hostname string) (*TokenRow, error) {
-	if token == "" {
-		return nil, errors.New("missing token")
-	}
-	if hostname == "" {
-		return nil, errors.New("hostname required")
+	if token == "" || hostname == "" {
+		return nil, ErrTokenNotFound
 	}
 	row, err := h.store.LookupToken(token)
 	if err != nil {
-		if errors.Is(err, ErrTokenNotFound) {
-			return nil, errors.New("unauthorized")
-		}
 		return nil, err
 	}
 	if row.Hostname == "" {
 		return row, nil
 	}
 	if row.Hostname != hostname {
-		return nil, errors.New("token bound to another hostname")
+		return nil, ErrTokenAlreadyBound
 	}
 	return row, nil
 }
@@ -297,15 +291,12 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenRow, err := h.authorizeAgent(token, req.Hostname)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrHostnameTaken), errors.Is(err, ErrTokenAlreadyBound):
-			log.Printf("report: conflict for hostname %q: %v", req.Hostname, err)
-			http.Error(w, err.Error(), http.StatusConflict)
-		case err.Error() == "hostname required":
-			http.Error(w, "hostname required", http.StatusBadRequest)
-		default:
+		if errors.Is(err, ErrTokenNotFound) || errors.Is(err, ErrTokenAlreadyBound) {
 			log.Printf("report: unauthorized for hostname %q", req.Hostname)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		} else {
+			log.Printf("report: credential lookup for hostname %q: %v", req.Hostname, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 		}
 		return
 	}
@@ -351,9 +342,6 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 
 	for _, t := range req.TCPing {
 		name := sanitizeTCPingName(t.Name)
-		if name == "" {
-			continue
-		}
 		write.TCPings = append(write.TCPings, TCPingRow{
 			Name:      name,
 			Target:    sanitizeTCPingTarget(t.Target),
@@ -414,7 +402,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
 	parts := strings.Split(path, "/")
-	if len(parts) == 0 || parts[0] == "" {
+	if parts[0] == "" {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

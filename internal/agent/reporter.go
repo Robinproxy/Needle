@@ -97,10 +97,6 @@ func NewReporter(serverURL, token string, tlsSkipVerify bool) *Reporter {
 	}
 }
 
-func (r *Reporter) Send(ctx context.Context, data *ReportData) error {
-	return r.send(ctx, "/api/report", data)
-}
-
 func (r *Reporter) SendRealtime(ctx context.Context, data *RealtimeData) error {
 	return r.send(ctx, "/api/realtime", data)
 }
@@ -149,24 +145,7 @@ func (r *Reporter) Unregister(ctx context.Context, hostname string) error {
 	payload := struct {
 		Hostname string `json:"hostname"`
 	}{Hostname: hostname}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.serverURL+"/api/unregister", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+r.token)
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("unregister: %w", err)
-	}
-	return r.redact(readReportResponse(resp))
+	return r.send(ctx, "/api/unregister", payload)
 }
 
 func (r *Reporter) redact(err error) error {

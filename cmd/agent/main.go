@@ -241,7 +241,7 @@ func main() {
 	sample := func() func() *agentpkg.ReportData {
 		c := newWindowCollectors(cfg.Interfaces)
 		return func() *agentpkg.ReportData {
-			data := collectReport(c, nil, log.Printf)
+			data := collectReport(c, log.Printf)
 			decorate(data)
 			return data
 		}

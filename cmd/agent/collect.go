@@ -2,9 +2,10 @@ package main
 
 import (
 	"errors"
+	"time"
+
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
-	"time"
 )
 
 type reportCollectors struct {
@@ -14,7 +15,6 @@ type reportCollectors struct {
 	network func() (*collector.NetworkStats, error)
 	load    func() (*collector.LoadStats, error)
 	uptime  func() (uint64, error)
-	tcpping func([]collector.TCPingTarget) []collector.TCPingResult
 }
 
 // Discard failed results even if a collector returns a partial value. Nil
@@ -48,11 +48,10 @@ func newWindowCollectors(interfaces []string) reportCollectors {
 			}
 			return value, nil
 		}, load: collector.CollectLoad, uptime: collector.CollectUptime,
-		tcpping: func([]collector.TCPingTarget) []collector.TCPingResult { return nil },
 	}
 }
 
-func collectReport(c reportCollectors, targets []collector.TCPingTarget, logf func(string, ...any)) *agentpkg.ReportData {
+func collectReport(c reportCollectors, logf func(string, ...any)) *agentpkg.ReportData {
 	return &agentpkg.ReportData{
 		// Timestamp the sample before collection/probing and transport delay.
 		// The Server can then reject old counter/config updates by sample time.
@@ -63,6 +62,5 @@ func collectReport(c reportCollectors, targets []collector.TCPingTarget, logf fu
 		Network:   collectValue("network", c.network, logf),
 		Load:      collectValue("load", c.load, logf),
 		Uptime:    collectValue("uptime", c.uptime, logf),
-		TCPing:    c.tcpping(targets),
 	}
 }

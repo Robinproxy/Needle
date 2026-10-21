@@ -3,7 +3,6 @@
 
 The separate systemd integration test exercises real ownership and service UIDs.
 """
-import os
 from pathlib import Path
 import shlex
 import subprocess

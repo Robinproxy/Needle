@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,10 @@ import (
 )
 
 func TestCollectionFailuresKeepIndependentMetricsAndProbes(t *testing.T) {
+	receiver := httptest.NewServer(http.NotFoundHandler())
+	defer receiver.Close()
+	targets := []collector.TCPingTarget{{Name: "CMv4", Target: receiver.Listener.Addr().String()}}
+	probe := newProbeSampler(targets)
 	for _, failed := range []string{"", "cpu", "memory", "disk", "network", "load", "uptime", "all"} {
 		t.Run("failed_"+failed, func(t *testing.T) {
 			var calls []string
@@ -46,20 +51,24 @@ func TestCollectionFailuresKeepIndependentMetricsAndProbes(t *testing.T) {
 					return &collector.LoadStats{Load1: 1}, failure("load")
 				},
 				uptime: func() (uint64, error) { return 100, failure("uptime") },
-				tcpping: func(targets []collector.TCPingTarget) []collector.TCPingResult {
-					calls = append(calls, "tcpping")
-					if len(targets) != 1 || targets[0].Name != "CMv4" {
-						t.Fatalf("probe targets changed: %+v", targets)
-					}
-					return []collector.TCPingResult{{Name: "CMv4", Success: true, LatencyMs: 25}}
-				},
 			}
-			report := collectReport(c, []collector.TCPingTarget{{Name: "CMv4"}}, logf)
+			report := collectReport(c, logf)
 			if report.CreatedAt <= 0 || report.CreatedAt > time.Now().Unix() {
 				t.Fatalf("sample timestamp unavailable: %d", report.CreatedAt)
 			}
-			if strings.Join(calls, ",") != "cpu,memory,disk,network,load,uptime,tcpping" {
+			if strings.Join(calls, ",") != "cpu,memory,disk,network,load,uptime" {
 				t.Fatalf("one collector failure skipped another collector: %v", calls)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ready, err := probe(ctx, report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-ready:
+			case <-ctx.Done():
+				t.Fatal("asynchronous probes did not complete")
 			}
 			encoded, err := json.Marshal(report)
 			if err != nil {
@@ -81,7 +90,7 @@ func TestCollectionFailuresKeepIndependentMetricsAndProbes(t *testing.T) {
 			if failed != "network" && failed != "all" && (report.Network.TotalSent != 1000 || report.Network.TotalRecv != 2000) {
 				t.Fatalf("independent failure changed network counters: %+v", report.Network)
 			}
-			if len(report.TCPing) != 1 || report.TCPing[0].LatencyMs != 25 {
+			if len(report.TCPing) != 1 || report.TCPing[0].Name != targets[0].Name || report.TCPing[0].Target != targets[0].Target || !report.TCPing[0].Success || report.TCPing[0].LatencyMs < 0 {
 				t.Fatalf("metrics failure lost probes: %+v", report.TCPing)
 			}
 			wantLogs := 0
@@ -117,12 +126,11 @@ func TestPartialCollectionWireReportKeepsTrafficAccounting(t *testing.T) {
 		network: func() (*collector.NetworkStats, error) {
 			return &collector.NetworkStats{TotalSent: sent, TotalRecv: recv}, nil
 		},
-		load:    func() (*collector.LoadStats, error) { return &collector.LoadStats{Load1: .1}, nil },
-		uptime:  func() (uint64, error) { return uint64(sent), nil },
-		tcpping: func([]collector.TCPingTarget) []collector.TCPingResult { return nil },
+		load:   func() (*collector.LoadStats, error) { return &collector.LoadStats{Load1: .1}, nil },
+		uptime: func() (uint64, error) { return uint64(sent), nil },
 	}
 	for i := 0; i < 2; i++ {
-		report := collectReport(c, nil, func(string, ...any) {})
+		report := collectReport(c, func(string, ...any) {})
 		report.Hostname = "partial-wire"
 		report.BillingPeriod = "forever"
 		encoded, err := json.Marshal(report)

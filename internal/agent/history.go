@@ -131,16 +131,14 @@ func (s *HistorySender) sendFrozen(ctx context.Context, body []byte, id string) 
 		return s.reporter.redact(readReportResponse(resp))
 	}
 	defer resp.Body.Close()
-	var ack struct{ Protocol, ReportID string }
 	// Explicit tags are required for snake_case wire names.
-	var payload struct {
+	var ack struct {
 		Protocol string `json:"protocol"`
 		ReportID string `json:"report_id"`
 	}
-	if err = json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&payload); err != nil {
+	if err = json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&ack); err != nil {
 		return fmt.Errorf("invalid committed report acknowledgement: %w", err)
 	}
-	ack.Protocol, ack.ReportID = payload.Protocol, payload.ReportID
 	if ack.Protocol != ReportProtocol || ack.ReportID != id {
 		return fmt.Errorf("committed report acknowledgement mismatch; refusing unsafe retry")
 	}
