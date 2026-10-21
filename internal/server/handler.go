@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -84,18 +84,24 @@ func SecurityHeaders(next http.Handler) http.Handler {
 }
 
 type Handler struct {
-	store         *Store
-	globalLimiter globalLimiter
-	tokenLimiter  *tokenLimiter
-	now           func() time.Time
+	store           *Store
+	globalLimiter   globalLimiter
+	tokenLimiter    *tokenLimiter
+	now             func() time.Time
+	realtimeGlobal  globalLimiter
+	realtimeLimiter *tokenLimiter
+	fullMu          sync.Mutex
+	realtimeSlots   chan struct{}
 }
 
 func NewHandler(store *Store) *Handler {
-	return &Handler{store: store, tokenLimiter: newTokenLimiter(), now: time.Now}
+	return &Handler{store: store, tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/report", h.handleReport)
+	mux.HandleFunc("/api/realtime", h.handleRealtime)
+	mux.HandleFunc("/api/events", h.handleEvents)
 	mux.HandleFunc("/api/unregister", h.handleUnregister)
 	mux.HandleFunc("/api/health", h.handleHealth)
 	mux.HandleFunc("/api/info", h.handleInfo)
@@ -260,6 +266,7 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.tokenLimiter.Delete(row.ID)
+	h.realtimeLimiter.Delete(row.ID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -327,6 +334,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	write := &ReportWrite{
+		Interval: req.Interval, RealtimeInterval: req.RealtimeInterval,
 		BillingCost:         req.BillingCost,
 		Hostname:            req.Hostname,
 		Region:              sanitizeRegion(req.Region),
@@ -336,61 +344,9 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:           createdAt,
 	}
 
-	if req.CPU != nil || req.Memory != nil || req.Disk != nil || req.Network != nil || req.Load != nil {
-		missing := 0
-		var cpuUsage float64
-		if req.CPU != nil {
-			write.CPUCores = req.CPU.Cores
-			cpuUsage = req.CPU.Percent
-		} else {
-			missing |= missingCPU
-		}
-		var memTotal, memUsed, diskTotal, diskUsed int64
-		if req.Memory != nil {
-			memTotal = int64(req.Memory.Total)
-			memUsed = int64(req.Memory.Used)
-		} else {
-			missing |= missingMemory
-		}
-		if req.Disk != nil {
-			diskTotal = int64(req.Disk.Total)
-			diskUsed = int64(req.Disk.Used)
-		} else {
-			missing |= missingDisk
-		}
-		var netUp, netDown, totalSent, totalRecv int64
-		if req.Network != nil {
-			netUp = req.Network.Up
-			netDown = req.Network.Down
-			totalSent = req.Network.TotalSent
-			totalRecv = req.Network.TotalRecv
-		} else {
-			missing |= missingNetwork
-		}
-		var load1, load5, load15 float64
-		if req.Load != nil {
-			load1 = req.Load.Load1
-			load5 = req.Load.Load5
-			load15 = req.Load.Load15
-		} else {
-			missing |= missingLoad
-		}
-		write.Metric = &MetricRow{
-			MissingMetrics: missing,
-			CPUUsage:       cpuUsage,
-			MemoryTotal:    memTotal,
-			MemoryUsed:     memUsed,
-			DiskTotal:      diskTotal,
-			DiskUsed:       diskUsed,
-			NetworkUp:      float64(netUp),
-			NetworkDown:    float64(netDown),
-			TotalSent:      totalSent,
-			TotalRecv:      totalRecv,
-			Load1:          load1,
-			Load5:          load5,
-			Load15:         load15,
-			Uptime:         int64(req.Uptime),
-		}
+	write.Metric, write.CPUCores = metricFromReport(&req)
+	if req.TCPingCreatedAt != nil {
+		write.TCPingCreatedAt = *req.TCPingCreatedAt
 	}
 
 	for _, t := range req.TCPing {
@@ -406,12 +362,17 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if _, err := h.store.SaveReport(write); err != nil {
+	h.fullMu.Lock()
+	id, err := h.store.SaveReport(write)
+	if err != nil {
+		h.fullMu.Unlock()
 		log.Printf("report: save for agent %q: %v", req.Hostname, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
+	h.publishNode(id, "history")
+	h.fullMu.Unlock()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -421,51 +382,12 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	agents, err := h.store.GetAgents()
+	result, err := h.snapshots()
 	if err != nil {
-		log.Printf("agents: list: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		log.Printf("agents: snapshot: %v", err)
+		http.Error(w, "internal error", 500)
 		return
 	}
-
-	type agentWithMetric struct {
-		Agent         AgentRow      `json:"agent"`
-		Metric        *MetricRow    `json:"latest_metric,omitempty"`
-		LatestTCPing  []TCPingRow   `json:"latest_tcpping,omitempty"`
-		TCPingEnabled bool          `json:"tcpping_enabled"`
-		Traffic       *TrafficUsage `json:"traffic,omitempty"`
-		ExpiryDays    int           `json:"expiry_days"`
-		ExpiryDate    string        `json:"expiry_date"`
-	}
-
-	now := h.now()
-	result := make([]agentWithMetric, 0, len(agents))
-	for _, a := range agents {
-		m, err := h.store.GetLatestMetric(a.ID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("agents: latest metric for agent %d: %v", a.ID, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		t, err := h.store.GetLatestTCPing(a.ID)
-		if err != nil {
-			log.Printf("agents: latest probes for agent %d: %v", a.ID, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		traffic, err := h.store.GetTrafficUsage(a.ID)
-		if err != nil {
-			log.Printf("agents: traffic for agent %d: %v", a.ID, err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		expiryDays, expiryDate := 0, ""
-		if a.ExpiresAt != nil && a.BillingPeriod != "" {
-			expiryDays, expiryDate = calcRenewalDue(*a.ExpiresAt, a.BillingPeriod, now)
-		}
-		result = append(result, agentWithMetric{Agent: a, Metric: m, LatestTCPing: t, TCPingEnabled: len(t) > 0, Traffic: traffic, ExpiryDays: expiryDays, ExpiryDate: expiryDate})
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -490,9 +412,18 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 {
-		m, _ := h.store.GetLatestMetric(agentID)
+		a, err := h.store.GetAgent(agentID)
+		if err != nil {
+			http.Error(w, "agent not found", 404)
+			return
+		}
+		node, err := h.nodeSnapshot(a)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(m)
+		json.NewEncoder(w).Encode(node.Metric)
 		return
 	}
 
@@ -604,4 +535,66 @@ func historyBucketSeconds(d time.Duration) int64 {
 	}
 	// Whole-minute buckets keep chart timestamps and query plans predictable.
 	return ((bucket + 59) / 60) * 60
+}
+
+func metricFromReport(req *reportRequest) (*MetricRow, int) {
+	write := &ReportWrite{}
+	if req.CPU != nil || req.Memory != nil || req.Disk != nil || req.Network != nil || req.Load != nil {
+		missing := 0
+		var cpuUsage float64
+		if req.CPU != nil {
+			write.CPUCores = req.CPU.Cores
+			cpuUsage = req.CPU.Percent
+		} else {
+			missing |= missingCPU
+		}
+		var memTotal, memUsed, diskTotal, diskUsed int64
+		if req.Memory != nil {
+			memTotal = int64(req.Memory.Total)
+			memUsed = int64(req.Memory.Used)
+		} else {
+			missing |= missingMemory
+		}
+		if req.Disk != nil {
+			diskTotal = int64(req.Disk.Total)
+			diskUsed = int64(req.Disk.Used)
+		} else {
+			missing |= missingDisk
+		}
+		var netUp, netDown, totalSent, totalRecv int64
+		if req.Network != nil {
+			netUp = req.Network.Up
+			netDown = req.Network.Down
+			totalSent = req.Network.TotalSent
+			totalRecv = req.Network.TotalRecv
+		} else {
+			missing |= missingNetwork
+		}
+		var load1, load5, load15 float64
+		if req.Load != nil {
+			load1 = req.Load.Load1
+			load5 = req.Load.Load5
+			load15 = req.Load.Load15
+		} else {
+			missing |= missingLoad
+		}
+		write.Metric = &MetricRow{
+			MissingMetrics: missing,
+			CPUUsage:       cpuUsage,
+			MemoryTotal:    memTotal,
+			MemoryUsed:     memUsed,
+			DiskTotal:      diskTotal,
+			DiskUsed:       diskUsed,
+			NetworkUp:      float64(netUp),
+			NetworkDown:    float64(netDown),
+			TotalSent:      totalSent,
+			TotalRecv:      totalRecv,
+			Load1:          load1,
+			Load5:          load5,
+			Load15:         load15,
+			Uptime:         int64(req.Uptime),
+		}
+	}
+
+	return write.Metric, write.CPUCores
 }

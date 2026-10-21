@@ -24,6 +24,7 @@ jobs:
           sh -n scripts/needle-agent-openwrt.sh
           bash -n scripts/needle-agent.sh
           python3 scripts/test-linux-agent-installer.py
+          python3 scripts/test-realtime-config.py
           python3 scripts/test-openwrt-installer.py
           python3 scripts/test-tcpping-selection.py
           python3 scripts/test-agent-upgrade-config.py
@@ -32,6 +33,7 @@ jobs:
           node scripts/test-dashboard-refresh.cjs
           node scripts/test-sparkline-hover.cjs
           node scripts/test-card-billing.cjs
+          node scripts/test-realtime-dashboard.cjs
       - name: Verify real Linux Agent service isolation and lifecycle
         run: |
           CGO_ENABLED=0 go build -o /tmp/needle-agent-security ./cmd/agent

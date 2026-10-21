@@ -3,6 +3,9 @@ package server
 import "needle/internal/billing"
 
 type AgentRow struct {
+	ReportInterval      int           `json:"interval"`
+	RealtimeInterval    int           `json:"realtime_interval"`
+	ReportSampleAt      int64         `json:"report_sample_at"`
 	BillingCost         *billing.Cost `json:"billing_cost,omitempty"`
 	CPUCores            int           `json:"cpu_cores"`
 	MonthlyTrafficLimit int64         `json:"monthly_traffic_limit"`

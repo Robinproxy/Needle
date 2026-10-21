@@ -34,6 +34,8 @@ Options:
   -y, --yes            Skip uninstall confirmation
   --keep-config        With upgrade: keep configuration without prompting
   --reconfigure        With upgrade: reselect probes, allowance, and optional billing; preserve token
+  --configure-intervals
+                       With upgrade: change only realtime/history intervals
   --unregister         With uninstall: also notify Server to delete this node
 
 Examples:
@@ -567,6 +569,42 @@ configure_monthly_traffic() {
 
 upgrade_interactive() { [ -t 0 ]; }
 
+
+interval_setting() {
+    # The Agent validates the full YAML later; only simple scalar defaults are
+    # read here. Unsupported layouts fail closed rather than changing identity.
+    awk -v wanted="$1" '
+        /^[^ \t#][^:]*:/ {
+            key=$0; sub(/[ \t]*:.*/, "", key); gsub(/^["\047]|["\047]$/, "", key)
+            if (key==wanted) {
+                value=$0; sub(/^[^:]*:[ \t]*/, "", value); sub(/[ \t]+#.*/, "", value)
+                gsub(/^["\047]|["\047 \t]$/, "", value)
+                if (value !~ /^[0-9]+$/ || value+0>86400) exit 1
+                printf "%d",value+0; found=1
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$2"
+}
+
+configure_intervals() {
+    DEFAULT_INTERVAL=30
+    DEFAULT_REALTIME_INTERVAL=5
+    if [ "${1:-install}" = upgrade ]; then
+        DEFAULT_INTERVAL=$(interval_setting interval "$2" || printf '30')
+        [ "$DEFAULT_INTERVAL" -gt 0 ] || DEFAULT_INTERVAL=30
+        DEFAULT_REALTIME_INTERVAL=$(interval_setting realtime_interval "$2" || printf '0')
+    fi
+    tcping_prompt "Realtime status interval in seconds; 0 = disabled [$DEFAULT_REALTIME_INTERVAL]: "
+    REALTIME_INTERVAL=${TCPING_ANSWER:-$DEFAULT_REALTIME_INTERVAL}
+    tcping_prompt "Full report / history interval in seconds [$DEFAULT_INTERVAL]: "
+    INTERVAL=${TCPING_ANSWER:-$DEFAULT_INTERVAL}
+    REALTIME_INTERVAL=$(printf '%s\n' "$REALTIME_INTERVAL" | LC_ALL=C awk '/^[0-9]+$/ && $0+0<=86400 {printf "%d",$0+0;ok=1} END {if(!ok)exit 1}') || { echo 'Realtime interval must be an integer from 0 to 86400.' >&2; return 1; }
+    INTERVAL=$(printf '%s\n' "$INTERVAL" | LC_ALL=C awk '/^[0-9]+$/ && $0+0>=1 && $0+0<=86400 {printf "%d",$0+0;ok=1} END {if(!ok)exit 1}') || { echo 'History interval must be an integer from 1 to 86400.' >&2; return 1; }
+    [ "$REALTIME_INTERVAL" -le "$INTERVAL" ] || { echo 'Realtime interval must be 0 (disabled) or no greater than the history interval.' >&2; return 1; }
+    printf 'realtime_interval: %s\ninterval: %s\n' "$REALTIME_INTERVAL" "$INTERVAL" > "$TMP_DIR/intervals.yaml"
+}
+
 configure_billing() {
     rm -f "$TMP_DIR/billing.yaml"
     if [ "${1:-install}" = upgrade ]; then
@@ -629,17 +667,27 @@ stage_tcping_config() {
     # Change the top-level tcpping section and optionally quota/billing settings.
     # Credentials and other settings are copied verbatim, including multiline values.
     # Reject layouts we cannot safely edit instead of regenerating an identity.
+    REPLACE_TCPING=0
+    [ ! -f "$TMP_DIR/tcpping.yaml" ] || REPLACE_TCPING=1
+    REPLACE_INTERVALS=0
+    [ ! -f "$TMP_DIR/intervals.yaml" ] || REPLACE_INTERVALS=1
     REPLACE_QUOTA=0
     [ ! -f "$TMP_DIR/traffic.yaml" ] || REPLACE_QUOTA=1
     REPLACE_BILLING=0
     [ ! -f "$TMP_DIR/billing.yaml" ] || REPLACE_BILLING=1
-    awk -v quota="$REPLACE_QUOTA" -v billing="$REPLACE_BILLING" '
+    awk -v tcping="$REPLACE_TCPING" -v intervals="$REPLACE_INTERVALS" -v quota="$REPLACE_QUOTA" -v billing="$REPLACE_BILLING" '
         BEGIN { skip = 0; token = 0; documents = 0; sections = 0; quotas = 0; unsafe = 0 }
         /^---([ \t]*#.*)?[ \t]*$/ { documents++; if (documents > 1) exit 1; print; next }
         /^\.\.\.([ \t]*#.*)?[ \t]*$/ { next }
         /^(token|"token"|\047token\047)[ \t]*:/ { token = 1 }
-        /^(tcpping|"tcpping"|\047tcpping\047)[ \t]*:/ { skip = 1; sections++; if ($0 ~ /[&*]/) unsafe = 1; next }
+        tcping && /^(tcpping|"tcpping"|\047tcpping\047)[ \t]*:/ { skip = 1; sections++; if ($0 ~ /[&*]/) unsafe = 1; next }
         quota && /^(monthly_traffic_limit_gb|"monthly_traffic_limit_gb"|\047monthly_traffic_limit_gb\047)[ \t]*:/ { skip = 1; quotas++; if ($0 ~ /[&*]/) unsafe = 1; next }
+        intervals && /^[^ \t#][^:]*:/ {
+            key=$0; sub(/[ \t]*:.*/, "", key); gsub(/^["\047]|["\047]$/, "", key)
+            if (key=="interval" || key=="realtime_interval") {
+                skip=1; count[key]++; if(count[key]>1 || $0 ~ /[&*]/) unsafe=1; next
+            }
+        }
         billing && /^[^ \t#][^:]*:/ {
             key = $0; sub(/[ \t]*:.*/, "", key); gsub(/^["\047]|["\047]$/, "", key)
             if (key == "billing_currency" || key == "billing_amount" || key == "billing_period" || key == "expires_at") {
@@ -655,15 +703,21 @@ stage_tcping_config() {
         echo 'Cannot safely update this YAML layout; original configuration is unchanged. Edit the Agent settings manually.' >&2
         return 1
     }
-    cat "$TMP_DIR/tcpping.yaml" >> "$TMP_DIR/agent.yaml"
+    if [ -f "$TMP_DIR/tcpping.yaml" ]; then cat "$TMP_DIR/tcpping.yaml" >> "$TMP_DIR/agent.yaml"; fi
+    if [ -f "$TMP_DIR/intervals.yaml" ]; then cat "$TMP_DIR/intervals.yaml" >> "$TMP_DIR/agent.yaml"; fi
     if [ -f "$TMP_DIR/traffic.yaml" ]; then cat "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"; fi
     if [ -f "$TMP_DIR/billing.yaml" ]; then cat "$TMP_DIR/billing.yaml" >> "$TMP_DIR/agent.yaml"; fi
 }
 
 choose_upgrade_config() {
     UPGRADE_RECONFIGURE=false
+    INTERVALS_ONLY=false
     case "${UPGRADE_CONFIG_MODE:-ask}" in
         keep) ;;
+        intervals)
+            upgrade_interactive || { echo 'Interval settings require an interactive terminal.' >&2; return 1; }
+            UPGRADE_RECONFIGURE=true; INTERVALS_ONLY=true
+            ;;
         reconfigure)
             upgrade_interactive || { echo 'Reconfiguration requires an interactive terminal.' >&2; return 1; }
             UPGRADE_RECONFIGURE=true
@@ -673,20 +727,25 @@ choose_upgrade_config() {
                 echo 'Upgrade configuration:'
                 echo '  1) Keep existing configuration (default)'
                 echo '  2) Reconfigure TCP Ping, monthly allowance, and optional billing settings; preserve token and identity'
+                echo '  3) Change realtime/history intervals only; preserve all other settings'
                 tcping_prompt 'Configuration choice [1]: '
                 case "${TCPING_ANSWER:-1}" in
                     1) ;;
                     2) UPGRADE_RECONFIGURE=true ;;
-                    *) echo 'Select configuration choice 1 or 2.' >&2; return 1 ;;
+                    3) UPGRADE_RECONFIGURE=true; INTERVALS_ONLY=true ;;
+                    *) echo 'Select configuration choice 1, 2 or 3.' >&2; return 1 ;;
                 esac
             fi
             ;;
         *) echo 'Invalid upgrade configuration mode.' >&2; return 1 ;;
     esac
     if [ "$UPGRADE_RECONFIGURE" = true ]; then
-        configure_tcping
-        configure_monthly_traffic upgrade
-        configure_billing upgrade
+        if [ "$INTERVALS_ONLY" = false ]; then
+            configure_tcping
+            configure_monthly_traffic upgrade
+            configure_billing upgrade
+        fi
+        configure_intervals upgrade "$1"
         stage_tcping_config "$1"
     fi
 }
@@ -763,8 +822,7 @@ cmd_install() {
     read_prompt TOKEN "Agent token is required: "
   done
 
-  read_prompt INTERVAL "Report interval (seconds) [30]: "
-  INTERVAL="${INTERVAL:-30}"
+  configure_intervals install
 
   configure_billing
 
@@ -776,11 +834,10 @@ hostname: "${HOSTNAME}"
 server: ${SERVER_URL}
 token: ${TOKEN}
 region: ${REGION}
-interval: ${INTERVAL}
 tls_skip_verify: false
 allow_plain_http: ${ALLOW_PLAIN_HTTP}
 YAML
-  cat "$TMP_DIR/billing.yaml" "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"
+  cat "$TMP_DIR/intervals.yaml" "$TMP_DIR/billing.yaml" "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"
   chmod 600 "$TMP_DIR/agent.yaml"
 
   echo "Installing Agent and unprivileged systemd service..."
@@ -824,9 +881,9 @@ cmd_upgrade() {
   UPGRADE_CONFIG_MODE=ask
   while [ $# -gt 0 ]; do
     case "$1" in
-      --keep-config|--reconfigure)
+      --keep-config|--reconfigure|--configure-intervals)
         [ "$UPGRADE_CONFIG_MODE" = ask ] || { echo 'Choose only one configuration option.' >&2; exit 1; }
-        if [ "$1" = --keep-config ]; then UPGRADE_CONFIG_MODE=keep; else UPGRADE_CONFIG_MODE=reconfigure; fi
+        if [ "$1" = --keep-config ]; then UPGRADE_CONFIG_MODE=keep; elif [ "$1" = --configure-intervals ]; then UPGRADE_CONFIG_MODE=intervals; else UPGRADE_CONFIG_MODE=reconfigure; fi
         ;;
       -h|--help) usage; return ;;
       *) echo "Unknown upgrade option: $1" >&2; exit 1 ;;

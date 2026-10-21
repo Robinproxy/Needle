@@ -93,7 +93,7 @@ TMP_DIR=$(mktemp -d /tmp/needle-agent-test.XXXXXX)
 configure
 cat "$TMP_DIR/agent.yaml"
 """
-        result = self.run_shell(commands, input_text="router's name\nhttps://needle.example.com\n\nsecret: #token\n030\n\n\n\npppoe-wan\n\n1000\n")
+        result = self.run_shell(commands, input_text="router's name\nhttps://needle.example.com\n\nsecret: #token\n\n030\n\n\n\npppoe-wan\n\n1000\n")
         self.assertEqual(result.returncode, 0, result.stderr)
         for value in ["hostname: 'router''s name'", "token: 'secret: #token'", "billing_period: 'forever'", "expires_at: ''", "interfaces: ['pppoe-wan']", 'interval: 30\n', 'allow_plain_http: false', 'monthly_traffic_limit_gb: 1000.000']:
             self.assertIn(value, result.stdout)
@@ -113,7 +113,7 @@ NETWORK_DIR={shlex.quote(str(network))}
 TMP_DIR=$(mktemp -d /tmp/needle-agent-test.XXXXXX)
 configure
 cat "$TMP_DIR/agent.yaml"
-''', input_text='router\nhttps://needle.example.com\n\n\n\n\n\n\neth1\n5\n0\n')
+''', input_text='router\nhttps://needle.example.com\n\n\n\n\n\n\n\neth1\n5\n0\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("token: 'c2c625be145e46f2b6166409fe41fbdd'", result.stdout)
         self.assertNotIn('od must not be required', result.stderr)
@@ -158,7 +158,7 @@ configure
 upgrade_interactive() { true; }
 tcping_prompt() { IFS= read -r TCPING_ANSWER; }
 main upgrade --reconfigure --version v9.9.9
-""", input_text='2\n\n\n')
+""", input_text='2\n\n\n\n\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         actual = self.config.read_text()
         for line in old.splitlines():
@@ -179,7 +179,7 @@ main upgrade --reconfigure --version v9.9.9
 upgrade_interactive() { true; }
 tcping_prompt() { IFS= read -r TCPING_ANSWER; }
 main upgrade --reconfigure
-""",input_text='5\n\n\n')
+""",input_text='5\n\n\n\n\n')
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.config.read_bytes(),old)
 
@@ -624,7 +624,7 @@ exit 0
 upgrade_interactive() { true; }
 tcping_prompt() { IFS= read -r TCPING_ANSWER; }
 main upgrade --reconfigure --version v9.9.9
-''', input_text='5\n\n\n')
+''', input_text='5\n\n\n\n\n')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(backup.read_text(), 'PREVIOUS KNOWN GOOD BACKUP\n')
         self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
@@ -640,7 +640,7 @@ exit 0
 upgrade_interactive() { true; }
 tcping_prompt() { IFS= read -r TCPING_ANSWER; }
 main upgrade --reconfigure --version v9.9.9
-''', input_text='5\n\n\n')
+''', input_text='5\n\n\n\n\n')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(backup.exists())
         self.assertFalse(self.lock.exists())

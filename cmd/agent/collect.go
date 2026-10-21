@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
 	"time"
@@ -21,11 +22,34 @@ type reportCollectors struct {
 func collectValue[T any](name string, collect func() (T, error), logf func(string, ...any)) T {
 	value, err := collect()
 	if err != nil {
-		logf("collect %s: %v", name, err)
+		if !errors.Is(err, collector.ErrBaseline) {
+			logf("collect %s: %v", name, err)
+		}
 		var unavailable T
 		return unavailable
 	}
 	return value
+}
+
+func newWindowCollectors(interfaces []string) reportCollectors {
+	cpu := &collector.CPUCollector{}
+	network := collector.NewNetworkCollector(interfaces)
+	ready := false
+	return reportCollectors{
+		cpu: cpu.Collect, memory: collector.CollectMemory, disk: collector.CollectDisk,
+		network: func() (*collector.NetworkStats, error) {
+			value, err := network.Collect()
+			if err != nil {
+				return nil, err
+			}
+			if !ready {
+				ready = true
+				return nil, collector.ErrBaseline
+			}
+			return value, nil
+		}, load: collector.CollectLoad, uptime: collector.CollectUptime,
+		tcpping: func([]collector.TCPingTarget) []collector.TCPingResult { return nil },
+	}
 }
 
 func collectReport(c reportCollectors, targets []collector.TCPingTarget, logf func(string, ...any)) *agentpkg.ReportData {

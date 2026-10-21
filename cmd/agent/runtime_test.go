@@ -78,12 +78,18 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 			t.Fatal(err)
 		}
 		var report agentpkg.ReportData
-		select {
-		case report = <-reports:
-		case <-ctx.Done():
-			cmd.Wait()
-			cancel()
-			t.Fatalf("Agent did not report: %s", logs.String())
+	warm:
+		for {
+			select {
+			case report = <-reports:
+				if report.CPU != nil && report.Network != nil {
+					break warm
+				}
+			case <-ctx.Done():
+				cmd.Wait()
+				cancel()
+				t.Fatalf("Agent did not report: %s", logs.String())
+			}
 		}
 		cmd.Process.Signal(syscall.SIGTERM)
 		err = cmd.Wait()

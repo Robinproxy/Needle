@@ -11,6 +11,9 @@ import (
 )
 
 type reportRequest struct {
+	TCPingCreatedAt     *int64        `json:"tcpping_created_at"`
+	Interval            int           `json:"interval"`
+	RealtimeInterval    int           `json:"realtime_interval"`
 	BillingCost         *billing.Cost `json:"billing_cost"`
 	MonthlyTrafficLimit int64         `json:"monthly_traffic_limit"`
 	Hostname            string        `json:"hostname"`
@@ -51,6 +54,16 @@ type reportRequest struct {
 }
 
 func validateReport(req *reportRequest, now time.Time) error {
+	if req.TCPingCreatedAt != nil && (*req.TCPingCreatedAt < now.Add(-30*24*time.Hour).Unix() || *req.TCPingCreatedAt > now.Add(5*time.Minute).Unix()) {
+		return fmt.Errorf("invalid TCP Ping sample time")
+	}
+	interval := req.Interval
+	if interval == 0 {
+		interval = 30
+	}
+	if interval < 1 || interval > 86400 || req.RealtimeInterval < 0 || req.RealtimeInterval > interval {
+		return fmt.Errorf("invalid report/realtime interval")
+	}
 	req.Hostname = strings.TrimSpace(req.Hostname)
 	if req.Hostname == "" {
 		return fmt.Errorf("hostname is required")

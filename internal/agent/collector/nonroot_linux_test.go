@@ -3,6 +3,7 @@
 package collector
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,7 +17,12 @@ func TestUnprivilegedLinuxCollectors(t *testing.T) {
 	if os.Getenv("NEEDLE_REQUIRE_NONROOT") == "1" && os.Geteuid() == 0 {
 		t.Fatal("this test must run as an unprivileged user")
 	}
-	cpu, err := CollectCPU()
+	cpuWindow := &CPUCollector{}
+	if _, err := cpuWindow.Collect(); !errors.Is(err, ErrBaseline) {
+		t.Fatalf("CPU baseline: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	cpu, err := cpuWindow.Collect()
 	if err != nil || cpu == nil || cpu.Cores < 1 {
 		t.Fatalf("CPU: %+v %v", cpu, err)
 	}
@@ -81,7 +87,7 @@ func TestProcPermissionErrorsAreNotHealthyZeros(t *testing.T) {
 	}
 	t.Setenv("HOST_PROC", proc)
 	checks := map[string]func() error{
-		"cpu":     func() error { _, err := CollectCPU(); return err },
+		"cpu":     func() error { _, err := (&CPUCollector{}).Collect(); return err },
 		"memory":  func() error { _, err := CollectMemory(); return err },
 		"network": func() error { _, err := NewNetworkCollector(nil).Collect(); return err },
 	}

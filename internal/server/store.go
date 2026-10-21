@@ -21,7 +21,7 @@ var (
 )
 
 const (
-	rawRetention    = 7 * 24 * time.Hour  // 30s-granularity metrics/tcpping rows
+	rawRetention    = 7 * 24 * time.Hour  // Original samples at the Agent's configured interval.
 	hourlyRetention = 90 * 24 * time.Hour // hourly rollups backing the 30d view
 )
 
@@ -29,6 +29,7 @@ type Store struct {
 	db   *sql.DB
 	path string
 	now  func() time.Time
+	live *liveState
 }
 
 // execer is the shared subset of *sql.DB and *sql.Tx, so single-statement
@@ -54,7 +55,7 @@ func newStore(path string, purge bool) (*Store, error) {
 	}
 	// Restrict DB file perms (tokens live here). Best-effort for existing files.
 	_ = os.Chmod(path, 0600)
-	s := &Store{db: db, path: path, now: time.Now}
+	s := &Store{db: db, path: path, now: time.Now, live: newLiveState()}
 	if err := s.enableIncrementalVacuum(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -204,6 +205,8 @@ func (s *Store) migrate() error {
 	// After the autoincrement rebuild so the rebuild cannot drop it.
 	s.db.Exec("ALTER TABLE agents ADD COLUMN last_seen INTEGER")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN monthly_traffic_limit INTEGER NOT NULL DEFAULT 0")
+	s.db.Exec("ALTER TABLE agents ADD COLUMN report_interval INTEGER NOT NULL DEFAULT 30")
+	s.db.Exec("ALTER TABLE agents ADD COLUMN realtime_interval INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
 	if err := s.migrateAgentOrder(); err != nil {
 		return err
@@ -423,10 +426,12 @@ func (s *Store) RevokeToken(token string) error {
 		return err
 	}
 
+	var deletedID int64
 	if hostname.Valid && hostname.String != "" {
 		var agentID int64
 		err = tx.QueryRow(`SELECT id FROM agents WHERE hostname = ?`, hostname.String).Scan(&agentID)
 		if err == nil {
+			deletedID = agentID
 			if err := deleteAgentTx(tx, agentID); err != nil {
 				return err
 			}
@@ -437,7 +442,13 @@ func (s *Store) RevokeToken(token string) error {
 	if _, err := tx.Exec(`DELETE FROM agent_tokens WHERE token = ?`, token); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if deletedID > 0 {
+		s.live.remove(deletedID)
+	}
+	return nil
 }
 
 func (s *Store) ListTokens() ([]TokenRow, error) {
@@ -547,6 +558,9 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
+	TCPingCreatedAt     int64
+	Interval            int
+	RealtimeInterval    int
 	BillingCost         *billing.Cost
 	CPUCores            int
 	MonthlyTrafficLimit int64
@@ -604,7 +618,11 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	}
 	for i := range r.TCPings {
 		r.TCPings[i].AgentID = agentID
-		if err := insertTCPing(tx, &r.TCPings[i], createdAt); err != nil {
+		probeAt := createdAt
+		if r.TCPingCreatedAt > 0 {
+			probeAt = min(r.TCPingCreatedAt, now.Unix())
+		}
+		if err := insertTCPing(tx, &r.TCPings[i], probeAt); err != nil {
 			return 0, err
 		}
 	}
@@ -631,24 +649,35 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	return agentID, nil
 }
 
+const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0)"
+
+func scanAgent(row interface{ Scan(...any) error }) (AgentRow, error) {
+	var a AgentRow
+	var cost sql.NullString
+	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt); err != nil {
+		return a, err
+	}
+	if cost.Valid {
+		if err := json.Unmarshal([]byte(cost.String), &a.BillingCost); err != nil {
+			return a, err
+		}
+	}
+	return a, nil
+}
+func (s *Store) GetAgent(id int64) (AgentRow, error) {
+	return scanAgent(s.db.QueryRow("SELECT "+agentColumns+" FROM agents WHERE id=?", id))
+}
 func (s *Store) GetAgents() ([]AgentRow, error) {
-	rows, err := s.db.Query("SELECT id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost FROM agents ORDER BY display_order, id")
+	rows, err := s.db.Query("SELECT " + agentColumns + " FROM agents ORDER BY display_order,id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var agents []AgentRow
 	for rows.Next() {
-		var a AgentRow
-		var cost sql.NullString
-		if err := rows.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost); err != nil {
+		a, err := scanAgent(rows)
+		if err != nil {
 			return nil, err
-		}
-		if cost.Valid {
-			if err := json.Unmarshal([]byte(cost.String), &a.BillingCost); err != nil {
-				return nil, err
-			}
 		}
 		agents = append(agents, a)
 	}
@@ -1129,7 +1158,11 @@ func (s *Store) DeleteAgent(id int64) error {
 	if err := deleteAgentTx(tx, id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.live.remove(id)
+	return nil
 }
 
 func deleteAgentTx(tx *sql.Tx, id int64) error {

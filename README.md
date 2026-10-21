@@ -28,7 +28,7 @@ Needle consists of one Server and multiple Agents. Agents make outbound-only con
 - Monthly upload + download usage with an optional allowance; accumulation survives Agent reboots and counter resets
 - Monthly, quarterly, semiannual, annual, and permanent billing periods; permanent nodes display ♾️
 - Node cards with CPU/MEM and DSK/TRF grids, separate live rates and monthly totals, and IPv4/IPv6 probe columns
-- Card and list layouts, region filters, themes, anomaly markers, and automatic refresh
+- Card and list layouts, region filters, themes, anomaly markers, SSE live updates, and bounded polling fallback
 - Unique Agent tokens bound to a hostname on the first successful report
 - SQLite storage and embedded frontend assets, with no frontend build step
 - Docker or binary Server deployment; systemd and OpenWrt / ImmortalWrt Agent installers
@@ -288,7 +288,7 @@ wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinprox
 sh /tmp/needle-agent-openwrt.sh install
 ```
 
-Enter the Server HTTPS URL and node details. The default reporting interval is 30 seconds and the default billing period is `forever` (Server v0.6.4+ required). Choose the TCP Ping mode and the monthly upload + download allowance in decimal GB (`1000` = 1 TB, `0` or Enter = no limit). Allow the printed token **on the Server** using the corresponding Server section above.
+Enter the Server HTTPS URL and node details. New installations default to a 5-second live-only interval and a 30-second full report/history interval and the default billing period is `forever` (Server v0.6.4+ required). Choose the TCP Ping mode and the monthly upload + download allowance in decimal GB (`1000` = 1 TB, `0` or Enter = no limit). Allow the printed token **on the Server** using the corresponding Server section above.
 
 Confirm the WAN interface suggested by the installer. PPPoE commonly uses `pppoe-wan`; other WANs may use an interface such as `eth1`. The selected interface must exist. Avoid counting both a PPPoE interface and its underlying device, or both LAN and WAN for the same traffic. See the OpenWrt / ImmortalWrt Agent settings under **Configuration** for multi-WAN setups.
 
@@ -324,7 +324,7 @@ Edit `/etc/needle/agent.yaml`, then restart. Before downloading, the installer r
 
 Installation, upgrades, and uninstall operations are locked against concurrent execution. Upgrades wait for the old process to exit before replacing it. When starting a service, the installer checks that it stays running; failures restore the previous binary, configuration, configuration backup, service, version, and boot/running state. If recovery itself fails, the installer prints and retains the temporary recovery directory. A startup check does not verify successful reports to the Server. For `unauthorized` reports, check the token allowed on the Server.
 
-The Agent reads system counters and sends outbound reports and the configured TCP probes. It does not change network, firewall, DHCP, DNS, or routing settings; install packages; add cron jobs; open a listening port; or write local metric history. Router CPU, memory, and a small amount of outbound traffic are still used. The procd service runs at nice level 10 with one Go execution core, a 32 MiB **soft Go memory target** (not an RSS cap), no core dumps, and a 128-file descriptor limit. Repeated immediate crashes stop respawning after five retries. Use the default 30-second interval or longer on a busy router, and select only the WAN interface and probes you need.
+The Agent reads system counters and sends outbound reports and the configured TCP probes. It does not change network, firewall, DHCP, DNS, or routing settings; install packages; add cron jobs; open a listening port; or write local metric history. Router CPU, memory, and a small amount of outbound traffic are still used. The procd service runs at nice level 10 with one Go execution core, a 32 MiB **soft Go memory target** (not an RSS cap), no core dumps, and a 128-file descriptor limit. Repeated immediate crashes stop respawning after five retries. On a busy router, keep the full history interval at 30 seconds or longer, consider `realtime_interval: 0` to disable extra live traffic, and select only the WAN interface and probes you need.
 
 ### Uninstall and firmware upgrades
 
@@ -406,6 +406,32 @@ Paths are the installer defaults.
 </details>
 
 ## Configuration
+
+<details>
+<summary><strong>Realtime updates and historical sampling</strong></summary>
+
+Agent-local settings control two independent channels; the Server cannot change them:
+
+```yaml
+realtime_interval: 5 # Extra live state, in seconds; 0 disables it
+interval: 30        # Full history, TCP Ping and monthly traffic accounting
+```
+
+New installations write `5 / 30`. Existing configurations without `realtime_interval` behave as `0 / interval`; keeping configuration during upgrade never silently enables extra traffic. Enable it explicitly after upgrading the Server. Both values must be integers; enabled realtime must be between 1 and the full report interval. `5 / 30`, `10 / 30`, `5 / 60`, `7 / 30` and `0 / 30` are supported. Edit YAML and restart to apply; there is no remote configuration or hot reload.
+
+`POST /api/realtime` accepts only already-registered Agents with the matching token/hostname. It updates one latest-state entry in memory and never writes system/probe history, billing settings or the traffic ledger. The first full report still registers the node. CPU and NIC rates have separate realtime/history counter baselines and use the actual observed window. At startup, rate collectors first establish their baselines; that initial report marks CPU/network unavailable instead of inventing a complete measurement window. Monthly accounting begins with the first valid historical network sample. TCP Ping starts on full-report ticks in bounded asynchronous batches; realtime ticks never trigger probes. Its actual batch-start timestamp is stored separately, so a slow HTTP sender cannot backdate probe results.
+
+The dashboard receives one same-origin `/api/events` SSE stream per page. Node events update the corresponding card/list values; only committed historical reports refresh current detail curves. Historical date selection, chart instances, zoom and probe visibility survive live updates. A snapshot on subscription/reconnection and periodic heartbeat snapshots reconcile changes and deletions. The browser polls every 30 seconds only while SSE is unavailable. The Server uses bounded queues, disconnects slow event clients, disables proxy buffering and sets deadlines specifically on the stream; ordinary HTTP timeout protections remain enabled.
+
+Online state uses the Server's actual Agent receipt time, with a threshold of at least 120 seconds and otherwise three expected reporting intervals plus 15 seconds. History freshness uses the full-report interval separately. Hover a live card/network summary to see the actual system sample, last saved full report and any history delay. SSE heartbeats never mark a node as newly reporting. Server restarts fall back to persisted samples with their original timestamps.
+
+History remains raw for seven days and hourly for 90 days; no minute tier is added. With `interval: 30`, a complete day theoretically has 2,880 regularly scheduled historical samples, excluding startup extras and failures; `interval: 60` produces 1,440. All queries use timestamps, not a fixed count. Five-second realtime does not multiply history sixfold. Successfully received history is retained; samples lost during outages are not reconstructed.
+
+Sampling and transport are separate. Realtime keeps only the latest pending state. Full reports use a bounded FIFO of 64 samples and one sender with no automatic retry, preserving order and avoiding duplicate accounting. Prolonged congestion can fill that queue: dropped new samples and recovery are explicitly logged. Unsent memory-only samples cannot survive Agent exit; there is no disk spool. An older Server returning 404/405/501 pauses realtime until Agent restart, with one compatibility message; full reports continue. Authentication errors remain errors and are not treated as unsupported realtime.
+
+Upgrade order: **Server first, then Agents**. Back up the Server database; the Server migration adds reporting-interval metadata without changing traffic algorithms or retention. On Linux, use `sudo bash /tmp/needle-agent.sh upgrade --keep-config`, then optionally `upgrade --configure-intervals`. On OpenWrt, use `sh /tmp/needle-agent-openwrt.sh upgrade --keep-config`, then optionally `upgrade --configure-intervals`. Both configuration flows validate before restart and retain the token and previous service state. Keep the Linux non-root user and file permissions described above.
+
+</details>
 
 <details>
 <summary><strong>Server — Docker Compose settings</strong></summary>
@@ -494,7 +520,8 @@ billing_amount: "" # Entire billing period; "0" = free, "" = not configured
 billing_period: "forever"
 expires_at: ""
 monthly_traffic_limit_gb: 1000 # 1000 decimal GB = 1 TB; 0 = no limit
-interval: 30
+realtime_interval: 5 # Extra live-only reports; 0 disables
+interval: 30 # Full history / TCP Ping / traffic ledger
 tls_skip_verify: false
 allow_plain_http: false
 tcpping:
@@ -513,7 +540,8 @@ tcpping:
 | `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves the billing period unset |
 | `expires_at` | Actual next renewal / top-up date in `YYYY-MM-DD`, independent of when you bought or acquired the node; empty for `forever` |
 | `monthly_traffic_limit_gb` | Monthly upload + download allowance in decimal GB; `1000` = 1 TB, `0` or omitted displays ♾️; display only, does not stop traffic; Server and Agent v0.7.0+ |
-| `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
+| `realtime_interval` | Extra live-only interval: integer 0 (disabled) or 1–`interval`; new installs use 5, omitted old settings remain disabled |
+| `interval` | Full history, TCP Ping and traffic accounting interval in seconds; default 30, maximum 86400; legacy non-positive values keep the 30-second default |
 | `interfaces` | Exact NIC whitelist; omitted or empty uses the virtual-interface exclusion filter |
 | `tls_skip_verify` | Disables TLS certificate verification; defaults to false |
 | `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
@@ -549,7 +577,7 @@ Custom targets require unique names and `host:port` addresses; bracket literal I
 
 The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping, monthly allowance, and optional billing settings**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance). The final billing question defaults to **No**, preserving existing currency, amount, period, and renewal date. Choosing **Yes** replaces all four billing fields through separate prompts; the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600.
 
-Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance and optional billing prompts. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
+Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance and optional billing prompts. The interval prompts follow the probe, allowance and optional billing prompts, defaulting to the current values. Use `upgrade --configure-intervals` (or interactive choice 3) to change only the two intervals while preserving probes, billing and identity. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config`, `--reconfigure` and `--configure-intervals` are mutually exclusive. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
 
 ```yaml
 tcpping: []
@@ -583,7 +611,8 @@ billing_amount: "" # Entire billing period; "0" = free, "" = not configured
 billing_period: "forever"
 expires_at: ""
 monthly_traffic_limit_gb: 1000 # 1000 decimal GB = 1 TB; 0 = no limit
-interval: 30
+realtime_interval: 5 # Extra live-only reports; 0 disables
+interval: 30 # Full history / TCP Ping / traffic ledger
 interfaces: ["pppoe-wan"]
 tls_skip_verify: false
 allow_plain_http: false
@@ -603,7 +632,8 @@ tcpping:
 | `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves the billing period unset |
 | `expires_at` | Actual next renewal / top-up date in `YYYY-MM-DD`, independent of when you bought or acquired the node; empty for `forever` |
 | `monthly_traffic_limit_gb` | Monthly upload + download allowance in decimal GB; `1000` = 1 TB, `0` or omitted displays ♾️; display only, does not stop traffic; Server and Agent v0.7.0+ |
-| `interval` | Report interval in seconds; defaults to 30 when missing or non-positive |
+| `realtime_interval` | Extra live-only interval: integer 0 (disabled) or 1–`interval`; new installs use 5, omitted old settings remain disabled |
+| `interval` | Full history, TCP Ping and traffic accounting interval in seconds; default 30, maximum 86400; legacy non-positive values keep the 30-second default |
 | `interfaces` | Exact NIC whitelist; explicitly select the actual WAN device, such as `pppoe-wan` or `eth1`, to avoid counting LAN/WAN traffic twice |
 | `tls_skip_verify` | Disables TLS certificate verification; defaults to false |
 | `allow_plain_http` | Allows remote plaintext HTTP; defaults to false. Loopback HTTP is permitted without it |
@@ -641,7 +671,7 @@ Custom targets require unique names and `host:port` addresses; bracket literal I
 
 The `tcpping` list remains the source of truth. During an interactive upgrade, choose **Keep existing configuration** (default) or **Reconfigure TCP Ping, monthly allowance, and optional billing settings**. Reselection updates `tcpping` and optionally `monthly_traffic_limit_gb` (Enter preserves the existing allowance). The final billing question defaults to **No**, preserving existing currency, amount, period, and renewal date. Choosing **Yes** replaces all four billing fields through separate prompts; the token, hostname, Server URL, network interfaces, and other settings are preserved. The previous file is saved as `agent.yaml.bak` with mode 600. OpenWrt installation failures restore the original configuration along with the old binary and service.
 
-Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance and optional billing prompts. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config` and `--reconfigure` cannot be combined. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
+Use `upgrade --keep-config` to suppress the choice, or `upgrade --reconfigure` to go directly to the five TCP Ping options, followed by the monthly allowance and optional billing prompts. The interval prompts follow the probe, allowance and optional billing prompts, defaulting to the current values. Use `upgrade --configure-intervals` (or interactive choice 3) to change only the two intervals while preserving probes, billing and identity. Non-interactive upgrades keep the original configuration; explicit reconfiguration requires a terminal. `--keep-config`, `--reconfigure` and `--configure-intervals` are mutually exclusive. You can also edit the list and restart the Agent manually; there is no runtime auto-detection or automatic removal of unreachable targets. To disable probes:
 
 ```yaml
 tcpping: []

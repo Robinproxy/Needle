@@ -15,6 +15,9 @@ import (
 )
 
 type ReportData struct {
+	TCPingCreatedAt     int64                    `json:"tcpping_created_at,omitempty"`
+	Interval            int                      `json:"interval,omitempty"`
+	RealtimeInterval    int                      `json:"realtime_interval,omitempty"`
 	BillingCost         *billing.Cost            `json:"billing_cost,omitempty"`
 	CreatedAt           int64                    `json:"created_at,omitempty"`
 	MonthlyTrafficLimit int64                    `json:"monthly_traffic_limit"`
@@ -31,6 +34,29 @@ type ReportData struct {
 	TCPing              []collector.TCPingResult `json:"tcpping,omitempty"`
 }
 
+// RealtimeData deliberately cannot carry probes, billing or traffic policy.
+type RealtimeData struct {
+	Hostname  string                  `json:"hostname"`
+	CreatedAt int64                   `json:"created_at"`
+	CPU       *collector.CPUStats     `json:"cpu"`
+	Memory    *collector.MemoryStats  `json:"memory"`
+	Disk      *collector.DiskStats    `json:"disk"`
+	Network   *collector.NetworkStats `json:"network"`
+	Load      *collector.LoadStats    `json:"load"`
+	Uptime    uint64                  `json:"uptime"`
+}
+
+func RealtimeFromReport(r *ReportData) *RealtimeData {
+	return &RealtimeData{Hostname: r.Hostname, CreatedAt: r.CreatedAt, CPU: r.CPU, Memory: r.Memory, Disk: r.Disk, Network: r.Network, Load: r.Load, Uptime: r.Uptime}
+}
+
+type HTTPStatusError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPStatusError) Error() string { return fmt.Sprintf("server %d: %s", e.Status, e.Body) }
+
 type Reporter struct {
 	serverURL string
 	token     string
@@ -45,7 +71,7 @@ func readReportResponse(resp *http.Response) error {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server %d: %s", resp.StatusCode, string(body))
+		return &HTTPStatusError{Status: resp.StatusCode, Body: string(body)}
 	}
 	if err != nil {
 		return fmt.Errorf("read server response: %w", err)
@@ -65,12 +91,20 @@ func NewReporter(serverURL, token string, tlsSkipVerify bool) *Reporter {
 }
 
 func (r *Reporter) Send(ctx context.Context, data *ReportData) error {
+	return r.send(ctx, "/api/report", data)
+}
+
+func (r *Reporter) SendRealtime(ctx context.Context, data *RealtimeData) error {
+	return r.send(ctx, "/api/realtime", data)
+}
+
+func (r *Reporter) send(ctx context.Context, path string, data any) error {
 	body, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.serverURL+"/api/report", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.serverURL+path, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("request: %w", err)
 	}

@@ -16,6 +16,13 @@ func (c Config) validateProbesAndInterval() error {
 	if c.Interval > 86400 {
 		return fmt.Errorf("interval must not exceed 86400 seconds")
 	}
+	interval := c.Interval
+	if interval <= 0 {
+		interval = 30
+	}
+	if c.RealtimeInterval < 0 || c.RealtimeInterval > interval {
+		return fmt.Errorf("realtime_interval must be 0 (disabled) or 1–interval seconds")
+	}
 	if len(c.TCPing) > 32 {
 		return fmt.Errorf("at most 32 TCP Ping targets are supported")
 	}

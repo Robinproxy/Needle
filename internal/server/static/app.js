@@ -134,7 +134,7 @@ function renderInfoBar() {
   const now = Date.now();
   const online = agents.filter(a => {
     const seen = lastSeenMs(a);
-    return seen && (now - seen < 120000);
+    return seen && (now - seen < (a.live?.offline_after || 120) * 1000);
   }).length;
   const total = agents.length;
 
@@ -537,7 +537,7 @@ function updateExpiryBadge(node, a) {
 }
 
 function dashboardLayoutSignature(list) {
-  return JSON.stringify(list.map(a => [a.agent.id, a.agent.display_order, a.agent.hostname, a.agent.region, !!a._online, !!a.latest_metric, a.tcpping_enabled,
+  return JSON.stringify(list.map(a => [a.agent.id, a.agent.display_order, a.agent.hostname, a.agent.region, a.tcpping_enabled,
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 
@@ -1283,10 +1283,11 @@ async function refreshDashboard(forceRender) {
       throw error;
     }
     const previousLayout = dashboardLayoutSignature(agents);
-    agents = data;
+    const previous = new Map(agents.map(a => [a.agent.id, a]));
+    agents = data.map(a => mergeLiveNode(previous.get(a.agent.id), a));
     agents.forEach(a => {
       const seen = lastSeenMs(a);
-      a._online = !!seen && (Date.now() - seen < 120000);
+      a._online = !!seen && (Date.now() - seen < (a.live?.offline_after || 120) * 1000);
     });
     rendering = true;
     renderInfoBar();
@@ -1294,7 +1295,7 @@ async function refreshDashboard(forceRender) {
     if (forceRender || dashboardNeedsRender || previousLayout !== dashboardLayoutSignature(agents)) renderAll();
     else {
       updateLiveSummaries(data);
-      if (expandedId) updateDetailCharts(expandedId);
+      if (expandedId && !eventsConnected) updateDetailCharts(expandedId);
     }
     lastRefreshAt = new Date();
     dashboardNeedsRender = false;
@@ -1320,6 +1321,9 @@ function updateLiveSummaries(data) {
       const isOnline = a._online || false;
 
       card.classList.toggle('offline', !isOnline);
+      card.setAttribute?.('aria-label', (isOnline ? 'Online' : 'Offline') + ' node ' + a.agent.hostname + ', open details');
+      card.setAttribute?.('data-history-stale', String(!!a.live?.history_stale));
+      card.setAttribute?.('title', freshnessText(a));
       const listExpiry = card.querySelector('.list-expiry');
       if (listExpiry) listExpiry.innerHTML = a.agent.billing_period === 'forever' ? expiryBadge(a) : '';
       const cardSub = card.querySelector('.card-sub');
@@ -1341,7 +1345,7 @@ function updateLiveSummaries(data) {
         card.querySelector('.card-sub span:first-child').textContent = m ? formatUptime(m.uptime) : '-';
         const speeds = card.querySelector('.card-speeds');
         speeds.innerHTML = cardNetworkHTML(a);
-        speeds.title = seenTs ? 'Last report ' + relativeTime(seenTs) : 'No reports yet';
+        speeds.title = freshnessText(a);
         return;
       }
 
@@ -1372,6 +1376,124 @@ function updateLiveSummaries(data) {
 function updateDetailCharts(id) {
   if (currentHistoryDay || detailRequest) return;
   return loadDetailData(id, currentMetricsRange || '24h');
+}
+
+let eventStream = null;
+let eventsConnected = false;
+let pollingTimer = null;
+let reconnectTimer = null;
+let reconnectDelay = 5000;
+let eventWatchdog = null;
+
+function watchEvents(stream, timeout) {
+  if (eventWatchdog) clearTimeout(eventWatchdog);
+  eventWatchdog = setTimeout(() => { eventWatchdog = null; stream.onerror(); }, timeout);
+}
+
+function freshnessText(a) {
+  const sampled = a.live?.sample_at || a.latest_metric?.created_at;
+  const saved = a.live?.last_full_report_at;
+  return (sampled ? 'System sampled ' + relativeTime(sampled * 1000) : 'No system sample')
+    + (a.live?.last_full_sample_at ? ' · History sample ' + relativeTime(a.live.last_full_sample_at * 1000) : '')
+    + (saved ? ' · History saved ' + relativeTime(saved * 1000) : '')
+    + (a.live?.history_stale ? ' · History storage delayed; node may still be online' : '');
+}
+
+function mergeLiveNode(previous, incoming) {
+  if (!previous) return incoming;
+  if (incoming.revision > 0 && incoming.revision < (previous.revision || 0)) return previous;
+  const merged = {...incoming};
+  if ((previous.latest_metric?.created_at || 0) > (incoming.latest_metric?.created_at || 0)) merged.latest_metric = previous.latest_metric;
+  if ((previous.live?.last_full_sample_at || 0) > (incoming.live?.last_full_sample_at || 0)) {
+    merged.agent = {...previous.agent};
+    merged.latest_tcpping = previous.latest_tcpping;
+    merged.tcpping_enabled = previous.tcpping_enabled;
+    merged.traffic = previous.traffic;
+    merged.expiry_date = previous.expiry_date;
+    merged.expiry_days = previous.expiry_days;
+  }
+  merged.agent = {...merged.agent, last_seen: Math.max(previous.agent.last_seen || 0, incoming.agent.last_seen || 0)};
+  merged.live = {...incoming.live,
+    sample_at: merged.latest_metric?.created_at || 0,
+    last_full_sample_at: Math.max(previous.live?.last_full_sample_at || 0, incoming.live?.last_full_sample_at || 0),
+    last_full_report_at: Math.max(previous.live?.last_full_report_at || 0, incoming.live?.last_full_report_at || 0)};
+  return merged;
+}
+
+function applyEventNodes(data, replace = false, resetRevision = false, historyEvent = false) {
+  if (!Array.isArray(data) || data.some(a => !a?.agent || !Number.isSafeInteger(a.agent.id))) throw new Error('Invalid event snapshot');
+  const before = dashboardLayoutSignature(agents);
+  const previous = new Map(agents.map(a => [a.agent.id, a]));
+  const changedHistory = new Set();
+  const changed = [];
+  for (const incoming of data) {
+    const old = previous.get(incoming.agent.id);
+    if (!replace && !resetRevision && old && (incoming.revision || 0) <= (old.revision || 0)) continue;
+    if (historyEvent || (incoming.live?.last_full_sample_at || 0) > (old?.live?.last_full_sample_at || 0)) changedHistory.add(incoming.agent.id);
+    const node = mergeLiveNode(old, incoming);
+    const seen = lastSeenMs(node);
+    node._online = !!seen && Date.now() - seen < (node.live?.offline_after || 120) * 1000;
+    previous.set(node.agent.id, node); changed.push(node);
+  }
+  agents = replace ? data.map(a => previous.get(a.agent.id)) : Array.from(previous.values());
+  if (expandedId && !agents.some(a => a.agent.id === expandedId)) expandedId = null;
+  renderInfoBar();
+  if (dashboardNeedsRender || before !== dashboardLayoutSignature(agents)) renderAll();
+  else updateLiveSummaries(changed);
+  if (expandedId && changedHistory.has(expandedId)) updateDetailCharts(expandedId);
+  dashboardNeedsRender = false; lastRefreshAt = new Date();
+  setDashboardState('ready');
+}
+
+function startPolling() {
+  if (!pollingTimer) pollingTimer = setInterval(softRefresh, 30000);
+}
+function stopEvents() {
+  eventStream?.close(); eventStream = null; eventsConnected = false;
+  if (pollingTimer) clearInterval(pollingTimer);
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (eventWatchdog) clearTimeout(eventWatchdog);
+  eventWatchdog = null;
+  pollingTimer = null; reconnectTimer = null;
+}
+function connectEvents() {
+  if (eventStream) return;
+  if (typeof EventSource === 'undefined') { startPolling(); return; }
+  const stream = new EventSource('/api/events'); eventStream = stream;
+  watchEvents(stream, 20000);
+  let firstSnapshot = true;
+  stream.onopen = () => {
+    eventsConnected = true; reconnectDelay = 5000;
+    if (pollingTimer) clearInterval(pollingTimer);
+    pollingTimer = null;
+    watchEvents(stream, 40000);
+  };
+  stream.addEventListener('snapshot', event => {
+    if (eventStream !== stream) return;
+    watchEvents(stream, 40000);
+    try { applyEventNodes(JSON.parse(event.data), true, firstSnapshot, firstSnapshot); firstSnapshot = false; }
+    catch (error) { console.error('Event snapshot:', error); stream.onerror(); }
+  });
+  stream.addEventListener('node', event => {
+    if (eventStream !== stream) return;
+    watchEvents(stream, 40000);
+    try {
+      const update = JSON.parse(event.data);
+      if (update.kind === 'remove') {
+        applyEventNodes(agents.filter(a => a.agent.id !== update.id), true);
+      } else if (update.node) applyEventNodes([update.node], false, false, update.kind === 'history');
+    } catch (error) { console.error('Node event:', error); stream.onerror(); }
+  });
+  stream.onerror = () => {
+    if (eventStream !== stream) return;
+    stream.close(); eventStream = null; eventsConnected = false;
+    if (eventWatchdog) clearTimeout(eventWatchdog);
+    eventWatchdog = null;
+    startPolling();
+    if (lastRefreshAt) setDashboardState('stale', 'Live connection interrupted; reconnecting. Historical data is retained.');
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connectEvents(); }, reconnectDelay);
+    reconnectDelay = Math.min(30000, reconnectDelay * 2);
+  };
 }
 
 let themeMode = localStorage.getItem('themeMode') || 'light';
@@ -1457,5 +1579,5 @@ document.addEventListener('click', e => {
   tcppingToggleLine(id, name);
 });
 
-fullRefresh();
-setInterval(softRefresh, 30000);
+fullRefresh().then(connectEvents);
+window.addEventListener('pagehide', stopEvents);

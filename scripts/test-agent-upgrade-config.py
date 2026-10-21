@@ -42,7 +42,7 @@ UPGRADE_CONFIG_MODE={shlex.quote(mode)}
 choose_upgrade_config {shlex.quote(str(original))}
 '''
             shell='/bin/bash' if script=='needle-agent.sh' else '/bin/sh'
-            result=subprocess.run([shell,'-c',commands],input=answers,text=True,capture_output=True)
+            result=subprocess.run([shell,'-c',commands],input=answers+"\n\n",text=True,capture_output=True)
             staged=root/'agent.yaml'
             return result, staged.read_text() if staged.exists() else None, original.read_text()
 
@@ -162,7 +162,7 @@ deploy_agent() {{
 }}
 cmd_upgrade {option}
 '''
-                result=subprocess.run(['/bin/bash','-c',commands],input=answers,text=True,capture_output=True)
+                result=subprocess.run(['/bin/bash','-c',commands],input=answers+('\n\n' if changed else ''),text=True,capture_output=True)
                 self.assertEqual(result.returncode,0,result.stderr)
                 actual=config.read_text()
                 for line in OLD.splitlines():

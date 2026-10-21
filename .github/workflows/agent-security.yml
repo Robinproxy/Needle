@@ -30,6 +30,7 @@ jobs:
           bash -n scripts/needle-agent.sh
           python3 scripts/test-linux-agent-installer.py
           python3 scripts/test-agent-upgrade-config.py
+          python3 scripts/test-realtime-config.py
       - name: Build Agent and real Linux collector tests
         run: |
           CGO_ENABLED=0 go build -o /tmp/needle-agent-security ./cmd/agent

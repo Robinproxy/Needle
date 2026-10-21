@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -31,11 +30,27 @@ type Config struct {
 	ExpiresAt             string                   `yaml:"expires_at"`
 	BillingPeriod         string                   `yaml:"billing_period"`
 	Interval              int                      `yaml:"interval"`
+	RealtimeInterval      int                      `yaml:"realtime_interval"`
 	TLSSkipVerify         bool                     `yaml:"tls_skip_verify"`
 	AllowPlainHTTP        bool                     `yaml:"allow_plain_http"`
 	Insecure              *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
 	Interfaces            []string                 `yaml:"interfaces"`
 	TCPing                []collector.TCPingTarget `yaml:"tcpping"`
+}
+
+func (c *Config) UnmarshalYAML(node *yaml.Node) error {
+	type plain Config
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == "realtime_interval" && node.Content[i+1].Tag != "!!int" {
+			return fmt.Errorf("realtime_interval must be an integer number of seconds")
+		}
+	}
+	*c = Config(decoded)
+	return nil
 }
 
 func (c Config) billingCost() (*billing.Cost, error) {
@@ -160,7 +175,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("Needle Agent - server: %s, interval: %ds", serverURL, cfg.Interval)
+	log.Printf("Needle Agent - server: %s, history interval: %ds, realtime interval: %ds (0=disabled)", serverURL, cfg.Interval, cfg.RealtimeInterval)
 
 	expiresAtUnix, err := cfg.expiryUnix()
 	if err != nil {
@@ -175,62 +190,45 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	netCollector := collector.NewNetworkCollector(cfg.Interfaces)
-	collectors := reportCollectors{
-		cpu: collector.CollectCPU, memory: collector.CollectMemory,
-		disk: collector.CollectDisk, network: netCollector.Collect,
-		load: collector.CollectLoad, uptime: collector.CollectUptime,
-		tcpping: collector.TCPing,
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	collector.CollectCPU()
-
-	// protect reportFn with a mutex so we wait for an in-flight report
-	var reportMu sync.Mutex
-
-	reportFn := func() {
-		reportMu.Lock()
-		defer reportMu.Unlock()
-
-		// after receiving shutdown signal, skip new reports
-		if ctx.Err() != nil {
-			return
-		}
-
-		data := collectReport(collectors, cfg.TCPing, log.Printf)
-		data.Hostname = hostname
-		data.Region = cfg.Region
-		data.ExpiresAt = expiresAtUnix
-		data.BillingPeriod = cfg.BillingPeriod
-		data.MonthlyTrafficLimit = monthlyLimit
-		data.BillingCost = billingCost
-
-		if err := reporter.Send(ctx, data); err != nil {
-			log.Printf("report failed: %v", err)
-		}
-	}
-
-	reportFn()
-
-	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
-	defer ticker.Stop()
-
-	for {
+	defer signal.Stop(sigCh)
+	go func() {
 		select {
-		case <-ticker.C:
-			reportFn()
 		case <-sigCh:
-			log.Println("shutting down...waiting for in-flight report...")
-			reportMu.Lock()
 			cancel()
-			reportMu.Unlock()
-			return
+		case <-ctx.Done():
+		}
+	}()
+
+	historyTicker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
+	defer historyTicker.Stop()
+	var realtimeTicks <-chan time.Time
+	if cfg.RealtimeInterval > 0 {
+		ticker := time.NewTicker(time.Duration(cfg.RealtimeInterval) * time.Second)
+		defer ticker.Stop()
+		realtimeTicks = ticker.C
+	}
+	decorate := func(data *agentpkg.ReportData) {
+		data.Hostname, data.Region = hostname, cfg.Region
+		data.ExpiresAt, data.BillingPeriod = expiresAtUnix, cfg.BillingPeriod
+		data.MonthlyTrafficLimit, data.BillingCost = monthlyLimit, billingCost
+		data.Interval, data.RealtimeInterval = cfg.Interval, cfg.RealtimeInterval
+	}
+	sample := func() func() *agentpkg.ReportData {
+		c := newWindowCollectors(cfg.Interfaces)
+		return func() *agentpkg.ReportData {
+			data := collectReport(c, nil, log.Printf)
+			decorate(data)
+			return data
 		}
 	}
+	runSampling(ctx, historyTicker.C, realtimeTicks, sample(), sample(),
+		func(ctx context.Context, data *agentpkg.ReportData) error {
+			return reporter.Send(ctx, data)
+		}, func(ctx context.Context, data *agentpkg.ReportData) error {
+			return reporter.SendRealtime(ctx, agentpkg.RealtimeFromReport(data))
+		}, log.Printf, newProbeSampler(cfg.TCPing))
 }

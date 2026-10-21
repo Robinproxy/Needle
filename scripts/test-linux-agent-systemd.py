@@ -60,7 +60,7 @@ def main():
     class Receiver(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-            reports.put((self.headers.get('Authorization'), data))
+            reports.put((self.path, self.headers.get('Authorization'), data))
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'ok')
@@ -80,6 +80,7 @@ def main():
 server: http://127.0.0.1:{port}
 token: {TOKEN}
 interval: 2
+realtime_interval: 1
 interfaces: ['lo']
 billing_period: forever
 tcpping:
@@ -114,10 +115,17 @@ deploy_agent
 
         def check_report():
             deadline = time.monotonic() + 15
+            realtime_received = False
             while time.monotonic() < deadline:
-                auth, report = reports.get(timeout=15)
+                path, auth, report = reports.get(timeout=15)
                 assert auth == 'Bearer ' + TOKEN
                 assert report['hostname'] == 'isolated-systemd-test'
+                if path == '/api/realtime':
+                    assert 'tcpping' not in report and 'billing_period' not in report
+                    realtime_received = True
+                    continue
+                if report['cpu'] is None or report['network'] is None:
+                    continue  # Startup establishes rate windows rather than inventing a full sample.
                 for name in ['cpu', 'memory', 'disk', 'network', 'load']:
                     assert report[name] is not None, (name, report)
                 assert report['cpu']['cores'] > 0
@@ -126,7 +134,7 @@ deploy_agent
                 assert report['disk']['total'] > 0
                 assert report['uptime'] > 0
                 assert report['tcpping'][0]['success']
-                if report['network']['total_sent'] > 0 and report['network']['up'] > 0:
+                if realtime_received and report['network']['total_sent'] > 0 and report['network']['up'] > 0:
                     return
             raise AssertionError('No report with nonzero loopback counters/rate')
 
