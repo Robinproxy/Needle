@@ -18,6 +18,13 @@ def http(path,payload=None,token=None):
     data=None if payload is None else json.dumps(payload).encode()
     req=urllib.request.Request('http://127.0.0.1:18928'+path,data=data,headers={'Content-Type':'application/json',**({'Authorization':'Bearer '+token} if token else {})})
     with urllib.request.urlopen(req,timeout=5) as r:return json.load(r)
+def wait_healthy():
+    for _ in range(50):
+        try:
+            if http('/api/health')['status']=='ok':return
+        except OSError:pass
+        time.sleep(.2)
+    raise AssertionError('Server did not become healthy')
 try:
     (base/'bin').mkdir(parents=True);db.parent.mkdir()
     shutil.copy2(binary,base/'bin/needle-server');os.chmod(base/'bin/needle-server',0o755)
@@ -25,9 +32,7 @@ try:
     cli('allow-token','ci-server-only')
     unit.write_text(f'[Service]\nExecStart={base}/bin/needle-server -l ${{NEEDLE_LISTEN}} -db {db}\nEnvironmentFile={base}/.env\n[Install]\nWantedBy=multi-user.target\n')
     run('systemctl','daemon-reload');run('systemctl','enable','--now',name)
-    for _ in range(30):
-        try: http('/api/health');break
-        except OSError:time.sleep(.2)
+    wait_healthy()
     http('/api/report',{'hostname':'CI Demo','billing_period':'forever','created_at':int(time.time()),'uptime':100,'network':{'total_sent':100,'total_recv':200}},'ci-server-only')
     with tempfile.TemporaryDirectory() as temp:
         shutil.copy2(binary,pathlib.Path(temp)/'needle-server')
@@ -47,6 +52,9 @@ cmd_upgrade
     assert (base/'.env').read_text()=='NEEDLE_LISTEN=127.0.0.1:18928\n'
     for operation in [('list-agents',),('list-tokens',),('allow-token','ci-extra'),('-y','revoke-token','ci-extra')]:
         cli(*operation)
+        # This checks CLI/DAC compatibility, not burst admission. Respect the
+        # production per-token limit instead of disabling it for the fixture.
+        time.sleep(1.05)
         http('/api/report',{'hostname':'CI Demo','created_at':int(time.time()),'uptime':101},'ci-server-only')
         for p in db.parent.iterdir(): assert p.stat().st_uid==uid and p.stat().st_mode&0o077==0,p
     # Root CLI must neither inherit group 0 from a bad DB nor race installer
@@ -62,8 +70,9 @@ cmd_upgrade
         fcntl.flock(lock,fcntl.LOCK_EX)
         rejected=subprocess.run([str(base/'bin/needle-server'),'-db',str(db),'list-agents'],capture_output=True,text=True)
         assert rejected.returncode!=0 and 'installer/administrator' in rejected.stderr
-    for _ in range(2):run('systemctl','restart',name)
-    assert http('/api/health')['status']=='ok'
+    for _ in range(2):
+        run('systemctl','restart',name)
+        wait_healthy()
     # Normal uninstall retains data, token and the non-login owner. Reinstall
     # from the saved unit must preserve listen/custom arguments and permissions.
     with tempfile.TemporaryDirectory() as temp:
@@ -80,8 +89,7 @@ download_release_server() {{ return 0; }}
         assert subprocess.run(['getent','passwd',name],capture_output=True).returncode==0
         run('bash','-c',prefix+'cmd_upgrade')
         run('systemctl','start',name)
-        time.sleep(1)
-        assert http('/api/health')['status']=='ok'
+        wait_healthy()
         cli('-y','delete-agent','CI Demo')
         assert http('/api/agents')==[]
         run('bash','-c',prefix+'cmd_uninstall --purge --yes')
@@ -101,7 +109,7 @@ read_prompt() {{ printf -v "$1" '%s' '127.0.0.1:18928'; }}
         run('bash','-c',prefix+'cmd_install')
         assert (base/'.env').read_text()=='NEEDLE_LISTEN=127.0.0.1:18928\n'
         assert subprocess.check_output(['systemctl','is-enabled',name],text=True).strip()=='enabled'
-        assert http('/api/health')['status']=='ok'
+        wait_healthy()
         run('bash','-c',prefix+'cmd_uninstall --purge --yes')
         assert not base.exists()
     print('PASS: root migration, non-root startup/restart, consistent backup, CLI followed by writes, DB/WAL/SHM permissions, retained uninstall/reinstall, explicit node deletion and purge')
