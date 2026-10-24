@@ -357,8 +357,10 @@ deploy_agent() (
   if [ -f "$AGENT_YAML" ]; then cp -p "$AGENT_YAML" "$TMP_DIR/old-config"; had_config=true; fi
   if [ -f "$SERVICE_FILE" ]; then cp -p "$SERVICE_FILE" "$TMP_DIR/old-unit"; had_unit=true; fi
   if [ -f "$AGENT_YAML.bak" ]; then cp -p "$AGENT_YAML.bak" "$TMP_DIR/old-backup"; had_backup=true; fi
-  systemctl is-active --quiet "$SERVICE_NAME" && was_active=true
-  systemctl is-enabled --quiet "$SERVICE_NAME" && was_enabled=true
+  # A missing unit is expected on first install. --quiet alone does not hide
+  # is-enabled's diagnostic; silence only these probes, not deployment errors.
+  systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null && was_active=true
+  systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null && was_enabled=true
 
   deployment_exit() {
     local result=$?

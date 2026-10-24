@@ -83,7 +83,12 @@ systemctl() {{
   echo "$*" >> "$TEST_ROOT/commands"
   case "$1" in
     is-active) [ -f "$TEST_ROOT/active" ] ;;
-    is-enabled) [ -f "$TEST_ROOT/enabled" ] ;;
+    is-enabled)
+      if [ ! -f "$SERVICE_FILE" ]; then
+        echo 'Failed to get unit file state for needle-agent.service: No such file or directory' >&2
+        return 4
+      fi
+      [ -f "$TEST_ROOT/enabled" ] ;;
     stop) rm -f "$TEST_ROOT/active" ;;
     start)
       if [ "${{FAIL_START:-0}}" = 1 ] && grep -q 'User=needle-agent' "$SERVICE_FILE"; then return 1; fi
@@ -137,18 +142,25 @@ systemctl() {{
             path.unlink()
         result = self.run_shell()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
         self.assertTrue(self.active.exists())
         self.assertTrue(self.enabled.exists())
         self.assertEqual(self.config.read_bytes(), self.original)
 
-    def test_disabled_stopped_service_stays_disabled_stopped(self):
-        self.active.unlink()
-        self.enabled.unlink()
-        result = self.run_shell()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.active.exists())
-        self.assertFalse(self.enabled.exists())
-        self.assertIn('User=needle-agent', self.service.read_text())
+    def test_upgrade_preserves_running_and_autostart_states(self):
+        for active in [False, True]:
+            for enabled in [False, True]:
+                with self.subTest(active=active, enabled=enabled):
+                    for path, present in [(self.active, active), (self.enabled, enabled)]:
+                        if present:
+                            path.touch()
+                        else:
+                            path.unlink(missing_ok=True)
+                    result = self.run_shell()
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(self.active.exists(), active)
+                    self.assertEqual(self.enabled.exists(), enabled)
+                    self.assertIn('User=needle-agent', self.service.read_text())
 
     def test_invalid_candidate_does_not_stop_or_modify_old_installation(self):
         (self.download / 'agent.yaml').write_text('invalid-config\n')
