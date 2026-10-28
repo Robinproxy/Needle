@@ -28,8 +28,12 @@
 .admin-columns, .admin-node { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(125px, 1fr) minmax(115px, 1fr) minmax(120px, 1fr) 58px; align-items: center; gap: 24px; }
 .admin-columns { font-size: 10px; color: hsl(var(--muted-foreground)); padding: 0 20px 10px; }
 .admin-node { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 9px; }
-.admin-node h3 { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
-.admin-node .node-meta { display: block; font-size: 10px; color: hsl(var(--muted-foreground)); margin-top: 5px; overflow-wrap: anywhere; }
+.admin-node .node-identity { min-width: 0; }
+.admin-node h3 { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-summary { display: flex; align-items: center; gap: 10px; min-width: 0; margin-top: 5px; line-height: 1.5; font-size: 10px; }
+.admin-node .node-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--muted-foreground)); }
+.node-summary.has-note .node-meta { flex-shrink: 0; max-width: 60%; }
+.admin-node .node-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--muted-foreground) / .8); }
 .admin-node .node-value { display: block; font-family: var(--font-mono); font-size: 12px; }
 .admin-node .cell-label { display: none; }
 .admin-footnote { margin-top: 24px; font-size: 11px !important; }
@@ -51,7 +55,6 @@
 .quota-fields > label:first-child { flex: 1; }
 .admin-page .check-label { flex-direction: row; align-items: center; height: 38px; font-size: 18px; gap: 8px; cursor: pointer; }
 .check-label input { accent-color: hsl(var(--foreground)); width: 15px; height: 15px; }
-.profile-source { font-size: 10px !important; margin-top: 20px; }
 .admin-page .form-error { color: hsl(var(--destructive)); font-size: 11px; }
 #profile-error { margin-top: 16px; }
 .editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; }

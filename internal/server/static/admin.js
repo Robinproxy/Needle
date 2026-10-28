@@ -96,11 +96,14 @@ async function loadNodes() {
   for (const node of adminNodes) {
     const row = document.createElement('article');
     row.className = 'admin-node'; row.setAttribute('role', 'listitem');
-    row.innerHTML = '<div class="node-identity"><h3></h3><span class="node-meta"></span></div><div><span class="cell-label">Billing</span><span class="node-value billing"></span><span class="node-meta source"></span></div><div><span class="cell-label">Next renewal</span><span class="node-value renewal"></span></div><div><span class="cell-label">Monthly traffic</span><span class="node-value allowance"></span></div><button class="admin-secondary" type="button">Edit</button>';
+    row.innerHTML = '<div class="node-identity"><h3></h3><div class="node-summary"><span class="node-meta"></span><span class="node-note" hidden></span></div></div><div><span class="cell-label">Billing</span><span class="node-value billing"></span></div><div><span class="cell-label">Next renewal</span><span class="node-value renewal"></span></div><div><span class="cell-label">Monthly traffic</span><span class="node-value allowance"></span></div><button class="admin-secondary" type="button">Edit</button>';
     row.querySelector('h3').textContent = node.display_name || node.hostname;
     row.querySelector('.node-meta').textContent = '#' + node.position + ' · ' + (node.region || 'Region not set') + (node.display_name ? ' · ' + node.hostname : '');
     row.querySelector('.billing').textContent = costText(node);
-    row.querySelector('.source').textContent = node.managed ? 'Managed here' : 'Agent settings';
+    const note = row.querySelector('.node-note');
+    note.textContent = node.note || '';
+    note.hidden = !node.note;
+    row.querySelector('.node-summary').classList.toggle('has-note', !!node.note);
     row.querySelector('.renewal').textContent = node.billing_period === 'forever' ? '♾️' : node.next_renewal || 'Not set';
     row.querySelector('.allowance').textContent = allowanceText(node.monthly_traffic_limit_gb);
     row.querySelector('button').setAttribute('aria-label', 'Edit ' + (node.display_name || node.hostname));
@@ -138,7 +141,6 @@ function openEditor(node) {
   el('node-identity').textContent = 'Agent hostname: ' + node.hostname;
   el('projected-renewal').textContent = node.next_renewal ? 'Next scheduled renewal: ' + node.next_renewal + '. The date above is the saved renewal anchor.' : '';
   el('traffic-reset').textContent = 'Monthly reset: day ' + (node.traffic_reset_day || 1) + '. Editing billing dates keeps this reset day and accumulated usage.';
-  el('profile-source').textContent = node.managed ? 'These settings are managed on the Server.' : 'Saving moves these settings to the Server. Agent reports will keep updating monitoring data.';
   message('profile-error', ''); el('reload-profile').hidden = true;
   if (!el('editor').open) el('editor').showModal();
 }
