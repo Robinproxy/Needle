@@ -53,9 +53,6 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 20px; width: 100%; }
-.manage-link { color: inherit; text-decoration: none; }
-.manage-link:hover { color: hsl(var(--foreground)); }
-.manage-link:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
 main.container { flex: 1; padding-top: 16px; padding-bottom: 32px; }
 
 /* BUTTONS */
@@ -93,6 +90,13 @@ header {
 .brand-text h1 { font-family: var(--font-sans); font-size: 16px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.2; }
 .brand-text p { font-size: 11px; color: hsl(var(--muted-foreground)); line-height: 1; margin-top: 1px; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
+.manage-link {
+  display: inline-flex; align-items: center;
+  min-height: 28px; margin-left: 8px;
+  color: hsl(var(--muted-foreground)); font-size: 12px; font-weight: 500;
+  text-decoration: none; transition: color 0.15s;
+}
+.manage-link:hover { color: hsl(var(--foreground)); }
 
 .header-icon-btn {
   appearance: none;
@@ -109,6 +113,8 @@ header {
 
 .brand:focus-visible,
 .header-icon-btn:focus-visible,
+.manage-link:focus-visible,
+.github-link:focus-visible,
 .card:focus-visible,
 .list-row:focus-visible,
 .region-filter:focus-visible,
@@ -170,16 +176,6 @@ header {
 .server-info .label { color: hsl(var(--muted-foreground) / 0.6); }
 .server-info .value { color: hsl(var(--foreground)); font-weight: 500; }
 .server-info .value.pri { color: hsl(var(--primary)); }
-.github-link {
-  display: flex; align-items: center; justify-content: center;
-  flex: 0 0 auto;
-  width: 22px; height: 22px;
-  color: hsl(var(--muted-foreground) / 0.5);
-  transition: color 0.15s;
-}
-.github-link:hover { color: hsl(var(--foreground)); }
-.github-link svg { width: 13px; height: 13px; }
-
 /* CARD GRID */
 .card-grid {
   display: grid;
@@ -230,9 +226,14 @@ header {
   font-size: 12px;
   font-weight: 600;
   color: hsl(var(--muted-foreground));
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
 }
-.card-sub > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-uptime { flex-shrink: 0; white-space: nowrap; }
+.card-note {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-sans); font-size: 11px; font-weight: 400;
+  color: hsl(var(--muted-foreground) / 0.8);
+}
 .expiry-days { flex-shrink: 0; white-space: nowrap; line-height: 1; }
 
 .card-billing {
@@ -520,12 +521,15 @@ footer {
   margin-top: auto;
 }
 .footer-inner {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
   height: 48px; font-size: 11px; color: hsl(var(--muted-foreground));
 }
-.footer-status { color: hsl(var(--success)); }
-.footer-status.loading, .footer-status.stale { color: hsl(var(--warning)); }
-.footer-status.error { color: hsl(var(--destructive)); }
+.github-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 22px; height: 28px;
+  color: inherit; text-decoration: none; transition: color 0.15s;
+}
+.github-link:hover { color: hsl(var(--foreground)); }
 
 /* RESPONSIVE */
 @media (max-width: 1279px) {

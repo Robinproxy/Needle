@@ -229,7 +229,7 @@ async function refreshServerInfo() {
     const version = document.getElementById('version-label');
     if (version) {
       const value = String(info.version || '');
-      version.textContent = 'NEEDLE ' + (value.split('-')[0] || value);
+      version.textContent = value.split('-')[0] || value;
       version.title = value;
     }
   } catch (error) {
@@ -243,7 +243,6 @@ async function refreshServerInfo() {
 function setDashboardState(state, message) {
   const alert = document.getElementById('dashboard-alert');
   const alertText = document.getElementById('dashboard-alert-text');
-  const footer = document.getElementById('footer-status');
   const empty = document.getElementById('empty-state');
   const title = document.getElementById('empty-title');
   const desc = document.getElementById('empty-desc');
@@ -251,7 +250,6 @@ function setDashboardState(state, message) {
   alert.hidden = state !== 'stale' && state !== 'error';
   alert.classList.toggle('error', state === 'error');
   if (alertText) alertText.textContent = message || '';
-  footer.className = 'footer-status ' + state;
 
   if (dashboardLoadingTimer) {
     clearTimeout(dashboardLoadingTimer);
@@ -260,7 +258,6 @@ function setDashboardState(state, message) {
   if (state !== 'loading') empty.classList.remove('loading');
 
   if (state === 'loading') {
-    footer.textContent = '● Connecting...';
     if (!agents.length) {
       // Avoid flashing a large empty-state card during normal fast loads.
       // Only reveal a compact loading hint when the request is noticeably slow.
@@ -275,16 +272,11 @@ function setDashboardState(state, message) {
       }, 350);
     }
   } else if (state === 'error') {
-    footer.textContent = '● Connection error';
     if (!agents.length) {
       title.textContent = 'Unable to load dashboard';
       desc.textContent = 'Check the server connection, then retry.';
       empty.classList.add('visible');
     }
-  } else if (state === 'stale') {
-    footer.textContent = '● Data may be stale';
-  } else {
-    footer.textContent = '● Connected';
   }
 }
 
@@ -559,7 +551,7 @@ function nodeName(a) {
 }
 
 function dashboardLayoutSignature(list) {
-  return JSON.stringify(filterAndSort(list).map(a => [a.agent.id, a.agent.display_order, nodeName(a), a.agent.region, a.tcpping_enabled,
+  return JSON.stringify(filterAndSort(list).map(a => [a.agent.id, a.agent.display_order, nodeName(a), a.agent.note || '', a.agent.region, a.tcpping_enabled,
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 
@@ -576,7 +568,8 @@ function renderCard(a, isActive) {
       + '<span class="card-hostname">' + escapeHtml(nodeName(a)) + '</span>'
       + '<span class="card-session">' + flagEmoji(a.agent.region) + '</span>'
     + '</div>'
-    + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
+    + '<div class="card-sub"><span class="card-uptime">' + uptime + '</span>'
+      + (a.agent.note ? '<span class="card-note">' + escapeHtml(a.agent.note) + '</span>' : '') + expiryHtml + '</div>'
     + '<div class="card-metrics">' + cardMetricsHTML(a) + '</div>'
     + '<div class="card-speeds" title="' + (seenTs ? 'Last report ' + escapeAttr(relativeTime(seenTs)) : 'No reports yet') + '">' + cardNetworkHTML(a) + '</div>'
     + (a.tcpping_enabled === false ? '<div class="card-probes-off"><span>TCP Ping · Off</span></div>'

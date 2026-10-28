@@ -701,12 +701,12 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	return commitReport(tx, r, agentID, now)
 }
 
-const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch, display_name, profile_managed, profile_revision, traffic_reset_day"
+const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch, display_name, profile_managed, profile_revision, traffic_reset_day, note"
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRow, error) {
 	var a AgentRow
 	var cost sql.NullString
-	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch, &a.DisplayName, &a.ProfileManaged, &a.ProfileRevision, &a.TrafficResetDay); err != nil {
+	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch, &a.DisplayName, &a.ProfileManaged, &a.ProfileRevision, &a.TrafficResetDay, &a.Note); err != nil {
 		return a, err
 	}
 	if cost.Valid {

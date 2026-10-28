@@ -4,6 +4,7 @@ import "needle/internal/billing"
 
 type AgentRow struct {
 	DisplayName         string        `json:"display_name,omitempty"`
+	Note                string        `json:"note,omitempty"`
 	ProfileManaged      bool          `json:"profile_managed"`
 	ProfileRevision     int64         `json:"-"`
 	TrafficResetDay     *int          `json:"traffic_reset_day,omitempty"`

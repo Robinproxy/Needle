@@ -238,6 +238,7 @@ func TestNodeProfileTakeoverKeepsTrafficAndAgentIdentity(t *testing.T) {
 	}
 	p := profiles[0].NodeProfileInput
 	p.DisplayName, p.Region = "My server", "CA"
+	p.Note = "家庭主路由"
 	p.BillingCurrency, p.BillingAmount, p.BillingPeriod, p.ExpiresAt = "CAD", "39.50", "12m", "2027-12-17"
 	p.MonthlyTrafficLimitGB = "2000"
 	if err := s.UpdateNodeProfile(id, p, "robin"); err != nil {
@@ -256,7 +257,7 @@ func TestNodeProfileTakeoverKeepsTrafficAndAgentIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated, _ := s.GetAgent(id)
-	if updated.Region != "CA" || updated.BillingCost.Amount != "39.5" || updated.BillingPeriod != "12m" || *updated.ExpiresAt != *a.ExpiresAt || updated.MonthlyTrafficLimit != 2e12 || *updated.TrafficResetDay != 3 {
+	if updated.Note != p.Note || updated.Region != "CA" || updated.BillingCost.Amount != "39.5" || updated.BillingPeriod != "12m" || *updated.ExpiresAt != *a.ExpiresAt || updated.MonthlyTrafficLimit != 2e12 || *updated.TrafficResetDay != 3 {
 		t.Fatalf("old Agent overwrote settings: %+v", updated)
 	}
 	usage, _ = s.GetTrafficUsage(id)
@@ -342,6 +343,7 @@ func TestAdminNodeWriteAuthorizationAndResync(t *testing.T) {
 	profiles, _, _ := s.NodeProfiles()
 	p := profiles[0].NodeProfileInput
 	p.DisplayName = "Edited"
+	p.Note = "  家庭主路由  "
 	encoded, _ := json.Marshal(p)
 	client, ok := s.live.subscribe()
 	if !ok {
@@ -350,6 +352,18 @@ func TestAdminNodeWriteAuthorizationAndResync(t *testing.T) {
 	defer s.live.unsubscribe(client)
 	if w := adminCall(h, "PATCH", fmt.Sprintf("nodes/%d", id), string(encoded), cookie, csrf); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	profiles, _, _ = s.NodeProfiles()
+	if profiles[0].Note != "家庭主路由" {
+		t.Fatal("note did not round-trip through admin API", profiles[0])
+	}
+	public := httptest.NewRecorder()
+	h.handleAgents(public, httptest.NewRequest("GET", "/api/agents", nil))
+	var nodes []struct {
+		Agent AgentRow `json:"agent"`
+	}
+	if err := json.Unmarshal(public.Body.Bytes(), &nodes); err != nil || len(nodes) != 1 || nodes[0].Agent.Note != "家庭主路由" {
+		t.Fatal("public dashboard did not receive note", public.Body.String(), err)
 	}
 	select {
 	case event := <-client:
@@ -365,6 +379,21 @@ func TestAdminNodeWriteAuthorizationAndResync(t *testing.T) {
 	if w := adminCall(h, "PATCH", fmt.Sprintf("nodes/%d", id), `{"hostname":"identity-change","token":"evil"}`, cookie, csrf); w.Code != 400 {
 		t.Fatal("non-profile fields accepted")
 	}
+	p = profiles[0].NodeProfileInput
+	p.Note = strings.Repeat("中", 41)
+	encoded, _ = json.Marshal(p)
+	if w := adminCall(h, "PATCH", fmt.Sprintf("nodes/%d", id), string(encoded), cookie, csrf); w.Code != 422 {
+		t.Fatal("overlong note accepted", w.Code, w.Body.String())
+	}
+	p.Note = ""
+	encoded, _ = json.Marshal(p)
+	if w := adminCall(h, "PATCH", fmt.Sprintf("nodes/%d", id), string(encoded), cookie, csrf); w.Code != 200 {
+		t.Fatal("could not clear note", w.Code, w.Body.String())
+	}
+	a, _ := s.GetAgent(id)
+	if a.Note != "" {
+		t.Fatal("cleared note remained on node")
+	}
 }
 
 func TestManagedProfileSurvivesMigrationAndDeletion(t *testing.T) {
@@ -377,6 +406,7 @@ func TestManagedProfileSurvivesMigrationAndDeletion(t *testing.T) {
 	profiles, _, _ := s.NodeProfiles()
 	p := profiles[0].NodeProfileInput
 	p.DisplayName = "Persistent"
+	p.Note = "Server-side note"
 	if err := s.UpdateNodeProfile(id, p, "robin"); err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +417,7 @@ func TestManagedProfileSurvivesMigrationAndDeletion(t *testing.T) {
 	}
 	defer s.Close()
 	a, _ := s.GetAgent(id)
-	if a.DisplayName != "Persistent" || !a.ProfileManaged || *a.TrafficResetDay != 1 {
+	if a.DisplayName != "Persistent" || a.Note != p.Note || !a.ProfileManaged || *a.TrafficResetDay != 1 {
 		t.Fatal("migration erased profile")
 	}
 	if err := s.DeleteAgent(id); err != nil {
@@ -397,7 +427,7 @@ func TestManagedProfileSurvivesMigrationAndDeletion(t *testing.T) {
 	a, _ = s.GetAgent(newID)
 	var audits int
 	s.db.QueryRow("SELECT COUNT(*) FROM node_profile_audit WHERE agent_id=?", newID).Scan(&audits)
-	if a.DisplayName != "" || a.ProfileManaged || a.TrafficResetDay != nil || audits != 0 {
+	if a.DisplayName != "" || a.Note != "" || a.ProfileManaged || a.TrafficResetDay != nil || audits != 0 {
 		t.Fatal("reused node inherited settings or audit")
 	}
 }
@@ -405,6 +435,13 @@ func TestManagedProfileSurvivesMigrationAndDeletion(t *testing.T) {
 func TestProfileValidationAndExactAllowances(t *testing.T) {
 	now := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
 	base := NodeProfileInput{BillingCurrency: "USD", MonthlyTrafficLimitGB: "0", Position: 1}
+	for _, note := range []string{"", "家庭主路由", strings.Repeat("中", 40), strings.Repeat("🌍", 40)} {
+		p := base
+		p.Note = "  " + note + "  "
+		if _, _, _, err := p.normalize(now); err != nil || p.Note != note {
+			t.Fatal("valid note was rejected or not trimmed", p.Note, err)
+		}
+	}
 	for _, quota := range []struct {
 		text  string
 		bytes int64
@@ -419,6 +456,11 @@ func TestProfileValidationAndExactAllowances(t *testing.T) {
 	for _, change := range []func(*NodeProfileInput){
 		func(p *NodeProfileInput) { p.Region = "US<script>" },
 		func(p *NodeProfileInput) { p.DisplayName = "forged\nname" },
+		func(p *NodeProfileInput) { p.Note = strings.Repeat("中", 41) },
+		func(p *NodeProfileInput) { p.Note = "two\nlines" },
+		func(p *NodeProfileInput) { p.Note = "hidden\x00control" },
+		func(p *NodeProfileInput) { p.Note = "two\u2028lines" },
+		func(p *NodeProfileInput) { p.Note = string([]byte{0xff}) },
 		func(p *NodeProfileInput) { p.BillingAmount = "5" },
 		func(p *NodeProfileInput) { p.BillingPeriod = "12m" },
 		func(p *NodeProfileInput) { p.BillingPeriod = "forever"; p.ExpiresAt = "2026-11-01" },
@@ -443,6 +485,46 @@ func TestProfileValidationAndExactAllowances(t *testing.T) {
 		if err != nil || cost.Amount != amount || expiry != nil {
 			t.Fatal("free, unset, and permanent conflated", cost, expiry, err)
 		}
+	}
+}
+
+func TestNodeNoteMigrationKeepsExistingProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "needle.db")
+	s, err := NewStoreCLI(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if s != nil {
+			s.Close()
+		}
+	}()
+	id, err := s.SaveReport(&ReportWrite{Hostname: "existing", Region: "US", BillingPeriod: "forever", MonthlyTrafficLimit: 1e12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles, _, err := s.NodeProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := profiles[0].NodeProfileInput
+	p.DisplayName = "Existing node"
+	if err := s.UpdateNodeProfile(id, p, "robin"); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.GetAgent(id)
+	// Recreate the schema from the release before notes were added.
+	if _, err := s.db.Exec("ALTER TABLE agents DROP COLUMN note"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = NewStoreCLI(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.GetAgent(id)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("adding the empty note changed an existing profile: before=%+v after=%+v err=%v", before, after, err)
 	}
 }
 

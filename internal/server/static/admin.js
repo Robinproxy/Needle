@@ -129,7 +129,8 @@ function syncAllowance() {
 function openEditor(node) {
   editingNode = node;
   profileForm.reset();
-  for (const name of ['display_name','region','position','billing_currency','billing_amount','billing_period','expires_at','monthly_traffic_limit_gb']) field(name).value = node[name];
+  for (const name of ['display_name','note','region','position','billing_currency','billing_amount','billing_period','expires_at','monthly_traffic_limit_gb']) field(name).value = node[name] ?? '';
+  validateNote();
   field('position').max = String(adminNodes.length);
   field('unlimited').checked = Number(node.monthly_traffic_limit_gb) === 0;
   syncPeriod(); syncAllowance();
@@ -156,9 +157,11 @@ el('login-form').addEventListener('submit', async event => {
 profileForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!editingNode || !adminCSRF) return;
+  validateNote();
+  if (!profileForm.reportValidity()) return;
   const node = editingNode;
   const payload = {version:node.version, order_version:node.order_version, position:Number(field('position').value)};
-  for (const name of ['display_name','region','billing_currency','billing_amount','billing_period','expires_at']) payload[name] = field(name).value;
+  for (const name of ['display_name','note','region','billing_currency','billing_amount','billing_period','expires_at']) payload[name] = field(name).value;
   payload.monthly_traffic_limit_gb = field('unlimited').checked ? '0' : field('monthly_traffic_limit_gb').value;
   el('save-profile').disabled = true; message('profile-error', '');
   try {
@@ -189,6 +192,11 @@ el('reload-profile').addEventListener('click', async () => {
 for (const id of ['close-editor','cancel-editor']) el(id).addEventListener('click', () => el('editor').close());
 field('billing_period').addEventListener('change', syncPeriod);
 field('unlimited').addEventListener('change', syncAllowance);
+function validateNote() {
+  const note = field('note');
+  note.setCustomValidity(Array.from(note.value.trim()).length > 40 ? 'Use up to 40 characters.' : '');
+}
+field('note').addEventListener('input', validateNote);
 el('setup-reload').addEventListener('click', checkSession);
 window.addEventListener('pageshow', () => { if (adminCSRF) checkSession(); });
 checkSession();

@@ -65,6 +65,7 @@
       <div class="editor-heading"><div><span class="admin-eyebrow">NODE SETTINGS</span><h2 id="editor-title">Edit node</h2><p id="node-identity"></p></div><button id="close-editor" class="btn btn-ghost btn-sm" type="button" aria-label="Close editor">✕</button></div>
       <div class="editor-fields">
         <label class="field-wide">Display name<input name="display_name" maxlength="253" placeholder="Use Agent hostname"></label>
+        <div class="field-wide"><label>Note<input name="note" maxlength="80" placeholder="Optional" aria-describedby="node-note-hint"></label><p id="node-note-hint" class="field-hint">Up to 40 characters. Shown publicly beside uptime on the node card.</p></div>
         <label>Region<input name="region" maxlength="2" placeholder="US, CN, SG…" autocomplete="off"></label>
         <label>Position<input name="position" type="number" min="1" step="1" required></label>
       </div>

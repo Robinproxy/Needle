@@ -422,7 +422,7 @@ Firmware upgrades with settings retention preserve `/etc/needle/` through `/etc/
 <details>
 <summary><strong>Dashboard — Administrator and node settings</strong></summary>
 
-The dashboard and its monitoring APIs remain public. `/admin` adds authenticated editing of display name, region, position, billing currency/amount/period, renewal date, and monthly upload + download allowance. An Agent's stable hostname, Token, collectors, and local YAML are not changed by this page.
+The dashboard and its monitoring APIs remain public. `/admin` adds authenticated editing of display name, note, region, position, billing currency/amount/period, renewal date, and monthly upload + download allowance. An Agent's stable hostname, Token, collectors, and local YAML are not changed by this page.
 
 Initialize one administrator **on the Server host**, after starting the Server. Use its actual database path:
 
@@ -437,7 +437,7 @@ sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-init
 
 Run only the command matching your deployment. The interactive setup asks for a username (default `admin`), the **browser-facing origin** (e.g. `https://needle.example.com`, without `/admin` or any other path), and a password of at least 15 characters, entered twice without echo. HTTPS is required; loopback HTTP is allowed for local testing. No password is accepted in command arguments, environment variables, or piped input. No public registration or initialization endpoint exists; editing stays disabled until CLI initialization succeeds.
 
-The configured origin is used for request validation and secure cookies behind HTTPS reverse proxies; forwarded headers are not trusted to select it. Keep the public origin stable and forward browser `Origin` headers unchanged. Open the public footer's **Manage** link, sign in, and select **Edit** beside a node. Sessions last eight hours, end on sign-out, and are lost when the Server restarts. Passwords are stored as salted Argon2id hashes in the existing database.
+The configured origin is used for request validation and secure cookies behind HTTPS reverse proxies; forwarded headers are not trusted to select it. Keep the public origin stable and forward browser `Origin` headers unchanged. Open **Manage** in the dashboard header, sign in, and select **Edit** beside a node. Sessions last eight hours, end on sign-out, and are lost when the Server restarts. Passwords are stored as salted Argon2id hashes in the existing database.
 
 Reset a forgotten password, change the username, or update the public origin interactively. Existing sessions are invalidated without restarting the Server:
 
@@ -454,6 +454,7 @@ Upgrade compatibility and ownership:
 - Existing nodes keep Agent-managed settings until their first successful admin save. The editor starts with their current values; saving transfers the static profile to the Server. Later Agent reports and upgrades cannot overwrite it. Existing Agent YAML and Token need no changes or re-registration.
 - New Agents installed with `server_managed: true` use Server-managed profiles from their first report. Missing billing and renewal settings show **Not set**, not Free or permanent. Monthly usage starts with reset day 1 and an unrestricted allowance; choose a finite allowance or ♾️ in the editor.
 - A display name is a label. CLI commands and Token bindings continue to use the original Agent hostname or stable numeric ID.
+- An optional note accepts up to 40 characters of single-line plain text. It appears beside uptime below the card's name, truncates to fit, and is hidden when empty. Clear it in the editor to remove it. Notes are stored on the Server; no Agent upgrade or YAML change is needed.
 - On takeover, the current monthly reset day is pinned independently of the renewal date. For a previously unconfigured node it defaults to day 1. The editor shows this day read-only. Changing price, payment period, renewal date, or allowance does not clear usage or move the monthly boundary. Legacy nodes still managed by the Agent retain their existing date-derived reset behavior.
 - The saved renewal anchor still projects future reminders by the payment period; it does not confirm payment. The editor shows both the saved date and projected next renewal. Short months keep the original reset day (29–31) for subsequent months.
 - Saves validate every field, use a database transaction, reject stale forms, refresh the public dashboard, and retain the latest 200 profile-change records in SQLite. A failed save does not partially change ordering or billing. Existing history and counter accounting remain intact.

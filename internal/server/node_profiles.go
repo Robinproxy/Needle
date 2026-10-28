@@ -17,6 +17,7 @@ var ErrProfileConflict = errors.New("node settings changed; reload before saving
 func (s *Store) migrateNodeProfiles() error {
 	for _, definition := range []string{
 		"display_name TEXT NOT NULL DEFAULT ''",
+		"note TEXT NOT NULL DEFAULT ''",
 		"profile_managed INTEGER NOT NULL DEFAULT 0",
 		"profile_revision INTEGER NOT NULL DEFAULT 0",
 		"traffic_reset_day INTEGER",
@@ -38,6 +39,7 @@ type NodeProfileInput struct {
 	Version               int64  `json:"version"`
 	OrderVersion          int64  `json:"order_version"`
 	DisplayName           string `json:"display_name"`
+	Note                  string `json:"note"`
 	Region                string `json:"region"`
 	BillingCurrency       string `json:"billing_currency"`
 	BillingAmount         string `json:"billing_amount"`
@@ -58,7 +60,7 @@ type NodeProfile struct {
 
 func nodeProfile(a AgentRow, position int, orderVersion int64, now time.Time) NodeProfile {
 	p := NodeProfile{NodeProfileInput: NodeProfileInput{
-		Version: a.ProfileRevision, OrderVersion: orderVersion, DisplayName: a.DisplayName,
+		Version: a.ProfileRevision, OrderVersion: orderVersion, DisplayName: a.DisplayName, Note: a.Note,
 		Region: a.Region, BillingPeriod: a.BillingPeriod, Position: position,
 		MonthlyTrafficLimitGB: strconv.FormatInt(a.MonthlyTrafficLimit/1_000_000_000, 10),
 	}, ID: a.ID, Hostname: a.Hostname, Managed: a.ProfileManaged}
@@ -87,6 +89,10 @@ func (p *NodeProfileInput) normalize(now time.Time) (*billing.Cost, *int64, int6
 	p.DisplayName = strings.TrimSpace(p.DisplayName)
 	if !utf8.ValidString(p.DisplayName) || utf8.RuneCountInString(p.DisplayName) > 253 || hasControl(p.DisplayName) {
 		return nil, nil, 0, fmt.Errorf("invalid display name")
+	}
+	p.Note = strings.TrimSpace(p.Note)
+	if !utf8.ValidString(p.Note) || utf8.RuneCountInString(p.Note) > 40 || hasControl(p.Note) || strings.ContainsAny(p.Note, "\u2028\u2029") {
+		return nil, nil, 0, fmt.Errorf("note must be a single line of up to 40 characters")
 	}
 	p.Region = strings.ToUpper(strings.TrimSpace(p.Region))
 	if p.Region != "" && !regionCodeRe.MatchString(p.Region) {
@@ -214,9 +220,9 @@ func (s *Store) UpdateNodeProfile(id int64, p NodeProfileInput, actor string) er
 		day = legacyDay
 	}
 	encoded, _ := json.Marshal(cost)
-	if _, err := tx.Exec(`UPDATE agents SET display_name=?,region=?,billing_cost=?,billing_period=?,expires_at=?,
+	if _, err := tx.Exec(`UPDATE agents SET display_name=?,note=?,region=?,billing_cost=?,billing_period=?,expires_at=?,
  monthly_traffic_limit=?,profile_managed=1,profile_revision=profile_revision+1,traffic_reset_day=? WHERE id=?`,
-		p.DisplayName, p.Region, string(encoded), p.BillingPeriod, expiry, limit, day, id); err != nil {
+		p.DisplayName, p.Note, p.Region, string(encoded), p.BillingPeriod, expiry, limit, day, id); err != nil {
 		return err
 	}
 	if err := moveAgentTx(tx, strconv.FormatInt(id, 10), p.Position); err != nil {
