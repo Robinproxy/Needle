@@ -363,7 +363,7 @@ function updateHeaderIcons() {
   }
 }
 
-function renderAll(scrollToDetail) {
+function renderAll() {
   destroyDetailCharts();
   const container = document.getElementById('card-grid');
   const empty = document.getElementById('empty-state');
@@ -422,12 +422,6 @@ function renderAll(scrollToDetail) {
     const agent = filtered.find(a => a.agent.id === expandedId);
     if (agent) {
       renderDetailContent(expandedId);
-      if (scrollToDetail) {
-        setTimeout(() => {
-          const el = document.getElementById('detail-' + expandedId);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }, 100);
-      }
     }
   }
 }
@@ -653,12 +647,11 @@ function relativeTime(ts) {
 function toggleExpand(id) {
   if (expandedId === id) {
     expandedId = null;
-    renderAll();
   } else {
     currentHistoryDay = null;
     expandedId = id;
-    renderAll(true);
   }
+  renderAll();
 }
 
 function destroyDetailCharts() {
@@ -1579,7 +1572,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && expandedId) {
     const id = expandedId;
     toggleExpand(id);
-    document.querySelector('[data-id="' + id + '"]')?.focus();
+    document.querySelector('[data-id="' + id + '"]')?.focus({ preventScroll: true });
     return;
   }
   if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -1604,7 +1597,7 @@ document.addEventListener('keydown', e => {
   if (!Number.isFinite(id)) return;
   e.preventDefault();
   toggleExpand(id);
-  document.querySelector('[data-id="' + id + '"]')?.focus();
+  document.querySelector('[data-id="' + id + '"]')?.focus({ preventScroll: true });
 });
 
 document.getElementById('server-info')?.addEventListener('click', e => {

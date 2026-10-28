@@ -193,5 +193,61 @@ function harness() {
   assert.equal(disposed,1);
   assert.equal(empty.elements.get('spark-cpu-val').textContent,'—');
   assert(empty.elements.get('spark-cpu').innerHTML.includes('No data'));
-  console.log('Dashboard refresh checks passed: independent metadata, request failures/recovery, invalid data, timeouts, render errors, detail isolation, cancellation, and empty history.');
+
+  // Opening details must never schedule a scroll, for either layout or probe
+  // mode. Exercise the real render path rather than the refresh harness stub.
+  const expansionElements=new Map([
+    ['card-grid',{innerHTML:''}],
+    ['empty-state',{classList:{remove:()=>{}}}],
+    ...[1,2].map(id=>['detail-'+id,{innerHTML:'',scrollIntoView:()=>assert.fail('details must not scroll into view')}]),
+  ]);
+  const expansion={
+    console,AbortController,window:{innerWidth:1280},
+    localStorage:{getItem:()=>null},
+    setTimeout:()=>assert.fail('opening details must not schedule delayed scrolling'),
+    fixture:[{...node,tcpping_enabled:true},{...node,agent:{...node.agent,id:2,hostname:'router'},tcpping_enabled:false}],
+    document:{getElementById:id=>expansionElements.get(id)||null},
+    loads:[],focuses:[],
+  };
+  vm.createContext(expansion);
+  vm.runInContext(source.slice(0,source.indexOf('let themeMode =')),expansion);
+  vm.runInContext('agents=fixture;loadDetailData=(id,range)=>loads.push({id,range});',expansion);
+  for(const width of [1280,500])for(const layout of ['card','list']){
+    expansion.window.innerWidth=width;
+    expansion.layout=layout;
+    vm.runInContext('cardFormat=layout;expandedId=null;currentHistoryDay={start:1,end:2};',expansion);
+    expansion.toggleExpand(1);
+    assert.equal(vm.runInContext('expandedId',expansion),1);
+    assert.equal(vm.runInContext('currentHistoryDay',expansion),null);
+    assert(expansionElements.get('card-grid').innerHTML.includes('id="detail-1"'));
+    assert(expansionElements.get('detail-1').innerHTML.includes('id="tcpping-chart-1"'));
+    expansion.toggleExpand(2);
+    assert(!expansionElements.get('card-grid').innerHTML.includes('id="detail-1"'));
+    assert(expansionElements.get('card-grid').innerHTML.includes('id="detail-2"'));
+    assert(!expansionElements.get('detail-2').innerHTML.includes('id="tcpping-chart-2"'));
+    expansion.toggleExpand(2);
+    assert.equal(vm.runInContext('expandedId',expansion),null);
+    assert(!expansionElements.get('card-grid').innerHTML.includes('class="inline-detail"'));
+  }
+  assert.equal(expansion.loads.length,8,'each opening must still load detail history');
+
+  // Replacing the card DOM requires restoring keyboard focus, but focus itself
+  // must not move the viewport when Enter, Space, or Escape opens/closes detail.
+  expansion.document.querySelector=()=>({focus:options=>{
+    assert.equal(options?.preventScroll,true);
+    expansion.focuses.push(options);
+  }});
+  expansion.document.addEventListener=(type,listener)=>{assert.equal(type,'keydown');expansion.keydown=listener;};
+  const keydownStart=source.indexOf("document.addEventListener('keydown',");
+  const keydownEnd=source.indexOf("document.getElementById('server-info')?.addEventListener",keydownStart);
+  vm.runInContext(source.slice(keydownStart,keydownEnd),expansion);
+  const keyboardNode={getAttribute:()=> '1'};
+  for(const key of ['Enter',' ','Enter','Escape']){
+    let prevented=false;
+    expansion.keydown({key,preventDefault:()=>{prevented=true;},target:{closest:selector=>selector.startsWith('.card[')?keyboardNode:null}});
+    if(key!=='Escape')assert(prevented,'Space/Enter must not invoke default page scrolling');
+  }
+  assert.equal(expansion.focuses.length,4);
+  assert.equal(vm.runInContext('expandedId',expansion),null);
+  console.log('Dashboard refresh checks passed: failures/recovery, detail isolation, cancellation, empty history, in-place card/list expansion, probe modes, and keyboard focus without scrolling.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
