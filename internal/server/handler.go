@@ -100,13 +100,16 @@ type Handler struct {
 	fullMu          sync.Mutex
 	realtimeSlots   chan struct{}
 	logs            *logging.Tracker
+	admin           *adminState
 }
 
 func NewHandler(store *Store) *Handler {
-	return &Handler{store: store, committed: make(map[int64]committedEntry), tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now, logs: logging.NewTracker("server.api", log.Printf)}
+	return &Handler{store: store, committed: make(map[int64]committedEntry), tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now, logs: logging.NewTracker("server.api", log.Printf), admin: newAdminState()}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("/api/admin/", h.handleAdmin)
+	mux.HandleFunc("/admin", h.handleAdminPage)
 	mux.HandleFunc("/api/report", h.handleReport)
 	mux.HandleFunc("/api/report-capabilities", h.handleReportCapabilities)
 	mux.HandleFunc("/api/realtime", h.handleRealtime)
@@ -324,7 +327,8 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	encodedReport, _ := json.Marshal(req)
 	digest := sha256.Sum256(encodedReport)
 	write := &ReportWrite{
-		CPUModel: req.CPUModel, OSName: req.OSName, Arch: req.Arch,
+		ServerManaged: req.ServerManaged,
+		CPUModel:      req.CPUModel, OSName: req.OSName, Arch: req.Arch,
 		ReportID: req.ReportID, Digest: hex.EncodeToString(digest[:]),
 		Token:    token,
 		Interval: req.Interval, RealtimeInterval: req.RealtimeInterval,

@@ -225,6 +225,9 @@ func (s *Store) migrate() error {
 	if err := s.migrateTrafficAccounting(); err != nil {
 		return err
 	}
+	if err := s.migrateNodeProfiles(); err != nil {
+		return err
+	}
 	if err := s.migrateAccountingAudit(); err != nil {
 		return err
 	}
@@ -501,9 +504,9 @@ func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPer
 		`INSERT INTO agents(hostname, region, expires_at, billing_period, last_seen, display_order)
 		 VALUES(?, ?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), 0) + 1 FROM agents))
 		 ON CONFLICT(hostname) DO UPDATE SET
-		   region = excluded.region,
-		   expires_at = excluded.expires_at,
-		   billing_period = excluded.billing_period,
+		   region = CASE WHEN agents.profile_managed=0 THEN excluded.region ELSE agents.region END,
+		   expires_at = CASE WHEN agents.profile_managed=0 THEN excluded.expires_at ELSE agents.expires_at END,
+		   billing_period = CASE WHEN agents.profile_managed=0 THEN excluded.billing_period ELSE agents.billing_period END,
 		   last_seen = excluded.last_seen`,
 		hostname, region, expiresAt, billingPeriod, lastSeen,
 	)
@@ -570,9 +573,10 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
-	CPUModel string
-	OSName   string
-	Arch     string
+	ServerManaged bool
+	CPUModel      string
+	OSName        string
+	Arch          string
 
 	ReportID  string
 	Digest    string
@@ -697,12 +701,12 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	return commitReport(tx, r, agentID, now)
 }
 
-const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch"
+const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch, display_name, profile_managed, profile_revision, traffic_reset_day"
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRow, error) {
 	var a AgentRow
 	var cost sql.NullString
-	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch); err != nil {
+	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch, &a.DisplayName, &a.ProfileManaged, &a.ProfileRevision, &a.TrafficResetDay); err != nil {
 		return a, err
 	}
 	if cost.Valid {
@@ -1250,7 +1254,7 @@ func deleteAgentTx(tx *sql.Tx, id int64) error {
 	if _, err := tx.Exec("DELETE FROM agent_tcpping_current WHERE agent_id = ?", id); err != nil {
 		return err
 	}
-	for _, table := range []string{"traffic_boot_epochs", "traffic_counter_identity", "report_receipts", "traffic_cycle_transition", "metrics_rollup_legacy", "metrics_hourly_rollup_legacy", "tcpping_results_rollup_legacy", "tcpping_hourly_rollup_legacy"} {
+	for _, table := range []string{"traffic_boot_epochs", "traffic_counter_identity", "report_receipts", "traffic_cycle_transition", "metrics_rollup_legacy", "metrics_hourly_rollup_legacy", "tcpping_results_rollup_legacy", "tcpping_hourly_rollup_legacy", "node_profile_audit"} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE agent_id=?", id); err != nil {
 			return err
 		}

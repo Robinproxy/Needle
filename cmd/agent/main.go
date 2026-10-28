@@ -21,8 +21,9 @@ import (
 )
 
 type Config struct {
-	HistoryQueueCapacity      int `yaml:"history_queue_capacity"`
-	HistoryRetryMaxAgeSeconds int `yaml:"history_retry_max_age_seconds"`
+	ServerManaged             bool `yaml:"server_managed"`
+	HistoryQueueCapacity      int  `yaml:"history_queue_capacity"`
+	HistoryRetryMaxAgeSeconds int  `yaml:"history_retry_max_age_seconds"`
 
 	BillingCurrency       string                   `yaml:"billing_currency"`
 	BillingAmount         *string                  `yaml:"billing_amount"`
@@ -49,6 +50,9 @@ func (c *Config) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == "server_managed" && node.Content[i+1].Tag != "!!bool" {
+			return fmt.Errorf("server_managed must be a boolean")
+		}
 		if (node.Content[i].Value == "realtime_interval" || node.Content[i].Value == "history_queue_capacity" || node.Content[i].Value == "history_retry_max_age_seconds") && node.Content[i+1].Tag != "!!int" {
 			return fmt.Errorf("%s must be an integer", node.Content[i].Value)
 		}
@@ -118,7 +122,7 @@ func main() {
 		return
 	}
 	if *installerProtocol {
-		fmt.Println("needle-install-v2 persistent-report-v1 realtime-v1")
+		fmt.Println("needle-install-v2 persistent-report-v1 realtime-v1 server-profiles-v1")
 		return
 	}
 	if *unregister && *checkConfig {
@@ -238,6 +242,7 @@ func main() {
 		logging.Print("WARN", "traffic", "boot_identity_unavailable", "error", bootErr)
 	}
 	decorate := func(data *agentpkg.ReportData) {
+		data.ServerManaged = cfg.ServerManaged
 		data.CPUModel, data.OSName, data.Arch = systemInfo.CPUModel, systemInfo.OSName, systemInfo.Arch
 		data.BootID = bootID
 		data.Hostname, data.Region = hostname, cfg.Region

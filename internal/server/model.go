@@ -3,6 +3,10 @@ package server
 import "needle/internal/billing"
 
 type AgentRow struct {
+	DisplayName         string        `json:"display_name,omitempty"`
+	ProfileManaged      bool          `json:"profile_managed"`
+	ProfileRevision     int64         `json:"-"`
+	TrafficResetDay     *int          `json:"traffic_reset_day,omitempty"`
 	CPUModel            string        `json:"cpu_model,omitempty"`
 	OSName              string        `json:"os_name,omitempty"`
 	Arch                string        `json:"arch,omitempty"`

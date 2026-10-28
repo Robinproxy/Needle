@@ -50,6 +50,10 @@ assert.equal(vm.runInContext('agents[0].latest_metric.cpu_usage',context),revisi
 context.startPolling();context.startPolling();assert.equal(intervals.size,1);
 context.connectEvents();context.connectEvents();assert.equal(connections.length,1);
 const stream=connections[0];stream.onopen();assert.equal(intervals.size,0,'SSE and polling must not run together');
+context.profileRefreshes=0;
+context.softRefresh=()=>context.profileRefreshes++;
+stream.emit('node',{kind:'resync'});
+assert.equal(context.profileRefreshes,1,'profile/order changes must reload the entire committed node list');
 stream.emit('snapshot',[node(140,130,10)]);
 stream.emit('node',{kind:'realtime',node:node(145,130,11)});
 assert.equal(vm.runInContext('agents[0].latest_metric.created_at',context),145);

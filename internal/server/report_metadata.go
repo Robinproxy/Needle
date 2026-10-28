@@ -17,9 +17,10 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 	var id int64
 	var expiry, lastSample sql.NullInt64
 	var period string
+	var managed bool
 	err := tx.QueryRow(`SELECT id,expires_at,billing_period,COALESCE(report_sample_at,
-	 (SELECT MAX(created_at) FROM metrics WHERE agent_id=agents.id)) FROM agents WHERE hostname=?`, r.Hostname).
-		Scan(&id, &expiry, &period, &lastSample)
+	 (SELECT MAX(created_at) FROM metrics WHERE agent_id=agents.id)),profile_managed FROM agents WHERE hostname=?`, r.Hostname).
+		Scan(&id, &expiry, &period, &lastSample, &managed)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, false, err
 	}
@@ -27,7 +28,21 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 		_, err := tx.Exec("UPDATE agents SET last_seen=? WHERE id=?", now.Unix(), id)
 		return id, false, err
 	}
-	if err == nil {
+	newNode := err == sql.ErrNoRows
+	var encodedCost any
+	if r.BillingCost != nil {
+		encoded, err := json.Marshal(r.BillingCost)
+		if err != nil {
+			return 0, false, err
+		}
+		encodedCost = string(encoded)
+	}
+	if !newNode && !managed {
+		if _, err := tx.Exec(`UPDATE agents SET profile_revision=profile_revision+1 WHERE id=? AND
+ (region IS NOT ? OR expires_at IS NOT ? OR billing_period IS NOT ? OR monthly_traffic_limit IS NOT ? OR (? IS NOT NULL AND billing_cost IS NOT ?))`,
+			id, r.Region, r.ExpiresAt, r.BillingPeriod, r.MonthlyTrafficLimit, encodedCost, encodedCost); err != nil {
+			return 0, false, err
+		}
 		var oldExpiry *int64
 		if expiry.Valid {
 			oldExpiry = &expiry.Int64
@@ -47,20 +62,23 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 		return 0, false, err
 	}
 	if r.BillingCost != nil {
-		encoded, err := json.Marshal(r.BillingCost)
-		if err != nil {
-			return 0, false, err
-		}
-		if _, err := tx.Exec("UPDATE agents SET billing_cost=? WHERE id=?", string(encoded), id); err != nil {
+		if _, err := tx.Exec("UPDATE agents SET billing_cost=? WHERE id=? AND profile_managed=0", encodedCost, id); err != nil {
 			return 0, false, err
 		}
 	}
-	_, err = tx.Exec(`UPDATE agents SET report_sample_at=?,monthly_traffic_limit=?,
+	_, err = tx.Exec(`UPDATE agents SET report_sample_at=?,monthly_traffic_limit=CASE WHEN profile_managed=0 THEN ? ELSE monthly_traffic_limit END,
 	 cpu_cores=CASE WHEN ?>0 THEN ? ELSE cpu_cores END,report_interval=?,realtime_interval=?,
 	 cpu_model=CASE WHEN ?<>'' THEN ? ELSE cpu_model END,
 	 os_name=CASE WHEN ?<>'' THEN ? ELSE os_name END,
 	 arch=CASE WHEN ?<>'' THEN ? ELSE arch END WHERE id=?`,
 		sampledAt, r.MonthlyTrafficLimit, r.CPUCores, r.CPUCores, defaultReportInterval(r.Interval), r.RealtimeInterval,
 		r.CPUModel, r.CPUModel, r.OSName, r.OSName, r.Arch, r.Arch, id)
+	if err == nil && newNode && r.ServerManaged {
+		day, configured := trafficResetDay(r.BillingPeriod, r.ExpiresAt)
+		if !configured {
+			day = 1
+		}
+		_, err = tx.Exec("UPDATE agents SET profile_managed=1,traffic_reset_day=? WHERE id=?", day, id)
+	}
 	return id, true, err
 }

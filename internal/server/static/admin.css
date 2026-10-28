@@ -1,0 +1,71 @@
+.admin-page [hidden] { display: none !important; }
+.admin-page a { color: inherit; text-decoration: none; }
+.admin-nav { display: flex; align-items: center; gap: 20px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.admin-nav a:hover { color: hsl(var(--foreground)); }
+.admin-main { max-width: 1120px; padding-top: 40px !important; padding-bottom: 48px !important; }
+.admin-eyebrow { display: block; font-size: 10px; font-weight: 600; letter-spacing: .12em; color: hsl(var(--muted-foreground)); margin-bottom: 10px; }
+.admin-page h2 { font-size: 24px; font-weight: 600; letter-spacing: -.025em; line-height: 1.3; }
+.admin-page p { font-size: 12px; color: hsl(var(--muted-foreground)); line-height: 1.7; }
+.admin-message { margin: 0 0 20px; }
+.login-card { max-width: 380px; margin: 9vh auto 40px; padding: 30px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--card)); box-shadow: 0 2px 8px hsl(0 0% 0% / .025); }
+.login-card > p { margin-top: 8px; }
+.login-card form { margin-top: 26px; display: grid; gap: 18px; }
+.admin-page label { display: flex; flex-direction: column; gap: 7px; min-width: 0; font-size: 11px; font-weight: 500; color: hsl(var(--muted-foreground)); }
+.admin-page input:not([type="checkbox"]), .admin-page select { width: 100%; height: 38px; padding: 0 10px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--card)); color: hsl(var(--foreground)); font: inherit; font-size: 13px; min-width: 0; }
+.admin-page input::placeholder { color: hsl(var(--muted-foreground) / .55); }
+.admin-page input:disabled { background: hsl(var(--muted) / .2); color: hsl(var(--muted-foreground)); }
+.admin-page :is(input, select, button, a):focus-visible { outline: 2px solid hsl(var(--ring) / .65); outline-offset: 3px; }
+.admin-primary, .admin-secondary { display: inline-flex; justify-content: center; align-items: center; min-height: 36px; padding: 0 15px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid hsl(var(--foreground)); }
+.admin-primary { background: hsl(var(--foreground)); color: hsl(var(--card)); }
+.admin-primary:hover { opacity: .88; }
+.admin-secondary { background: hsl(var(--card)); color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
+.admin-secondary:hover { background: hsl(var(--muted) / .2); }
+.admin-page button:disabled { opacity: .5; cursor: wait; }
+.login-card .admin-primary { width: 100%; }
+.login-card .login-note { margin-top: 24px; font-size: 10px; text-align: center; }
+.admin-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
+.admin-heading p { margin-top: 8px; }
+.admin-columns, .admin-node { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(125px, 1fr) minmax(115px, 1fr) minmax(120px, 1fr) 58px; align-items: center; gap: 24px; }
+.admin-columns { font-size: 10px; color: hsl(var(--muted-foreground)); padding: 0 20px 10px; }
+.admin-node { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 9px; }
+.admin-node h3 { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.admin-node .node-meta { display: block; font-size: 10px; color: hsl(var(--muted-foreground)); margin-top: 5px; overflow-wrap: anywhere; }
+.admin-node .node-value { display: block; font-family: var(--font-mono); font-size: 12px; }
+.admin-node .cell-label { display: none; }
+.admin-footnote { margin-top: 24px; font-size: 11px !important; }
+.admin-notice { margin: -10px 0 20px; padding: 10px 14px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--card)); }
+.admin-empty { padding: 50px 20px; text-align: center; border: 1px dashed hsl(var(--border)); border-radius: var(--radius); }
+.admin-page dialog { margin: auto; width: min(580px, calc(100% - 28px)); max-height: calc(100dvh - 28px); overflow-y: auto; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 20px 80px hsl(0 0% 0% / .14); }
+.admin-page dialog::backdrop { background: hsl(217 24% 11% / .32); }
+#profile-form { padding: 24px; }
+.editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+.editor-heading h2 { font-size: 20px; overflow-wrap: anywhere; }
+.editor-heading p { margin-top: 5px; font-size: 10px; overflow-wrap: anywhere; }
+.editor-heading .admin-eyebrow { margin-bottom: 7px; }
+.editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.field-wide { grid-column: 1 / -1; }
+.editor-section { margin-top: 22px; padding-top: 20px; border-top: 1px solid hsl(var(--border)); }
+.editor-section h3 { font-size: 12px; font-weight: 600; margin-bottom: 14px; }
+.field-hint { font-size: 10px !important; margin-top: 9px; }
+.quota-fields { display: flex; align-items: flex-end; gap: 18px; }
+.quota-fields > label:first-child { flex: 1; }
+.admin-page .check-label { flex-direction: row; align-items: center; height: 38px; font-size: 18px; gap: 8px; cursor: pointer; }
+.check-label input { accent-color: hsl(var(--foreground)); width: 15px; height: 15px; }
+.profile-source { font-size: 10px !important; margin-top: 20px; }
+.admin-page .form-error { color: hsl(var(--destructive)); font-size: 11px; }
+#profile-error { margin-top: 16px; }
+.editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+@media (max-width: 800px) {
+  .admin-main { padding-top: 28px !important; }
+  .admin-columns { display: none; }
+  .admin-node { position: relative; grid-template-columns: repeat(3, 1fr); gap: 18px 12px; padding: 18px; }
+  .admin-node .node-identity { grid-column: 1 / -1; padding-right: 65px; }
+  .admin-node > button { position: absolute; right: 18px; top: 18px; }
+  .admin-node .cell-label { display: block; font-size: 9px; color: hsl(var(--muted-foreground)); margin-bottom: 6px; }
+  .admin-node .node-value { font-size: 11px; overflow-wrap: anywhere; }
+}
+@media (max-width: 420px) {
+  .login-card { margin-top: 6vh; padding: 24px; }
+  #profile-form { padding: 20px; }
+  .admin-nav { gap: 10px; }
+}

@@ -11,9 +11,10 @@ import (
 )
 
 type reportRequest struct {
-	CPUModel string `json:"cpu_model,omitempty"`
-	OSName   string `json:"os_name,omitempty"`
-	Arch     string `json:"arch,omitempty"`
+	ServerManaged bool   `json:"server_managed,omitempty"`
+	CPUModel      string `json:"cpu_model,omitempty"`
+	OSName        string `json:"os_name,omitempty"`
+	Arch          string `json:"arch,omitempty"`
 
 	BootID string `json:"boot_id,omitempty"`
 

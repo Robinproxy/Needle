@@ -85,9 +85,9 @@ func TestSystemInformationValidationAndRealtimeIsolation(t *testing.T) {
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("rejected metadata created a node: %+v / %v", rows, err)
 	}
-	data := agentpkg.ReportData{Hostname: "node", CPUModel: "private model", OSName: "private OS", Arch: "x86_64"}
+	data := agentpkg.ReportData{Hostname: "node", ServerManaged: true, CPUModel: "private model", OSName: "private OS", Arch: "x86_64"}
 	encoded, _ := json.Marshal(agentpkg.RealtimeFromReport(&data))
-	for _, field := range []string{"cpu_model", "os_name", "arch"} {
+	for _, field := range []string{"cpu_model", "os_name", "arch", "server_managed"} {
 		if strings.Contains(string(encoded), field) {
 			t.Fatalf("realtime includes static metadata: %s", encoded)
 		}
@@ -95,7 +95,7 @@ func TestSystemInformationValidationAndRealtimeIsolation(t *testing.T) {
 	// Omitted metadata must leave the legacy canonical report (and its stored
 	// deduplication digest) unchanged across a Server upgrade.
 	legacy, _ := json.Marshal(reportRequest{Hostname: "legacy"})
-	for _, field := range []string{"cpu_model", "os_name", "arch"} {
+	for _, field := range []string{"cpu_model", "os_name", "arch", "server_managed"} {
 		if strings.Contains(string(legacy), field) {
 			t.Fatalf("new default fields change legacy report digests: %s", legacy)
 		}

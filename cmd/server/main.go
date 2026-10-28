@@ -63,6 +63,14 @@ func main() {
 			return
 		}
 		switch args[0] {
+		case "admin-init", "admin-reset":
+			if len(args) != 1 {
+				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> admin-init|admin-reset (interactive; no password arguments)"))
+			}
+			if err := runAdminSetup(*dbPath, args[0] == "admin-reset"); err != nil {
+				logging.Fatal("server", "command_failed", err)
+			}
+			return
 		case "repair-traffic":
 			if err := runRepairTraffic(*dbPath, args[1:]); err != nil {
 				logging.Fatal("server", "command_failed", err)
@@ -108,7 +116,7 @@ func main() {
 			}
 			return
 		default:
-			logging.Fatal("server", "command_invalid", fmt.Errorf("unknown command %q (supported: list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0]))
+			logging.Fatal("server", "command_invalid", fmt.Errorf("unknown command %q (supported: admin-init, admin-reset, list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0]))
 		}
 	}
 

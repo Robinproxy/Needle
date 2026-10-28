@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Disposable CI only. Never point this at an existing production installation."""
 import json, os, pathlib, shutil, subprocess, sys, tempfile, time, urllib.request
+import pty, select
 if os.environ.get('NEEDLE_DISPOSABLE_SYSTEMD_TEST') != '1' or os.geteuid() != 0:
     raise SystemExit('Run as root only in a disposable systemd CI runner with NEEDLE_DISPOSABLE_SYSTEMD_TEST=1')
 binary=pathlib.Path(sys.argv[1]).resolve()
@@ -14,6 +15,30 @@ if base.exists() or unit.exists() or subprocess.run(['getent','passwd',name],cap
     raise SystemExit('Refusing to overwrite an existing test namespace')
 def run(*args,**kwargs): return subprocess.run(args,check=True,**kwargs)
 def cli(*args): return run(str(base/'bin/needle-server'),'-db',str(db),*args,capture_output=True,text=True)
+def admin_setup(command):
+    master, slave = pty.openpty()
+    process = subprocess.Popen([str(base/'bin/needle-server'), '-db', str(db), command], stdin=slave, stdout=slave, stderr=slave)
+    os.close(slave)
+    output = b''
+    def expect(marker):
+        nonlocal output
+        deadline = time.monotonic() + 20
+        while marker not in output:
+            if time.monotonic() >= deadline:
+                raise AssertionError('Admin terminal setup timed out')
+            if select.select([master], [], [], 1)[0]:
+                output += os.read(master, 65536)
+    try:
+        for marker, value in [(b'Administrator username', 'ci-admin'), (b'Public origin', 'https://needle-ci.invalid'), (b'Password (at least', 'isolated-admin-password-2026'), (b'Confirm password', 'isolated-admin-password-2026')]:
+            expect(marker)
+            os.write(master, value.encode() + b'\n')
+        expect(b'Administrator saved.')
+        assert process.wait(timeout=10) == 0
+        assert b'isolated-admin-password-2026' not in output, 'Password echoed to terminal'
+    finally:
+        os.close(master)
+        if process.poll() is None:
+            process.kill(); process.wait()
 def http(path,payload=None,token=None):
     data=None if payload is None else json.dumps(payload).encode()
     req=urllib.request.Request('http://127.0.0.1:18928'+path,data=data,headers={'Content-Type':'application/json',**({'Authorization':'Bearer '+token} if token else {})})
@@ -57,6 +82,22 @@ cmd_upgrade
         time.sleep(1.05)
         http('/api/report',{'hostname':'CI Demo','created_at':int(time.time()),'uptime':101},'ci-server-only')
         for p in db.parent.iterdir(): assert p.stat().st_uid==uid and p.stat().st_mode&0o077==0,p
+    # Exercise hidden password input after root CLI switches to the DB owner.
+    admin_setup('admin-init')
+    request = urllib.request.Request('http://127.0.0.1:18928/api/admin/login', data=json.dumps({'username':'ci-admin','password':'isolated-admin-password-2026'}).encode(), headers={'Content-Type':'application/json','Origin':'https://needle-ci.invalid','X-Needle-Admin':'1'})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        cookie = response.headers['Set-Cookie'].split(';', 1)[0]
+        assert json.load(response)['csrf_token']
+    request = urllib.request.Request('http://127.0.0.1:18928/api/admin/nodes', headers={'Cookie':cookie})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        assert json.load(response)['nodes'][0]['hostname'] == 'CI Demo'
+    admin_setup('admin-reset')
+    try:
+        urllib.request.urlopen(request, timeout=5)
+        raise AssertionError('CLI reset did not invalidate an existing session')
+    except urllib.error.HTTPError as error:
+        assert error.code == 401
+    for p in db.parent.iterdir(): assert p.stat().st_uid==uid and p.stat().st_mode&0o077==0,p
     # Root CLI must neither inherit group 0 from a bad DB nor race installer
     # ownership migration. Both failures happen before opening SQLite.
     gid=int(subprocess.check_output(['id','-g',name]))

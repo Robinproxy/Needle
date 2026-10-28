@@ -1,44 +1,71 @@
-# System information, renewal sorting, and operations shortcuts
+# Public dashboard with administrator-managed node profiles
 
-Upgrade **Server first, then Agents**. Back up the Server database before upgrading.
-
-- Node Detail now shows the CPU model, operating system/version, and architecture.
-  The Agent reads these once at startup and includes them in full reports. Upgrade
-  both Server and Agent to populate the fields; no YAML changes or Token
-  registration are required. Older Agents remain compatible and do not erase
-  saved metadata. Cards retain their existing core/load line and height.
-- The first header control toggles sorting by the next renewal date, soonest
-  first. Click again to restore manual order. Permanent or undated nodes appear
-  last; region filters, card/list views, and live updates keep working. The browser
-  remembers the choice. Sorting does not change stored dates, node positions, or
-  monthly traffic boundaries and requires only a Server update.
-- The sort, view, and theme icons have transparent backgrounds with the same
-  muted style as the GitHub icon. Active sorting uses a stronger icon color.
-- README includes copyable Linux systemd and OpenWrt / ImmortalWrt shortcuts that
-  download the installer, run `upgrade --keep-config`, and restart the Agent.
-  Each step requires the previous step to succeed. YAML and Token are retained;
-  optional new settings are not inserted into existing configuration.
-- Runtime logs rate-limit repeated failures and emit recovery messages through
-  the existing system logger. The supplied Docker Compose file rotates container
-  logs at 10 MB per file, retaining three files. Existing deployments must add the
-  logging block to their local Compose file and recreate the container to enable
-  rotation; an image upgrade alone does not apply it.
-- Fresh Linux Agent installs no longer print a misleading missing-unit diagnostic
-  while probing the previous service state. Actual deployment failures remain
-  visible. README operations, paths, settings, and full Token lookup are clarified.
+The dashboard remains public. An optional single-administrator `/admin` page now
+edits display name, region, position, currency, billing amount/period, renewal
+anchor, and monthly upload + download allowance. No remote shell, Agent service
+management, Token management, or node deletion is added to the web interface.
 
 ## Upgrade
 
-Use the **Deployment & Operations** section in README. Upgrade the Server before
-running the Agent shortcuts. `--keep-config` preserves billing, renewal dates,
-interfaces, TCP Ping targets, allowances, intervals, and Token without prompts.
-The shortcut explicitly restarts the Agent, including a previously stopped
-service, while keeping its boot autostart setting. No traffic accounting or
-retention algorithms change in this release.
+Back up the complete Server database directory and upgrade **Server first**.
+Existing Agent binaries, YAML, Tokens, and history remain compatible; existing
+Agents do not need upgrading for the management features.
+
+Initialize the administrator once, interactively on the Server host:
+
+```sh
+# Docker: run from the Server Compose directory
+docker compose exec needle-server needle-server -db /data/needle.db admin-init
+
+# Binary: use the actual database path if customized
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-init
+```
+
+Choose the command matching your deployment. Enter a username, the public HTTPS
+origin without a path, and a password of at least 15 characters twice. Password
+entry is hidden before the prompt appears. `admin-reset` changes credentials or
+the public origin and invalidates old sessions without restarting the Server.
+Subsequent upgrades retain the administrator. No default account or public
+initialization endpoint exists; the public dashboard works before setup.
+
+## Profile ownership and traffic continuity
+
+- Existing node values automatically populate the editor. Until the first admin
+  save, legacy nodes continue using Agent-provided settings. Saving transfers
+  that static profile to the Server; later Agent reports cannot overwrite it.
+- Display names are separate from the stable Agent hostname and Token binding.
+- On takeover, the existing monthly traffic reset day is pinned independently of
+  renewal dates. It is read-only in this version. Editing costs, renewal dates,
+  periods, or allowances preserves the current boundary and accumulated usage.
+  Legacy nodes not yet taken over retain their date-derived reset behavior.
+- Fresh Agent installations now configure connection and collection settings
+  only and set `server_managed: true`. Complete static settings in `/admin`.
+  Unconfigured billing/dates show Not set. Fresh nodes use monthly reset day 1
+  and an unrestricted allowance; finite allowances and the infinity option are
+  available in the editor. No automatic historical traffic correction occurs.
+- Old YAML is retained on upgrades. Reselection skips legacy billing prompts for
+  `server_managed: true` configurations. New installers require the compatible
+  `server-profiles-v1` Agent marker and reject older release binaries before
+  changing an installation; use the installer bundled with an older release.
+
+## Security and interface
+
+Administrator credentials are independent of Agent Tokens. Passwords use salted
+Argon2id hashes in SQLite. Sessions are bounded, memory-only, expire after eight
+hours, and end on logout or Server restart. Management writes require an admin
+session, matching origin, JSON content, and CSRF verification. Login attempts,
+password verification concurrency, and request sizes are bounded.
+
+Profile saves are transactional and reject stale forms; the most recent 200
+changes are recorded in SQLite. Public cards update after saves. Node detail
+expansion no longer automatically scrolls the page; keyboard focus restoration
+also preserves the viewport. README covers setup, recovery, and legacy settings.
 
 ## Validation
 
-Local checks cover Go tests with the race detector, static analysis, installer
-regressions, dashboard regressions, and Linux Agent cross-builds. Real Linux
-systemd lifecycle checks, Docker isolation, and execution of both Linux release
-archives remain required CI gates before Release artifacts are published.
+Local Go/race tests, vet, installer/dashboard regressions, native terminal
+initialization/reset/cancellation, and Linux amd64/arm64 Agent cross-builds pass.
+CI additionally verifies root CLI terminal setup after switching to the database
+owner, credential reset revocation, real systemd lifecycle, Docker permissions,
+and execution/checksums of both architectures' packaged release archives before
+publishing Release assets.

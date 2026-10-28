@@ -1,12 +1,7 @@
 hostname: ""     # optional, defaults to os.Hostname()
 server: http://127.0.0.1:8008
 token: replace-with-unique-agent-token   # unique per agent; allow on Server with allow-token
-region: SG
-billing_currency: "USD"     # USD/CNY/EUR/GBP/CAD/HKD/JPY/AUD or another three-letter code; no conversion
-billing_amount: "5.00"      # Entire billing period, not monthly equivalent; "0" = free, "" = not configured
-billing_period: "1m"        # 1m/3m/6m/12m/24m/36m/forever; forever has no expiry
-expires_at: "2026-11-15"    # Actual next renewal / top-up date (YYYY-MM-DD), including transferred nodes; empty for forever
-monthly_traffic_limit_gb: 1000 # Upload + download per month; decimal GB (1000 GB = 1 TB); 0 = no limit
+server_managed: true # Display name, region, billing and traffic allowance are configured on Server /admin
 realtime_interval: 5         # Extra live-only reports; 0 disables. Omitted in old configs means 0.
 interval: 30                # Full history, TCP Ping and traffic accounting, in seconds.
 # interfaces: ["eth0"]      # optional NIC whitelist; default counts physical NICs only

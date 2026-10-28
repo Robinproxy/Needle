@@ -554,8 +554,12 @@ function updateExpiryBadge(node, a) {
   node.insertAdjacentHTML('beforeend', expiryBadge(a));
 }
 
+function nodeName(a) {
+  return a.agent.display_name || a.agent.hostname;
+}
+
 function dashboardLayoutSignature(list) {
-  return JSON.stringify(filterAndSort(list).map(a => [a.agent.id, a.agent.display_order, a.agent.hostname, a.agent.region, a.tcpping_enabled,
+  return JSON.stringify(filterAndSort(list).map(a => [a.agent.id, a.agent.display_order, nodeName(a), a.agent.region, a.tcpping_enabled,
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 
@@ -566,10 +570,10 @@ function renderCard(a, isActive) {
   const seenTs = lastSeenMs(a);
   const expiryHtml = expiryBadge(a);
 
-  return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
+  return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<div class="card-top">'
       + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
-      + '<span class="card-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
+      + '<span class="card-hostname">' + escapeHtml(nodeName(a)) + '</span>'
       + '<span class="card-session">' + flagEmoji(a.agent.region) + '</span>'
     + '</div>'
     + '<div class="card-sub"><span>' + uptime + '</span>' + expiryHtml + '</div>'
@@ -611,9 +615,9 @@ function renderListRow(a, idx, isActive) {
       + '</span>';
   }
 
-  return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(a.agent.hostname) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
+  return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
-    + '<span class="list-hostname">' + escapeHtml(a.agent.hostname) + '</span>'
+    + '<span class="list-hostname">' + escapeHtml(nodeName(a)) + '</span>'
     + '<span class="list-region">' + regionLabel + '</span>'
     + '<span class="list-session">#' + sess + '</span>'
     + '<div class="list-bars">'
@@ -682,10 +686,10 @@ function renderDetailContent(id) {
   const systemInfo = systemInfoText(agent);
   detailEl.innerHTML = '<div class="detail-header">'
     + '<div class="detail-heading">'
-      + '<div class="detail-title"><span class="detail-hostname">' + escapeHtml(agent.agent.hostname) + '</span><span class="sub">Node Detail</span></div>'
+      + '<div class="detail-title"><span class="detail-hostname">' + escapeHtml(nodeName(agent)) + '</span><span class="sub">Node Detail</span></div>'
       + '<div class="detail-system" id="detail-system-' + id + '"' + (systemInfo ? '' : ' hidden') + '>' + escapeHtml(systemInfo) + '</div>'
     + '</div>'
-    + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
+    + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(nodeName(agent)) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
     + '</div>'
     + '<div class="spark-grid">'
       + '<div class="spark-item"><div class="spark-header"><span class="label">CPU</span><span class="value" id="spark-cpu-val">—</span></div><div id="spark-cpu" class="spark-chart"></div></div>'
@@ -1357,7 +1361,7 @@ function updateLiveSummaries(data) {
       const isOnline = a._online || false;
 
       card.classList.toggle('offline', !isOnline);
-      card.setAttribute?.('aria-label', (isOnline ? 'Online' : 'Offline') + ' node ' + a.agent.hostname + ', open details');
+      card.setAttribute?.('aria-label', (isOnline ? 'Online' : 'Offline') + ' node ' + nodeName(a) + ', open details');
       card.setAttribute?.('data-history-stale', String(!!a.live?.history_stale));
       card.setAttribute?.('title', freshnessText(a));
       const listExpiry = card.querySelector('.list-expiry');
@@ -1515,7 +1519,9 @@ function connectEvents() {
     watchEvents(stream, 40000);
     try {
       const update = JSON.parse(event.data);
-      if (update.kind === 'remove') {
+      if (update.kind === 'resync') {
+        softRefresh();
+      } else if (update.kind === 'remove') {
         applyEventNodes(agents.filter(a => a.agent.id !== update.id), true);
       } else if (update.node) applyEventNodes([update.node], false, false, update.kind === 'history');
     } catch (error) { console.error('Node event:', error); stream.onerror(); }

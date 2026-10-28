@@ -26,6 +26,16 @@ type trafficCycle struct {
 
 func activeTrafficCycle(x execer, agentID int64, period string, expiry *int64, now time.Time) (trafficCycle, bool, error) {
 	day, ok := trafficResetDay(period, expiry)
+	var fixed sql.NullInt64
+	if err := x.QueryRow("SELECT traffic_reset_day FROM agents WHERE id=?", agentID).Scan(&fixed); err != nil && err != sql.ErrNoRows {
+		return trafficCycle{}, false, err
+	}
+	if fixed.Valid {
+		if fixed.Int64 < 1 || fixed.Int64 > 31 {
+			return trafficCycle{}, false, fmt.Errorf("invalid stored traffic reset day")
+		}
+		day, ok = int(fixed.Int64), true
+	}
 	if !ok {
 		return trafficCycle{}, false, nil
 	}

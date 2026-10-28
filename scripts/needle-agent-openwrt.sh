@@ -179,7 +179,7 @@ download() {
     tar xOzf "$TMP_DIR/$ARCHIVE" needle-agent > "$TMP_DIR/needle-agent"
     [ -s "$TMP_DIR/needle-agent" ] && [ ! -L "$TMP_DIR/needle-agent" ] || fail 'Agent binary missing or empty.'
     chmod 755 "$TMP_DIR/needle-agent"
-    "$TMP_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 ' || fail 'Release binary is older than this installer protocol; use its packaged installer or wait for a compatible release. Existing Agent unchanged.'
+    "$TMP_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 .*server-profiles-v1' || fail 'Release binary is older than this installer protocol; use its packaged installer or wait for a compatible release. Existing Agent unchanged.'
     "$TMP_DIR/needle-agent" -h > "$TMP_DIR/agent-help" 2>&1 || fail 'Agent binary cannot execute on this router.'
 }
 
@@ -441,6 +441,10 @@ stage_tcping_config() {
 }
 
 choose_upgrade_config() {
+    PROFILE_MANAGED=false
+    if awk '/^[[:space:]]*["\047]?server_managed["\047]?:[[:space:]]*true([[:space:]]*(#.*)?)?$/ { found=1 } END { exit !found }' "$1"; then
+        PROFILE_MANAGED=true
+    fi
     UPGRADE_RECONFIGURE=false
     INTERVALS_ONLY=false
     case "${UPGRADE_CONFIG_MODE:-ask}" in
@@ -457,7 +461,11 @@ choose_upgrade_config() {
             if upgrade_interactive; then
                 echo 'Upgrade configuration:'
                 echo '  1) Keep existing configuration (default)'
-                echo '  2) Reconfigure TCP Ping, monthly allowance, and optional billing settings; preserve token and identity'
+                if [ "$PROFILE_MANAGED" = true ]; then
+                    echo '  2) Reconfigure TCP Ping and intervals; preserve token and identity'
+                else
+                    echo '  2) Reconfigure TCP Ping, legacy allowance/billing, and intervals; preserve token and identity'
+                fi
                 echo '  3) Change realtime/history intervals only; preserve all other settings'
                 tcping_prompt 'Configuration choice [1]: '
                 case "${TCPING_ANSWER:-1}" in
@@ -473,8 +481,12 @@ choose_upgrade_config() {
     if [ "$UPGRADE_RECONFIGURE" = true ]; then
         if [ "$INTERVALS_ONLY" = false ]; then
             configure_tcping
-            configure_monthly_traffic upgrade
-            configure_billing upgrade
+            if [ "$PROFILE_MANAGED" = false ]; then
+                configure_monthly_traffic upgrade
+                configure_billing upgrade
+            else
+                echo 'Node profile is managed on the Server; update billing and allowance in /admin.'
+            fi
         fi
         configure_intervals upgrade "$1"
         stage_tcping_config "$1"
@@ -504,13 +516,11 @@ configure() {
             case "$ANSWER" in y|Y|yes) ALLOW_HTTP=true ;; *) fail 'HTTPS required unless HTTP is explicitly allowed.' ;; esac ;;
         *) fail 'A full http:// or https:// URL is required.' ;;
     esac
-    prompt 'Region code [CN]: '; REGION=${ANSWER:-CN}
     prompt 'Agent token (empty = generate): '; TOKEN=$ANSWER
     if [ -z "$TOKEN" ]; then
         TOKEN=$(generate_token) || fail 'Cannot generate an Agent token; run install again and enter a unique token manually.'
     fi
     configure_intervals install
-    configure_billing
     echo 'Available network interfaces:'
     for DEVICE in "$NETWORK_DIR"/*; do printf '  %s\n' "${DEVICE##*/}"; done
     DEFAULT_IFACE=
@@ -522,16 +532,13 @@ configure() {
     case "$IFACE" in ''|lo|*[!a-zA-Z0-9_.:-]*) fail 'Select a valid WAN interface.' ;; esac
     [ -d "$NETWORK_DIR/$IFACE" ] || fail "Interface $IFACE does not exist; connect WAN before installation."
     configure_tcping
-    configure_monthly_traffic
     {
         printf 'hostname: '; yaml_quote "$HOSTNAME"; printf '\nserver: '; yaml_quote "$SERVER_URL"
-        printf '\ntoken: '; yaml_quote "$TOKEN"; printf '\nregion: '; yaml_quote "$REGION"
+        printf '\ntoken: '; yaml_quote "$TOKEN"; printf '\nserver_managed: true'
         printf '\ntls_skip_verify: false\nallow_plain_http: %s\ninterfaces: [' "$ALLOW_HTTP"
         yaml_quote "$IFACE"; printf ']\n'
         cat "$TMP_DIR/intervals.yaml"
-        cat "$TMP_DIR/billing.yaml"
         cat "$TMP_DIR/tcpping.yaml"
-        cat "$TMP_DIR/traffic.yaml"
     } > "$TMP_DIR/agent.yaml"
 }
 
@@ -711,6 +718,7 @@ install_agent() {
         echo '  Hostname binds automatically on the first successful report.'
     fi
     echo 'Logs: logread -e needle-agent'
+    echo 'Configure display name, region, billing and traffic allowance in the Server /admin page.'
     echo 'Firmware sysupgrade preserves configuration when keeping settings; reinstall the Agent afterward.'
 }
 

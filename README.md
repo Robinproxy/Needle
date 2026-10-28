@@ -25,6 +25,7 @@ Needle consists of one Server and multiple Agents. Agents make outbound-only con
 - CPU model, operating system/version, and architecture in Node Detail
 - Configurable TCP Ping targets for IPv4 / IPv6, with latency, jitter, and loss history
 - Billing costs, renewal reminders, monthly traffic allowances, and ♾️ options
+- Public dashboard with an optional single-administrator node settings page
 - Cards and list views, region filters, themes, persistent node ordering, and live SSE updates
 - SQLite storage, embedded dashboard, and unique hostname-bound Agent tokens
 - Docker or Linux binary Server; Linux systemd and OpenWrt / ImmortalWrt Agents
@@ -269,7 +270,7 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 sudo bash /tmp/needle-agent.sh install
 ```
 
-Enter the Server HTTPS URL, a unique Token (Enter generates one), node settings, separate billing values, intervals, TCP Ping mode, and monthly traffic allowance. Run the printed Docker or binary `allow-token` command **on the Server**. The first successful report binds the Token to the hostname.
+Enter the Agent hostname, Server HTTPS URL, a unique Token (Enter generates one), reporting intervals, and TCP Ping mode. New installations set `server_managed: true`; set the display name, region, billing, renewal date, and monthly allowance in the Server `/admin` page after the first report. Run the printed Docker or binary `allow-token` command **on the Server**. The first successful report binds the Token to the hostname.
 
 Root installs and manages the service; the Agent runs as the non-login `needle-agent` user with no capabilities. It cannot modify its binary, configuration, or systemd unit, execute Server commands, or upgrade itself.
 
@@ -320,7 +321,7 @@ sudo systemctl disable needle-agent
 | `--reconfigure` | Reselect TCP Ping, allowance, optional billing, and intervals; preserve Token and identity |
 | `--configure-intervals` | Change only realtime and full-report intervals |
 
-The three flags are mutually exclusive. Non-interactive upgrades keep configuration; reconfiguration requires a terminal. Reinstalling with an existing configuration enters the upgrade flow. Kept configurations do not gain new fields automatically; omitted optional fields use their defaults.
+For new `server_managed: true` configurations, `--reconfigure` changes probes and intervals only; billing and allowance stay in `/admin`. Legacy YAML billing options apply only while the node is Agent-managed. The three flags are mutually exclusive. Non-interactive upgrades keep configuration; reconfiguration requires a terminal. Reinstalling with an existing configuration enters the upgrade flow. Kept configurations do not gain new fields automatically; omitted optional fields use their defaults.
 
 Upgrade migrates older root-run installations to the dedicated user, validates configuration as that user, and preserves running / autostart states. A new installation starts immediately and at boot. Failed deployment restores the old files; failed rollback retains originals under `/opt/needle-agent/recovery/` and prints the recovery path.
 
@@ -360,7 +361,7 @@ wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinprox
 sh /tmp/needle-agent-openwrt.sh install
 ```
 
-Choose the actual WAN interface (`pppoe-wan`, `eth1`, etc.). Avoid counting both LAN and WAN or a PPPoE interface and its underlying device. Enter node, billing, interval, probe, and traffic settings; allow the printed Token **on the Server**.
+Choose the actual WAN interface (`pppoe-wan`, `eth1`, etc.). Avoid counting both LAN and WAN or a PPPoE interface and its underlying device. Enter the Agent hostname, Server URL, Token, intervals, WAN interface, and probes; allow the printed Token **on the Server**. New installations set `server_managed: true`; complete region, billing, renewal date, and allowance in the Server `/admin` page.
 
 The router installer uses procd and runs the Agent as root; the Linux systemd service-account setup does not apply. It does not change routing, firewall, DNS, DHCP, or package settings. It opens no listening port and writes no local metric history. The service uses nice level 10, `GOMAXPROCS=1`, a 32 MiB soft Go memory target (not an RSS cap), and a 128-file descriptor limit.
 
@@ -395,7 +396,7 @@ sh /tmp/needle-agent-openwrt.sh upgrade --configure-intervals
 /etc/init.d/needle-agent disable
 ```
 
-Plain `upgrade` offers an interactive choice, defaulting to keeping configuration. `--keep-config` preserves YAML unchanged; `--reconfigure` changes probes, allowance, optional billing, and intervals; `--configure-intervals` changes only intervals. These flags are mutually exclusive and preserve Token and identity. Existing running / autostart states are preserved; a first installation starts immediately and at boot.
+For `server_managed: true` configurations, reselection changes probes and intervals only; use `/admin` for static settings. Plain `upgrade` offers an interactive choice, defaulting to keeping configuration. `--keep-config` preserves YAML unchanged; `--reconfigure` changes probes, allowance, optional billing, and intervals; `--configure-intervals` changes only intervals. These flags are mutually exclusive and preserve Token and identity. Existing running / autostart states are preserved; a first installation starts immediately and at boot.
 
 The installer checks checksums, binary execution, configuration, and space before replacing files. It requires 64 MiB available memory, 32 MiB free in `/tmp`, and a 4 MiB installation-space reserve after staging. Startup failure restores the old files and service state; a failed recovery retains its snapshot and prints the location. A running process alone does not prove successful reporting: check logs and the Server dashboard.
 
@@ -415,6 +416,49 @@ sh /tmp/needle-agent-openwrt.sh uninstall --unregister --purge
 Add `--yes` to skip confirmation. Revocation requires a compatible Server; failure retains local files and restores the previous running state. `--purge` removes Needle's configuration, backup, and staging files, retaining unrelated files and backup entries. Delete the Server node/history separately with `delete-agent` if required.
 
 Firmware upgrades with settings retention preserve `/etc/needle/` through `/etc/sysupgrade.conf`. Reinstall the binary and service afterward; retained configuration is reused.
+
+</details>
+
+<details>
+<summary><strong>Dashboard — Administrator and node settings</strong></summary>
+
+The dashboard and its monitoring APIs remain public. `/admin` adds authenticated editing of display name, region, position, billing currency/amount/period, renewal date, and monthly upload + download allowance. An Agent's stable hostname, Token, collectors, and local YAML are not changed by this page.
+
+Initialize one administrator **on the Server host**, after starting the Server. Use its actual database path:
+
+```sh
+# Docker: run from the Server Compose directory
+cd ~/needle
+docker compose exec needle-server needle-server -db /data/needle.db admin-init
+
+# Linux binary / systemd
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-init
+```
+
+Run only the command matching your deployment. The interactive setup asks for a username (default `admin`), the **browser-facing origin** (e.g. `https://needle.example.com`, without `/admin` or any other path), and a password of at least 15 characters, entered twice without echo. HTTPS is required; loopback HTTP is allowed for local testing. No password is accepted in command arguments, environment variables, or piped input. No public registration or initialization endpoint exists; editing stays disabled until CLI initialization succeeds.
+
+The configured origin is used for request validation and secure cookies behind HTTPS reverse proxies; forwarded headers are not trusted to select it. Keep the public origin stable and forward browser `Origin` headers unchanged. Open the public footer's **Manage** link, sign in, and select **Edit** beside a node. Sessions last eight hours, end on sign-out, and are lost when the Server restarts. Passwords are stored as salted Argon2id hashes in the existing database.
+
+Reset a forgotten password, change the username, or update the public origin interactively. Existing sessions are invalidated without restarting the Server:
+
+```sh
+# Docker, from ~/needle
+docker compose exec needle-server needle-server -db /data/needle.db admin-reset
+
+# Linux binary
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-reset
+```
+
+Upgrade compatibility and ownership:
+
+- Existing nodes keep Agent-managed settings until their first successful admin save. The editor starts with their current values; saving transfers the static profile to the Server. Later Agent reports and upgrades cannot overwrite it. Existing Agent YAML and Token need no changes or re-registration.
+- New Agents installed with `server_managed: true` use Server-managed profiles from their first report. Missing billing and renewal settings show **Not set**, not Free or permanent. Monthly usage starts with reset day 1 and an unrestricted allowance; choose a finite allowance or ♾️ in the editor.
+- A display name is a label. CLI commands and Token bindings continue to use the original Agent hostname or stable numeric ID.
+- On takeover, the current monthly reset day is pinned independently of the renewal date. For a previously unconfigured node it defaults to day 1. The editor shows this day read-only. Changing price, payment period, renewal date, or allowance does not clear usage or move the monthly boundary. Legacy nodes still managed by the Agent retain their existing date-derived reset behavior.
+- The saved renewal anchor still projects future reminders by the payment period; it does not confirm payment. The editor shows both the saved date and projected next renewal. Short months keep the original reset day (29–31) for subsequent months.
+- Saves validate every field, use a database transaction, reject stale forms, refresh the public dashboard, and retain the latest 200 profile-change records in SQLite. A failed save does not partially change ordering or billing. Existing history and counter accounting remain intact.
+
+Administrator cookies and Agent Tokens are separate credentials. The management API accepts only authenticated, same-origin JSON writes with CSRF protection. It provides profile editing only; Token registration, node deletion, and Agent service/configuration management remain terminal operations. Database backups contain the password hash as well as Agent credentials and should remain private.
 
 </details>
 
@@ -623,18 +667,13 @@ Edit the configuration as root (`nano` if installed, otherwise `vi`):
 sudo nano /opt/needle-agent/agent.yaml
 ```
 
-Example; replace hostname, URL, Token, dates, and interfaces for your machine. See also [agent.yaml.example](agent.yaml.example).
+Example; replace hostname, URL, Token, and interfaces for your machine. Configure billing and other static node settings in `/admin`. See also [agent.yaml.example](agent.yaml.example).
 
 ```yaml
 hostname: "my-vps"
 server: "https://needle.example.com"
 token: "replace-with-unique-agent-token"
-region: US
-billing_currency: "USD"
-billing_amount: "35"
-billing_period: "12m"
-expires_at: "2027-03-03"
-monthly_traffic_limit_gb: 1000
+server_managed: true
 realtime_interval: 5
 interval: 30
 # interfaces: ["eth0"]
@@ -651,10 +690,11 @@ tcpping:
 
 | Field | Meaning / default |
 | --- | --- |
-| `hostname` | Node name; `""` / omitted uses the system hostname. Token binds to it on the first successful report |
+| `hostname` | Stable Agent identity; empty / omitted uses the system hostname. Token binds to it; edit the display name in `/admin` |
 | `server` | Server URL; use the public HTTPS address, e.g. `https://needle.example.com` |
 | `token` | Unique allowed credential; required, 1–256 characters, no whitespace or control characters |
-| `region` | Region code used for flag / filtering, e.g. `US`, `CN`, `SG` |
+| `server_managed` | Boolean; new installs use `true` and configure static node settings in `/admin`. Omitted / false keeps legacy behavior until admin takeover |
+| `region` | Legacy Agent-managed region code, e.g. `US`, `CN`, `SG`; Server-managed nodes use `/admin` |
 | `billing_currency` | Three-letter code: `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another code; default USD when cost is configured; no exchange conversion |
 | `billing_amount` | Quoted decimal for the **entire billing period**; `"0"` = Free, `""` = Not set; up to 12 integer and 6 fractional digits. A configured amount requires a billing period |
 | `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves it unset |
@@ -669,7 +709,7 @@ tcpping:
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
-Billing inputs are separate: **currency → total amount → period → next renewal date**. At `Amount for the entire billing period...`, enter only a number such as `35`, never `12m,35`. For USD 35 per year, use:
+**Legacy Agent-managed billing:** new Server-managed nodes use `/admin`; the following YAML options remain supported for existing configurations. Billing inputs are separate: **currency → total amount → period → next renewal date**. At `Amount for the entire billing period...`, enter only a number such as `35`, never `12m,35`. For USD 35 per year, use:
 
 ```yaml
 billing_currency: "USD"
@@ -680,7 +720,7 @@ expires_at: "2027-03-03"
 
 The card displays the configured amount with its period (USD 35 `/yr` here), not a monthly conversion. `"0"` means free; an empty amount means unconfigured. For transferred machines, use the existing next renewal date, not the transfer date.
 
-Finite renewal dates advance by the payment period after the due day; the due day itself shows `Due today`. This is a schedule reminder, not proof of payment. **Traffic still resets monthly** on the day of month in `expires_at`, even for annual / multi-year payments. Days 29–31 clamp in shorter months. `forever` shows ♾️ for expiry and resets traffic on day 1. Without an expiry date or `forever`, monthly usage is unavailable. Boundaries use the Server timezone.
+Finite renewal dates advance by the payment period after the due day; the due day itself shows `Due today`. This is a schedule reminder, not proof of payment. **Legacy Agent-managed traffic resets monthly** on the day of month in `expires_at`, even for annual / multi-year payments. Server-managed nodes instead keep their pinned monthly reset day shown in `/admin`. Days 29–31 clamp in shorter months. Legacy `forever` configurations reset on day 1; without an expiry date or `forever`, legacy usage is unavailable. Server-managed nodes use their pinned reset day independently of billing, including when renewal settings are not configured. Boundaries use the Server timezone.
 
 Traffic allowance is independent: a paid or free node can use `monthly_traffic_limit_gb: 0` for ♾️, or a permanent node can have a finite allowance. Changing the allowance does not clear accumulated usage; usage begins at the first observed baseline.
 
@@ -723,18 +763,13 @@ Edit the configuration as root (`nano` if installed, otherwise `vi`):
 nano /etc/needle/agent.yaml
 ```
 
-Example; replace hostname, URL, Token, dates, and interfaces for your machine. See also [agent.yaml.example](agent.yaml.example).
+Example; replace hostname, URL, Token, and interfaces for your machine. Configure billing and other static node settings in `/admin`. See also [agent.yaml.example](agent.yaml.example).
 
 ```yaml
 hostname: "home-router"
 server: "https://needle.example.com"
 token: "replace-with-unique-agent-token"
-region: CN
-billing_currency: "CNY"
-billing_amount: "38"
-billing_period: "1m"
-expires_at: "2026-11-01"
-monthly_traffic_limit_gb: 0
+server_managed: true
 realtime_interval: 0
 interval: 30
 interfaces: ["pppoe-wan"]
@@ -745,10 +780,11 @@ tcpping: []
 
 | Field | Meaning / default |
 | --- | --- |
-| `hostname` | Node name; `""` / omitted uses the system hostname. Token binds to it on the first successful report |
+| `hostname` | Stable Agent identity; empty / omitted uses the system hostname. Token binds to it; edit the display name in `/admin` |
 | `server` | Server URL; use the public HTTPS address, e.g. `https://needle.example.com` |
 | `token` | Unique allowed credential; required, 1–256 characters, no whitespace or control characters |
-| `region` | Region code used for flag / filtering, e.g. `US`, `CN`, `SG` |
+| `server_managed` | Boolean; new installs use `true` and configure static node settings in `/admin`. Omitted / false keeps legacy behavior until admin takeover |
+| `region` | Legacy Agent-managed region code, e.g. `US`, `CN`, `SG`; Server-managed nodes use `/admin` |
 | `billing_currency` | Three-letter code: `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another code; default USD when cost is configured; no exchange conversion |
 | `billing_amount` | Quoted decimal for the **entire billing period**; `"0"` = Free, `""` = Not set; up to 12 integer and 6 fractional digits. A configured amount requires a billing period |
 | `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves it unset |
@@ -763,7 +799,7 @@ tcpping: []
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
-Billing inputs are separate: **currency → total amount → period → next renewal date**. At `Amount for the entire billing period...`, enter only a number such as `35`, never `12m,35`. For USD 35 per year, use:
+**Legacy Agent-managed billing:** new Server-managed nodes use `/admin`; the following YAML options remain supported for existing configurations. Billing inputs are separate: **currency → total amount → period → next renewal date**. At `Amount for the entire billing period...`, enter only a number such as `35`, never `12m,35`. For USD 35 per year, use:
 
 ```yaml
 billing_currency: "USD"
@@ -774,7 +810,7 @@ expires_at: "2027-03-03"
 
 The card displays the configured amount with its period (USD 35 `/yr` here), not a monthly conversion. `"0"` means free; an empty amount means unconfigured. For transferred machines, use the existing next renewal date, not the transfer date.
 
-Finite renewal dates advance by the payment period after the due day; the due day itself shows `Due today`. This is a schedule reminder, not proof of payment. **Traffic still resets monthly** on the day of month in `expires_at`, even for annual / multi-year payments. Days 29–31 clamp in shorter months. `forever` shows ♾️ for expiry and resets traffic on day 1. Without an expiry date or `forever`, monthly usage is unavailable. Boundaries use the Server timezone.
+Finite renewal dates advance by the payment period after the due day; the due day itself shows `Due today`. This is a schedule reminder, not proof of payment. **Legacy Agent-managed traffic resets monthly** on the day of month in `expires_at`, even for annual / multi-year payments. Server-managed nodes instead keep their pinned monthly reset day shown in `/admin`. Days 29–31 clamp in shorter months. Legacy `forever` configurations reset on day 1; without an expiry date or `forever`, legacy usage is unavailable. Server-managed nodes use their pinned reset day independently of billing, including when renewal settings are not configured. Boundaries use the Server timezone.
 
 Traffic allowance is independent: a paid or free node can use `monthly_traffic_limit_gb: 0` for ♾️, or a permanent node can have a finite allowance. Changing the allowance does not clear accumulated usage; usage begins at the first observed baseline.
 

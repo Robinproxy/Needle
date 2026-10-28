@@ -147,6 +147,22 @@ systemctl() {{
         self.assertTrue(self.enabled.exists())
         self.assertEqual(self.config.read_bytes(), self.original)
 
+    def test_fresh_install_asks_only_connection_and_collection_settings(self):
+        for path in [self.config, self.binary, self.service, self.active, self.enabled]:
+            path.unlink()
+        result=self.run_shell('cmd_install', before='''
+require_tty_for_install() { :; }
+read_prompt() { IFS= read -r "$1"; }
+download_release_agent() { VERSION=v9.9.9; }
+http_get() { printf '{"status":"ok"}'; }
+''', answers='machine\nhttps://needle.example.com\nunique-test-token\n\n\n5\n')
+        self.assertEqual(result.returncode,0,result.stderr)
+        config=self.config.read_text()
+        for line in ['server_managed: true','token: unique-test-token','interval: 30','realtime_interval: 5','tcpping: []']:
+            self.assertIn(line,config)
+        for key in ['region:', 'billing_amount:', 'billing_period:', 'expires_at:', 'monthly_traffic_limit_gb:']:
+            self.assertNotIn(key,config)
+
     def test_upgrade_preserves_running_and_autostart_states(self):
         for active in [False, True]:
             for enabled in [False, True]:

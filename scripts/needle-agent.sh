@@ -216,7 +216,7 @@ download_release_agent() {
     exit 1
   fi
   chmod 755 "$TMP_DIR/needle-agent"
-  if ! "$TMP_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 '; then
+  if ! "$TMP_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 .*server-profiles-v1'; then
     echo 'ERROR: latest release binary is older than this installer protocol. Use the installer packaged with that release, or wait for a compatible release. Existing installation unchanged.' >&2
     exit 1
   fi
@@ -693,6 +693,10 @@ stage_tcping_config() {
 }
 
 choose_upgrade_config() {
+    PROFILE_MANAGED=false
+    if awk '/^[[:space:]]*["\047]?server_managed["\047]?:[[:space:]]*true([[:space:]]*(#.*)?)?$/ { found=1 } END { exit !found }' "$1"; then
+        PROFILE_MANAGED=true
+    fi
     UPGRADE_RECONFIGURE=false
     INTERVALS_ONLY=false
     case "${UPGRADE_CONFIG_MODE:-ask}" in
@@ -709,7 +713,11 @@ choose_upgrade_config() {
             if upgrade_interactive; then
                 echo 'Upgrade configuration:'
                 echo '  1) Keep existing configuration (default)'
-                echo '  2) Reconfigure TCP Ping, monthly allowance, and optional billing settings; preserve token and identity'
+                if [ "$PROFILE_MANAGED" = true ]; then
+                    echo '  2) Reconfigure TCP Ping and intervals; preserve token and identity'
+                else
+                    echo '  2) Reconfigure TCP Ping, legacy allowance/billing, and intervals; preserve token and identity'
+                fi
                 echo '  3) Change realtime/history intervals only; preserve all other settings'
                 tcping_prompt 'Configuration choice [1]: '
                 case "${TCPING_ANSWER:-1}" in
@@ -725,8 +733,12 @@ choose_upgrade_config() {
     if [ "$UPGRADE_RECONFIGURE" = true ]; then
         if [ "$INTERVALS_ONLY" = false ]; then
             configure_tcping
-            configure_monthly_traffic upgrade
-            configure_billing upgrade
+            if [ "$PROFILE_MANAGED" = false ]; then
+                configure_monthly_traffic upgrade
+                configure_billing upgrade
+            else
+                echo 'Node profile is managed on the Server; update billing and allowance in /admin.'
+            fi
         fi
         configure_intervals upgrade "$1"
         stage_tcping_config "$1"
@@ -747,9 +759,6 @@ cmd_install() {
 
   read_prompt HOSTNAME "Hostname (leave empty for auto-detection) []: "
   HOSTNAME="${HOSTNAME:-}"
-
-  read_prompt REGION "Region (ISO country code, e.g. CN/SG/US) [SG]: "
-  REGION="${REGION:-SG}"
 
   DEFAULT_SERVER_URL="http://127.0.0.1:8008"
   ALLOW_PLAIN_HTTP=false
@@ -807,20 +816,17 @@ cmd_install() {
 
   configure_intervals install
 
-  configure_billing
-
   configure_tcping
-  configure_monthly_traffic
 
   cat > "$TMP_DIR/agent.yaml" <<YAML
 hostname: "${HOSTNAME}"
 server: ${SERVER_URL}
 token: ${TOKEN}
-region: ${REGION}
+server_managed: true
 tls_skip_verify: false
 allow_plain_http: ${ALLOW_PLAIN_HTTP}
 YAML
-  cat "$TMP_DIR/intervals.yaml" "$TMP_DIR/billing.yaml" "$TMP_DIR/tcpping.yaml" "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"
+  cat "$TMP_DIR/intervals.yaml" "$TMP_DIR/tcpping.yaml" >> "$TMP_DIR/agent.yaml"
   chmod 600 "$TMP_DIR/agent.yaml"
 
   echo "Installing Agent and unprivileged systemd service..."
@@ -831,7 +837,6 @@ YAML
   echo " Needle Agent installed!"
   echo " Version:  $VERSION"
   echo " Hostname: ${HOSTNAME:-auto-detected}"
-  echo " Region:   $REGION"
   echo " Server:   $SERVER_URL"
   echo " Config:   $AGENT_YAML"
   echo " Run as:   $AGENT_USER (root manages installation and systemd)"
@@ -848,6 +853,7 @@ YAML
   echo "      needle-server -db /data/needle.db allow-token $TOKEN"
   echo
   echo "  Hostname binds automatically on first successful report."
+  echo "  Configure display name, region, billing and traffic allowance in $SERVER_URL/admin."
   echo "========================================="
   echo "To view logs: journalctl -u $SERVICE_NAME -f"
 }

@@ -53,6 +53,9 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 0 20px; width: 100%; }
+.manage-link { color: inherit; text-decoration: none; }
+.manage-link:hover { color: hsl(var(--foreground)); }
+.manage-link:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
 main.container { flex: 1; padding-top: 16px; padding-bottom: 32px; }
 
 /* BUTTONS */

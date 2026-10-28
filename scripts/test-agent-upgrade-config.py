@@ -113,6 +113,20 @@ choose_upgrade_config {shlex.quote(str(original))}
                 self.assertIsNone(staged)
                 self.assertEqual(original,config)
 
+    def test_managed_reselection_skips_legacy_billing_and_preserves_settings(self):
+        for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
+            for key in ['server_managed', '"server_managed"', "'server_managed'"]:
+                config=OLD+f"{key}: true\nbilling_currency: USD\nbilling_amount: '35'\nmonthly_traffic_limit_gb: 500\n"
+                result,staged,original=self.run_choice(script,mode='reconfigure',answers='5\n\n\n',config=config)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(original,config)
+                self.assertIn('tcpping: []',staged)
+                self.assertIn("billing_amount: '35'",staged)
+                self.assertIn('monthly_traffic_limit_gb: 500',staged)
+                self.assertIn(f'{key}: true',staged)
+                self.assertNotIn('Monthly upload + download allowance',result.stdout)
+                self.assertIn('managed on the Server',result.stdout)
+
     def test_linux_reinstall_uses_upgrade_instead_of_regenerating_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

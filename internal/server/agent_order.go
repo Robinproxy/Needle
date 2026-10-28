@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,6 +36,16 @@ func (s *Store) MoveAgent(target string, position int) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := moveAgentTx(tx, target, position); err != nil {
+		return err
+	}
+	if err := bumpAdminRevision(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func moveAgentTx(tx *sql.Tx, target string, position int) error {
 	if _, err := tx.Exec(`UPDATE agents SET display_order=display_order WHERE 0`); err != nil {
 		return err
 	}
@@ -89,5 +100,5 @@ func (s *Store) MoveAgent(target string, position int) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }

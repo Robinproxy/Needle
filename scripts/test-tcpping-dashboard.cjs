@@ -89,6 +89,13 @@ assert(systemDetail.includes('id="detail-system-1">'), 'system information is vi
 assert.equal(ctx.systemInfoText({agent:{cpu_model:'AMD EPYC 7B13',arch:'aarch64'}}),'AMD EPYC 7B13 · ARM64');
 assert.equal(ctx.systemInfoText({agent:{os_name:'Debian 12'}}),'Debian 12');
 assert.equal(ctx.systemInfoText({agent:{}}),'');
+const renamed={...node,agent:{...node.agent,hostname:'stable-agent',display_name:'Home <Router>'}};
+assert.equal(ctx.nodeName(renamed),'Home <Router>');
+assert(ctx.renderCard(renamed,false).includes('Home &lt;Router&gt;'));
+assert(ctx.renderListRow(renamed,0,false).includes('Home &lt;Router&gt;'));
+assert(!ctx.renderCard(renamed,false).includes('Home <Router>'));
+assert.equal(renamed.agent.hostname,'stable-agent','a display label must not replace Agent identity');
+assert.notEqual(ctx.dashboardLayoutSignature([node]),ctx.dashboardLayoutSignature([renamed]));
 const cpuModelMetrics=ctx.cardMetricsHTML(systemNode);
 assert(!cpuModelMetrics.includes('Intel N150'));
 assert.equal(cpuModelMetrics,ctx.cardMetricsHTML({...systemNode,agent:{...systemNode.agent,cpu_model:''}}),'CPU model must not change card content or hover titles');
