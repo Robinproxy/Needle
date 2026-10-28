@@ -1,75 +1,44 @@
-# Security, report reliability and traffic continuity
+# System information, renewal sorting, and operations shortcuts
 
-Upgrade **Server first, then Agents**. This release changes Server permissions,
-reporting protocol and database metadata; take a consistent SQLite backup first.
+Upgrade **Server first, then Agents**. Back up the Server database before upgrading.
 
-- Native Server installs use a non-login `needle-server` user and a strictly
-  limited writable database directory. New native installs listen on
-  `127.0.0.1:8008`; upgrades preserve existing listen, database and TLS arguments.
-  Container listening stays on `:8008`; Compose publishes on host loopback.
-- Root CLI operations switch to the database owner before opening SQLite, keeping
-  DB/WAL/SHM ownership compatible with the service. Environment, executable and
-  service configuration remain root-managed.
-- `/api/unregister` and `revoke-token` revoke only the specified credential. Node,
-  billing, history and traffic records are retained. Only explicit local
-  `delete-agent` removes those records, with confirmation (`-y` for automation).
-  A new Agent refuses unregister against a Server that has not explicitly
-  confirmed history-preserving semantics, avoiding the older deletion behavior.
-- Full reports gain a process-instance/sequence identity and transactional,
-  persistent Server deduplication. Retries require explicit protocol support and
-  a matching committed acknowledgement. Duplicate reports never repeat metric,
-  Ping or traffic writes; conflicting content returns 409.
-- Agent history remains a bounded in-memory FIFO: capacity 64 including the
-  in-flight report, at most 8 MiB reserved, default maximum age 1800 seconds from
-  original sampling time. Advanced YAML settings are optional. Backoff and
-  Retry-After are bounded; permanent errors are discarded explicitly. This does
-  **not** survive Agent exit or guarantee unlimited offline backfill.
-- Kernel boot identity and actual sorted interface-scope identity improve traffic
-  continuity while retaining counter high-watermark protection. Initial migration
-  preserves existing totals and rebases conservatively. A scope change does not
-  charge existing counters. Missing identity after strong-state establishment
-  freezes further traffic rather than guessing continuity. Kernel resets can
-  still lose pre-reboot traffic; aggregate samples cannot precisely split gaps
-  across monthly boundaries. No automatic historical correction is performed.
-- Five-second realtime remains memory-only; default 30-second history, seven-day
-  raw/day detail, 90-day hourly retention and Agent non-root isolation remain.
-  History charts show gaps; committed snapshot reuse reduces repeated SQL reads.
+- Node Detail now shows the CPU model, operating system/version, and architecture.
+  The Agent reads these once at startup and includes them in full reports. Upgrade
+  both Server and Agent to populate the fields; no YAML changes or Token
+  registration are required. Older Agents remain compatible and do not erase
+  saved metadata. Cards retain their existing core/load line and height.
+- The first header control toggles sorting by the next renewal date, soonest
+  first. Click again to restore manual order. Permanent or undated nodes appear
+  last; region filters, card/list views, and live updates keep working. The browser
+  remembers the choice. Sorting does not change stored dates, node positions, or
+  monthly traffic boundaries and requires only a Server update.
+- The sort, view, and theme icons have transparent backgrounds with the same
+  muted style as the GitHub icon. Active sorting uses a stronger icon color.
+- README includes copyable Linux systemd and OpenWrt / ImmortalWrt shortcuts that
+  download the installer, run `upgrade --keep-config`, and restart the Agent.
+  Each step requires the previous step to succeed. YAML and Token are retained;
+  optional new settings are not inserted into existing configuration.
+- Runtime logs rate-limit repeated failures and emit recovery messages through
+  the existing system logger. The supplied Docker Compose file rotates container
+  logs at 10 MB per file, retaining three files. Existing deployments must add the
+  logging block to their local Compose file and recreate the container to enable
+  rotation; an image upgrade alone does not apply it.
+- Fresh Linux Agent installs no longer print a misleading missing-unit diagnostic
+  while probing the previous service state. Actual deployment failures remain
+  visible. README operations, paths, settings, and full Token lookup are clarified.
 
-## Upgrade and recovery
+## Upgrade
 
-Keep old Agent YAML/token with `upgrade --keep-config`; optionally change only
-reporting intervals later with `upgrade --configure-intervals`. Old configs omit
-`realtime_interval` and keep extra realtime disabled. Defaults for fresh installs
-remain 5 / 30. New optional settings are:
+Use the **Deployment & Operations** section in README. Upgrade the Server before
+running the Agent shortcuts. `--keep-config` preserves billing, renewal dates,
+interfaces, TCP Ping targets, allowances, intervals, and Token without prompts.
+The shortcut explicitly restarts the Agent, including a previously stopped
+service, while keeping its boot autostart setting. No traffic accounting or
+retention algorithms change in this release.
 
-```yaml
-history_queue_capacity: 64
-history_retry_max_age_seconds: 1800
-```
+## Validation
 
-Native Server upgrades stop the service and use SQLite's consistent backup API,
-including WAL, before migrating ownership/schema. Root-only backup and original
-files are retained under `/opt/needle/recovery/migration.*`. Unsupported shared
-paths, symlinks, custom unit/drop-ins, mounts or inaccessible TLS keys require an
-explicit reviewed migration. The installer never falls back to root.
-
-If deployment fails before database migration, original executable/unit and
-recorded permissions are restored. Once migration may have begun, keep the
-service stopped and repair forward. Binary rollback and database restore are
-separate decisions: do not restore an old DB over reports already received, and
-do not run an older Server against the new schema without reviewing compatibility.
-Disable new Agent retries before any approved downgrade to a Server lacking the
-persistent protocol. Prefer restoring a backup to an isolated path for review.
-
-Use the installers bundled with the selected release. A newer main installer
-checks its downloaded binary's protocol before touching the installation and
-refuses an older incompatible release binary instead of generating unsupported
-configuration.
-
-## Validation and limits
-
-See `docs/p0-p1-validation.md` for executed checks, migration details and remaining
-validation gates; `docs/load-testing.md` describes isolated load runs. Workstation
-load measurements are evidence about those exact runs, not a supported node-count
-guarantee. Real Linux systemd, Docker and Linux release archive execution are CI
-gates; local macOS builds do not substitute for those checks.
+Local checks cover Go tests with the race detector, static analysis, installer
+regressions, dashboard regressions, and Linux Agent cross-builds. Real Linux
+systemd lifecycle checks, Docker isolation, and execution of both Linux release
+archives remain required CI gates before Release artifacts are published.

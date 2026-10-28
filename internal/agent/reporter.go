@@ -15,6 +15,10 @@ import (
 )
 
 type ReportData struct {
+	CPUModel string `json:"cpu_model,omitempty"`
+	OSName   string `json:"os_name,omitempty"`
+	Arch     string `json:"arch,omitempty"`
+
 	BootID string `json:"boot_id,omitempty"`
 
 	ReportID string `json:"report_id,omitempty"`

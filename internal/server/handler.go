@@ -324,6 +324,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	encodedReport, _ := json.Marshal(req)
 	digest := sha256.Sum256(encodedReport)
 	write := &ReportWrite{
+		CPUModel: req.CPUModel, OSName: req.OSName, Arch: req.Arch,
 		ReportID: req.ReportID, Digest: hex.EncodeToString(digest[:]),
 		Token:    token,
 		Interval: req.Interval, RealtimeInterval: req.RealtimeInterval,

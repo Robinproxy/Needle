@@ -208,6 +208,10 @@ func main() {
 	if err != nil {
 		logging.Fatal("agent", "config_invalid", err)
 	}
+	systemInfo, systemErr := collector.CollectSystemInfo()
+	if systemErr != nil {
+		logging.Print("WARN", "agent", "system_info_incomplete", "error", systemErr)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sigCh := make(chan os.Signal, 1)
@@ -234,6 +238,7 @@ func main() {
 		logging.Print("WARN", "traffic", "boot_identity_unavailable", "error", bootErr)
 	}
 	decorate := func(data *agentpkg.ReportData) {
+		data.CPUModel, data.OSName, data.Arch = systemInfo.CPUModel, systemInfo.OSName, systemInfo.Arch
 		data.BootID = bootID
 		data.Hostname, data.Region = hostname, cfg.Region
 		data.ExpiresAt, data.BillingPeriod = expiresAtUnix, cfg.BillingPeriod

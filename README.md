@@ -22,6 +22,7 @@ Needle consists of one Server and multiple Agents. Agents make outbound-only con
 ## Features
 
 - CPU, memory, disk, load, uptime, network rates, and monthly upload + download usage
+- CPU model, operating system/version, and architecture in Node Detail
 - Configurable TCP Ping targets for IPv4 / IPv6, with latency, jitter, and loss history
 - Billing costs, renewal reminders, monthly traffic allowances, and ♾️ options
 - Cards and list views, region filters, themes, persistent node ordering, and live SSE updates
@@ -282,7 +283,15 @@ Root installs and manages the service; the Agent runs as the non-login `needle-a
 
 ### Status, logs, and upgrades
 
-Upgrade the Server first. Download the current installer before upgrading:
+Upgrade the Server first. **Quick upgrade — download the latest installer, keep configuration, and restart the Agent:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh upgrade --keep-config && sudo systemctl restart needle-agent
+```
+
+Run on the Agent machine. This upgrades to the latest stable release without configuration prompts, preserves the complete YAML and Token, and restarts the service even if it was stopped. Boot autostart settings are unchanged. Each step runs only if the previous one succeeds; no new Token registration is needed.
+
+Other status, log, and upgrade commands (download the installer first if `/tmp` was cleared):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
@@ -357,7 +366,15 @@ The router installer uses procd and runs the Agent as root; the Linux systemd se
 
 ### Status, logs, and upgrades
 
-Upgrade the Server first. Re-download the installer after `/tmp` is cleared:
+Upgrade the Server first. **Quick upgrade — download the latest installer, keep configuration, and restart the Agent:**
+
+```sh
+wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh upgrade --keep-config && /etc/init.d/needle-agent restart
+```
+
+Run as root on the router. This upgrades to the latest stable release without configuration prompts, preserves the complete YAML and Token, and restarts the service even if it was stopped. Boot autostart settings are unchanged. Each step runs only if the previous one succeeds; no new Token registration is needed.
+
+Other status, log, and upgrade commands (re-download the installer after `/tmp` is cleared):
 
 ```sh
 wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh
@@ -796,6 +813,12 @@ Settings apply after restart; there is no hot reload or remote configuration. Ch
 <summary><strong>Node cards and live probe results</strong></summary>
 
 Cards show system usage, live upload / download rates, monthly totals, allowance, configured billing cost, and next scheduled renewal. Permanent dates and unmetered allowances display ♾️. Probe columns keep v4 left and v6 right; disabled probes retain a muted `TCP Ping · Off` area.
+
+Click the **calendar / up-arrow** button first in the header controls (renewal sort, view, theme) to sort cards or list rows by the next renewal date, soonest first; click again to restore the saved manual order. A stronger icon color indicates renewal sorting is active. Permanent nodes and nodes without a valid date appear last. Ties keep manual order, offline nodes are included, and region filters still apply. The current browser remembers the mode across reloads and live updates. Sorting uses the Server's projected next renewal date; it does not change stored node positions, payment dates, or monthly traffic boundaries. This sorting feature requires only a Server update.
+
+Node Detail shows the CPU model, OS/version, and architecture in a muted line below its title, for example `Intel N150 · ImmortalWrt 24.10.4 · x86_64`. Long text wraps so the full information is readable directly. These details appear only in Node Detail, without hover popups; cards retain their existing height and core/load line. Missing items are omitted without placeholders.
+
+Upgrade the Server first, then Agents to populate these fields; use `upgrade --keep-config`. No YAML settings or Token registration changes are needed. The Agent reads system information once at startup and attaches it to full reports, not realtime requests or history rows. Restart the Agent after an OS upgrade to refresh it. Model names reflect what the host or hypervisor exposes. Metadata read failures are logged without disabling live CPU collection, and omitted/empty fields from older Agents preserve saved values.
 
 `4C` means four logical CPUs; `Load 0.14` is the one-minute system load average, not CPU percentage. Live TCP loss reflects the latest attempt (`0%` or `100%`); detail statistics summarize the selected history window. Click detail targets to toggle chart lines; this does not change Agent configuration.
 

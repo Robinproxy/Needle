@@ -92,15 +92,16 @@ header {
 .header-actions { display: flex; align-items: center; gap: 8px; }
 
 .header-icon-btn {
+  appearance: none;
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px;
   border: none; border-radius: calc(var(--radius) - 2px);
-  background: hsl(var(--muted) / 0.3);
+  background: transparent;
   color: hsl(var(--muted-foreground) / 0.5);
-  cursor: pointer; transition: all 0.15s;
+  cursor: pointer; transition: color 0.15s;
   padding: 0;
 }
-.header-icon-btn:hover { color: hsl(var(--foreground)); background: hsl(var(--muted) / 0.5); }
+.header-icon-btn:hover, .header-icon-btn.active { color: hsl(var(--foreground)); }
 .header-icon-btn svg { width: 14px; height: 14px; }
 
 .brand:focus-visible,
@@ -363,11 +364,19 @@ header {
 }
 
 .detail-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 16px; gap: 12px; flex-wrap: wrap;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 16px; gap: 12px;
 }
+.detail-header > button { flex-shrink: 0; }
+.detail-heading { flex: 1; min-width: 0; }
 .detail-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-.detail-title .sub { font-size: 12px; color: hsl(var(--muted-foreground)); font-weight: 400; }
+.detail-hostname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-title .sub { font-size: 12px; color: hsl(var(--muted-foreground)); font-weight: 400; flex-shrink: 0; }
+.detail-system {
+  margin-top: 4px; font-size: 12px; line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
+}
 
 /* SPARKLINE GRID */
 .spark-grid {

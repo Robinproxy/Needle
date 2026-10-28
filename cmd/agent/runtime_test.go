@@ -108,6 +108,9 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 		if len(report.TCPing) != 1 || !report.TCPing[0].Success {
 			t.Fatalf("unprivileged TCP Ping failed: %+v", report.TCPing)
 		}
+		if report.Arch == "" {
+			t.Fatalf("Agent did not attach startup system information: %+v", report)
+		}
 		if strings.Contains(logs.String(), "WARN module=collect.") || strings.Contains(logs.String(), "ERROR module=history") || strings.Contains(logs.String(), "WARN module=realtime") {
 			t.Fatalf("Agent reported collection/transport errors: %s", logs.String())
 		}

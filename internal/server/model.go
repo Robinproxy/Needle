@@ -3,6 +3,9 @@ package server
 import "needle/internal/billing"
 
 type AgentRow struct {
+	CPUModel            string        `json:"cpu_model,omitempty"`
+	OSName              string        `json:"os_name,omitempty"`
+	Arch                string        `json:"arch,omitempty"`
 	ReportInterval      int           `json:"interval"`
 	RealtimeInterval    int           `json:"realtime_interval"`
 	ReportSampleAt      int64         `json:"report_sample_at"`

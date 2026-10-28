@@ -211,6 +211,11 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN report_interval INTEGER NOT NULL DEFAULT 30")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN realtime_interval INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
+	for _, column := range []string{"cpu_model", "os_name", "arch"} {
+		if _, err := s.db.Exec("ALTER TABLE agents ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
 	if err := s.migrateAgentOrder(); err != nil {
 		return err
 	}
@@ -565,6 +570,10 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
+	CPUModel string
+	OSName   string
+	Arch     string
+
 	ReportID  string
 	Digest    string
 	Duplicate bool
@@ -688,12 +697,12 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	return commitReport(tx, r, agentID, now)
 }
 
-const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0)"
+const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch"
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRow, error) {
 	var a AgentRow
 	var cost sql.NullString
-	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt); err != nil {
+	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch); err != nil {
 		return a, err
 	}
 	if cost.Valid {

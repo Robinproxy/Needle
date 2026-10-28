@@ -11,6 +11,10 @@ import (
 )
 
 type reportRequest struct {
+	CPUModel string `json:"cpu_model,omitempty"`
+	OSName   string `json:"os_name,omitempty"`
+	Arch     string `json:"arch,omitempty"`
+
 	BootID string `json:"boot_id,omitempty"`
 
 	ReportID string `json:"report_id,omitempty"`
@@ -59,6 +63,15 @@ type reportRequest struct {
 }
 
 func validateReport(req *reportRequest, now time.Time) error {
+	for _, field := range []struct {
+		value *string
+		limit int
+	}{{&req.CPUModel, 256}, {&req.OSName, 256}, {&req.Arch, 32}} {
+		if !utf8.ValidString(*field.value) || hasControl(*field.value) || utf8.RuneCountInString(*field.value) > field.limit {
+			return fmt.Errorf("invalid system information")
+		}
+		*field.value = strings.TrimSpace(*field.value)
+	}
 	if req.ReportID != "" && (!reportIDPattern.MatchString(req.ReportID) || req.CreatedAt == nil || *req.CreatedAt <= 0) {
 		return fmt.Errorf("invalid report identity/sample time")
 	}

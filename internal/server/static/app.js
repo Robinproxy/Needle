@@ -4,6 +4,7 @@ let sparkCharts = {};
 let tcppingChart = null;
 let filterRegion = '';
 let cardFormat = localStorage.getItem('cardFormat') || 'card';
+let dueSortEnabled = localStorage.getItem('renewalSort') === 'due';
 let infoRefreshInFlight = false;
 let detailRequest = null;
 let currentTcppingRange = '24h';
@@ -122,6 +123,14 @@ function setRegionFilter(code) {
   selectedFilter?.focus();
 }
 
+function toggleDueSort() {
+  dueSortEnabled = !dueSortEnabled;
+  try { localStorage.setItem('renewalSort', dueSortEnabled ? 'due' : 'manual'); }
+  catch (error) { console.warn('Renewal sort preference:', error); }
+  renderAll();
+  renderInfoBar();
+}
+
 function renderInfoBar() {
   const now = Date.now();
   const online = agents.filter(a => {
@@ -148,6 +157,15 @@ function renderInfoBar() {
   document.getElementById('server-info').innerHTML =
     '<button type="button" class="item region-filter' + (!filterRegion ? ' active' : '') + '" data-region="" aria-pressed="' + (!filterRegion) + '" aria-label="Show all nodes, ' + online + ' online out of ' + total + '"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></button>'
     + regionHtml;
+
+  const dueButton = document.getElementById('due-sort');
+  if (dueButton) {
+    dueButton.classList.toggle('active', dueSortEnabled);
+    dueButton.setAttribute('aria-pressed', String(dueSortEnabled));
+    dueButton.setAttribute('aria-label', dueSortEnabled
+      ? 'Renewal date order; activate to restore manual order'
+      : 'Sort by next renewal date, soonest first');
+  }
 }
 
 async function fetchJSON(url, { signal, timeoutMs = 15000 } = {}) {
@@ -270,12 +288,26 @@ function setDashboardState(state, message) {
   }
 }
 
+function renewalSortDate(a) {
+  const date = a.agent.billing_period === 'forever' ? '' : a.expiry_date;
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  // Validate the calendar date in UTC, then compare the original ISO strings.
+  // Never derive a new renewal date from the browser clock or stored anchor.
+  const parsed = new Date(date + 'T00:00:00Z');
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : '';
+}
+
 function filterAndSort(list) {
   let arr = [...list];
   if (filterRegion) {
     arr = arr.filter(a => a.agent.region === filterRegion);
   }
   arr.sort((a, b) => {
+    if (dueSortEnabled) {
+      const aDate = renewalSortDate(a), bDate = renewalSortDate(b);
+      if (!!aDate !== !!bDate) return aDate ? -1 : 1;
+      if (aDate !== bDate) return aDate < bDate ? -1 : 1;
+    }
     return (a.agent.display_order ?? a.agent.id) - (b.agent.display_order ?? b.agent.id)
       || a.agent.id - b.agent.id;
   });
@@ -529,7 +561,7 @@ function updateExpiryBadge(node, a) {
 }
 
 function dashboardLayoutSignature(list) {
-  return JSON.stringify(list.map(a => [a.agent.id, a.agent.display_order, a.agent.hostname, a.agent.region, a.tcpping_enabled,
+  return JSON.stringify(filterAndSort(list).map(a => [a.agent.id, a.agent.display_order, a.agent.hostname, a.agent.region, a.tcpping_enabled,
     (a.latest_tcpping || []).map(p => [p.name, p.target]).sort()]));
 }
 
@@ -637,6 +669,13 @@ function destroyDetailCharts() {
   if (tcppingChart) { try { tcppingChart.dispose(); } catch(e) {}; tcppingChart = null; }
 }
 
+function systemInfoText(a) {
+  const info = a.agent;
+  const arch = info.arch === 'aarch64' || info.arch === 'arm64' ? 'ARM64' : info.arch;
+  return [info.cpu_model, info.os_name, arch].filter(value => typeof value === 'string' && value.trim())
+    .map(value => value.trim()).join(' · ');
+}
+
 function renderDetailContent(id) {
   const detailEl = document.getElementById('detail-' + id);
   if (!detailEl) return;
@@ -647,8 +686,12 @@ function renderDetailContent(id) {
   const range = currentMetricsRange || '24h';
   const probesEnabled = agent.tcpping_enabled !== false;
   const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
+  const systemInfo = systemInfoText(agent);
   detailEl.innerHTML = '<div class="detail-header">'
-    + '<div class="detail-title">' + escapeHtml(agent.agent.hostname) + ' <span class="sub">Node Detail</span></div>'
+    + '<div class="detail-heading">'
+      + '<div class="detail-title"><span class="detail-hostname">' + escapeHtml(agent.agent.hostname) + '</span><span class="sub">Node Detail</span></div>'
+      + '<div class="detail-system" id="detail-system-' + id + '"' + (systemInfo ? '' : ' hidden') + '>' + escapeHtml(systemInfo) + '</div>'
+    + '</div>'
     + '<button class="btn btn-ghost btn-sm" type="button" aria-label="Close ' + escapeAttr(agent.agent.hostname) + ' node details" onclick="toggleExpand(' + id + ')">\u2715</button>'
     + '</div>'
     + '<div class="spark-grid">'
@@ -1309,6 +1352,12 @@ async function refreshDashboard(forceRender) {
 
 function updateLiveSummaries(data) {
   data.forEach(a => {
+      const systemInfo = document.getElementById('detail-system-' + a.agent.id);
+      if (systemInfo) {
+        const text = systemInfoText(a);
+        systemInfo.textContent = text;
+        systemInfo.hidden = !text;
+      }
       const card = document.querySelector('[data-id="' + a.agent.id + '"]');
       if (!card) return;
       const m = a.latest_metric;

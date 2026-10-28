@@ -56,7 +56,11 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 		}
 	}
 	_, err = tx.Exec(`UPDATE agents SET report_sample_at=?,monthly_traffic_limit=?,
-	 cpu_cores=CASE WHEN ?>0 THEN ? ELSE cpu_cores END,report_interval=?,realtime_interval=? WHERE id=?`,
-		sampledAt, r.MonthlyTrafficLimit, r.CPUCores, r.CPUCores, defaultReportInterval(r.Interval), r.RealtimeInterval, id)
+	 cpu_cores=CASE WHEN ?>0 THEN ? ELSE cpu_cores END,report_interval=?,realtime_interval=?,
+	 cpu_model=CASE WHEN ?<>'' THEN ? ELSE cpu_model END,
+	 os_name=CASE WHEN ?<>'' THEN ? ELSE os_name END,
+	 arch=CASE WHEN ?<>'' THEN ? ELSE arch END WHERE id=?`,
+		sampledAt, r.MonthlyTrafficLimit, r.CPUCores, r.CPUCores, defaultReportInterval(r.Interval), r.RealtimeInterval,
+		r.CPUModel, r.CPUModel, r.OSName, r.OSName, r.Arch, r.Arch, id)
 	return id, true, err
 }
