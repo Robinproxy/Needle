@@ -24,7 +24,7 @@ class InstallerTests(unittest.TestCase):
         self.config_dir = self.root / 'config'
         self.config_dir.mkdir()
         self.config = self.config_dir / 'agent.yaml'
-        self.config.write_text("token: 'keep-me'\nbilling_period: 'forever'\n")
+        self.config.write_text("token: 'keep-me'\nserver_managed: true\n")
         self.binary = self.root / 'needle-agent'
         self.binary.write_text('#!/bin/sh\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1 server-profiles-v1\"; fi\nexit 0\n')
         self.binary.chmod(0o755)
@@ -251,7 +251,7 @@ case "$1" in running|enabled) exit 1 ;; esac
         self.service.unlink()
         result = self.run_shell("""
 require_interactive() { :; }
-configure() { printf 'billing_period: forever\\n' > "$TMP_DIR/agent.yaml"; }
+configure() { printf 'server_managed: true\\n' > "$TMP_DIR/agent.yaml"; }
 write_service() {
     cat > "$SERVICE" <<'SERVICE'
 #!/bin/sh

@@ -20,9 +20,10 @@ function harness() {
   };
   vm.createContext(context);
   vm.runInContext(source.slice(0,source.indexOf('let themeMode =')),context);
+  const renderInfoBar = context.renderInfoBar;
   vm.runInContext(`renderAll=()=>renders.push('all'); renderInfoBar=()=>{};
     setDashboardState=(state,message)=>states.push({state,message});`,context);
-  return {context,elements,states,logs,renders};
+  return {context,elements,states,logs,renders,renderInfoBar};
 }
 
 (async()=>{
@@ -53,6 +54,18 @@ function harness() {
   assert.equal(ctx.filterAndSort(orderedNodes).map(a=>a.agent.id).join(','),'1');
   vm.runInContext('filterRegion=null;',ctx);
   assert.equal(ctx.filterAndSort([{...node,agent:{id:4}},{...node,agent:{id:3}}]).map(a=>a.agent.id).join(','),'3,4');
+  // New Server-managed nodes may not have a region yet. The globe filter must
+  // select both empty and omitted regions using the same key as the info bar.
+  const regions=harness(),r=regions.context;
+  regions.elements.set('server-info',{innerHTML:''});
+  r.fixture=[...orderedNodes,{...node,agent:{...node.agent,id:3,region:''}},{...node,agent:{...node.agent,id:4}}];
+  vm.runInContext('agents=fixture;',r);
+  regions.renderInfoBar();
+  assert(regions.elements.get('server-info').innerHTML.includes('data-region="🌐"'));
+  r.setRegionFilter('🌐');
+  assert.equal(r.filterAndSort(r.fixture).map(a=>a.agent.id).join(','),'3,4');
+  r.setRegionFilter('🌐');
+  assert.equal(r.filterAndSort(r.fixture).length,4,'clicking the selected globe must restore all nodes');
   ctx.fetch=async url=>response(url==='/api/info'?{}:[{...node,agent:{...node.agent,display_order:2}}]);
   await ctx.softRefresh();
   const beforeMove=renders.length;
@@ -119,7 +132,7 @@ function harness() {
   const requested=[];
   const now=Math.floor(Date.now()/1000);
   d.fixture=[{...node,tcpping_enabled:false,latest_tcpping:[{name:'old',created_at:now}]}];
-  vm.runInContext('agents=fixture;currentMetricsRange="168h";currentTcppingRange="168h";',d);
+  vm.runInContext('agents=fixture;currentHistoryRange="168h";',d);
   detail.elements.set('metrics-days-1',{innerHTML:'',hidden:true});
   detail.elements.set('detail-day-btn',{textContent:'1d',classList:{add:()=>{}}});
   d.fetch=async url=>{requested.push(url);return response([{created_at:now,cpu_usage:20}]);};

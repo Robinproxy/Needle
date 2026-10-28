@@ -495,10 +495,6 @@ func (s *Store) ListTokens() ([]TokenRow, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) UpsertAgent(hostname, region string, expiresAt *int64, billingPeriod string) (int64, error) {
-	return upsertAgent(s.db, hostname, region, expiresAt, billingPeriod, s.now().Unix())
-}
-
 func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPeriod string, lastSeen int64) (int64, error) {
 	_, err := x.Exec(
 		`INSERT INTO agents(hostname, region, expires_at, billing_period, last_seen, display_order)
@@ -518,10 +514,6 @@ func upsertAgent(x execer, hostname, region string, expiresAt *int64, billingPer
 		return 0, err
 	}
 	return id, nil
-}
-
-func (s *Store) InsertMetric(m *MetricRow, createdAt int64) error {
-	return insertMetric(s.db, m, createdAt)
 }
 
 func insertMetric(x execer, m *MetricRow, createdAt int64) error {
@@ -544,10 +536,6 @@ func insertMetric(x execer, m *MetricRow, createdAt int64) error {
 	m.ID, err = result.LastInsertId()
 	m.CreatedAt = createdAt
 	return err
-}
-
-func (s *Store) InsertTCPing(t *TCPingRow, createdAt int64) error {
-	return insertTCPing(s.db, t, createdAt)
 }
 
 func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
@@ -946,13 +934,6 @@ func (s *Store) getTCPingResultsAggregated(agentID int64, since, until, bucketSe
 	return results, rows.Err()
 }
 
-type ServerStats struct {
-	AgentCount  int   `json:"agent_count"`
-	MetricCount int   `json:"metric_count"`
-	TCPingCount int   `json:"tcpping_count"`
-	DBSize      int64 `json:"db_size"`
-}
-
 func (s *Store) GetLatestTCPing(agentID int64) ([]TCPingRow, error) {
 	var encoded string
 	err := s.db.QueryRow("SELECT results_json FROM agent_tcpping_current WHERE agent_id = ?", agentID).Scan(&encoded)
@@ -1177,27 +1158,6 @@ func calcRenewalDue(expiresAtUnix int64, period string, now time.Time) (int, str
 	}
 	days := int(due.Sub(today) / (24 * time.Hour))
 	return days, due.Format("2006-01-02")
-}
-
-func (s *Store) GetStats() (*ServerStats, error) {
-	var stats ServerStats
-	counts := []struct {
-		query string
-		dst   *int
-	}{
-		{"SELECT COUNT(*) FROM agents", &stats.AgentCount},
-		{"SELECT COUNT(*) FROM metrics", &stats.MetricCount},
-		{"SELECT COUNT(*) FROM tcpping_results", &stats.TCPingCount},
-	}
-	for _, c := range counts {
-		if err := s.db.QueryRow(c.query).Scan(c.dst); err != nil {
-			return nil, err
-		}
-	}
-	if fi, err := os.Stat(s.path); err == nil {
-		stats.DBSize = fi.Size()
-	}
-	return &stats, nil
 }
 
 func (s *Store) DeleteAgent(id int64) error {

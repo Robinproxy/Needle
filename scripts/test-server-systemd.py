@@ -58,7 +58,7 @@ try:
     unit.write_text(f'[Service]\nExecStart={base}/bin/needle-server -l ${{NEEDLE_LISTEN}} -db {db}\nEnvironmentFile={base}/.env\n[Install]\nWantedBy=multi-user.target\n')
     run('systemctl','daemon-reload');run('systemctl','enable','--now',name)
     wait_healthy()
-    http('/api/report',{'hostname':'CI Demo','billing_period':'forever','created_at':int(time.time()),'uptime':100,'network':{'total_sent':100,'total_recv':200}},'ci-server-only')
+    http('/api/report',{'hostname':'CI Demo','server_managed':True,'created_at':int(time.time()),'uptime':100,'network':{'total_sent':100,'total_recv':200}},'ci-server-only')
     with tempfile.TemporaryDirectory() as temp:
         shutil.copy2(binary,pathlib.Path(temp)/'needle-server')
         code=f'''source "{script}"

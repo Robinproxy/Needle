@@ -12,14 +12,13 @@ END='# End of TCP Ping selection.'
 OLD="""hostname: 'my-router'
 server: 'https://needle.example.com'
 token: 'token:# with ''quotes'' and spaces'
-region: CN
+server_managed: true
 tcpping:
   - name: Old
     target: old.example:80
 interval: 60
+realtime_interval: 5
 interfaces: ['pppoe-wan']
-billing_period: forever
-expires_at: ''
 tls_skip_verify: false
 allow_plain_http: false
 """
@@ -96,36 +95,22 @@ choose_upgrade_config {shlex.quote(str(original))}
             self.assertIn('tcpping: []',staged)
             if 'token:with:colons' in config:self.assertIn('token: |-\n  token:with:colons\n',staged)
 
-    def test_quota_reconfiguration_preserves_identity_and_omitted_quota(self):
-        config=OLD+"monthly_traffic_limit_gb: 500\n"
-        for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
-            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n1000\n\n',config=config)
-            self.assertEqual(result.returncode,0,result.stderr)
-            self.assertEqual(staged.count('monthly_traffic_limit_gb:'),1)
-            self.assertIn('monthly_traffic_limit_gb: 1000.000',staged)
-            self.assertIn("token: 'token:# with ''quotes'' and spaces'",staged)
-            result,staged,_=self.run_choice(script,mode='reconfigure',answers='5\n\n\n',config=config)
-            self.assertEqual(result.returncode,0,result.stderr)
-            self.assertIn('monthly_traffic_limit_gb: 500\n',staged)
-            for value in ['-1','1e3','nan','9000001','0.0001','1; echo unsafe']:
-                result,staged,original=self.run_choice(script,mode='reconfigure',answers='5\n'+value+'\n',config=config)
-                self.assertNotEqual(result.returncode,0,value)
-                self.assertIsNone(staged)
-                self.assertEqual(original,config)
-
-    def test_managed_reselection_skips_legacy_billing_and_preserves_settings(self):
+    def test_reselection_changes_only_probes_and_intervals(self):
         for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
             for key in ['server_managed', '"server_managed"', "'server_managed'"]:
-                config=OLD+f"{key}: true\nbilling_currency: USD\nbilling_amount: '35'\nmonthly_traffic_limit_gb: 500\n"
-                result,staged,original=self.run_choice(script,mode='reconfigure',answers='5\n\n\n',config=config)
+                config=OLD.replace('server_managed: true',f'{key}: true')
+                result,staged,original=self.run_choice(script,mode='reconfigure',answers='5\n10\n90\n',config=config)
                 self.assertEqual(result.returncode,0,result.stderr)
                 self.assertEqual(original,config)
                 self.assertIn('tcpping: []',staged)
-                self.assertIn("billing_amount: '35'",staged)
-                self.assertIn('monthly_traffic_limit_gb: 500',staged)
+                self.assertIn('realtime_interval: 10\ninterval: 90\n',staged)
+                self.assertIn("token: 'token:# with ''quotes'' and spaces'",staged)
+                self.assertIn("interfaces: ['pppoe-wan']",staged)
                 self.assertIn(f'{key}: true',staged)
                 self.assertNotIn('Monthly upload + download allowance',result.stdout)
-                self.assertIn('managed on the Server',result.stdout)
+                self.assertNotIn('billing period',result.stdout)
+                for field in ['region:', 'billing_currency:', 'billing_amount:', 'billing_period:', 'expires_at:', 'monthly_traffic_limit_gb:']:
+                    self.assertNotIn(field,staged)
 
     def test_linux_reinstall_uses_upgrade_instead_of_regenerating_identity(self):
         with tempfile.TemporaryDirectory() as tmp:

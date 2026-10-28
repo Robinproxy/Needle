@@ -88,7 +88,7 @@ token: {TOKEN}
 interval: 2
 realtime_interval: 1
 interfaces: ['lo']
-billing_period: forever
+server_managed: true
 tcpping:
   - name: loopback
     target: 127.0.0.1:{port}

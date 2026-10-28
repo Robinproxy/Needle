@@ -13,11 +13,7 @@ server: https://needle.example.com
 interval: 60
 interfaces: [eth1]
 tcpping: []
-billing_currency: CNY
-billing_amount: '38'
-billing_period: 1m
-expires_at: '2026-11-01'
-monthly_traffic_limit_gb: 0
+server_managed: true
 """
 
 
@@ -54,7 +50,7 @@ UPGRADE_CONFIG_MODE={shlex.quote(mode)}
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(config, f'realtime_interval: {realtime}\ninterval: {history}\n')
 
-    def test_legacy_upgrade_keep_does_not_enable_realtime(self):
+    def test_upgrade_keep_does_not_enable_realtime(self):
         for script in ['needle-agent.sh', 'needle-agent-openwrt.sh']:
             result, staged = self.run_flow(script, mode='keep')
             self.assertEqual(result.returncode, 0, result.stderr)

@@ -33,7 +33,7 @@ No command:
 Options:
   -y, --yes            Skip uninstall confirmation
   --keep-config        With upgrade: keep configuration without prompting
-  --reconfigure        With upgrade: reselect probes, allowance, and optional billing; preserve token
+  --reconfigure        With upgrade: reselect probes and intervals; preserve token
   --configure-intervals
                        With upgrade: change only realtime/history intervals
   --unregister         With uninstall: revoke this Agent credential; keep Server data
@@ -534,22 +534,6 @@ configure_tcping() {
     fi
 }
 
-configure_monthly_traffic() {
-    rm -f "$TMP_DIR/traffic.yaml"
-    if [ "${1:-install}" = upgrade ]; then
-        tcping_prompt 'Monthly upload + download allowance in GB (1000 = 1 TB; 0 = no limit; Enter = keep existing): '
-        [ -n "$TCPING_ANSWER" ] || return 0
-    else
-        tcping_prompt 'Monthly upload + download allowance in GB (1000 = 1 TB; 0 = no limit) [0]: '
-    fi
-    TRAFFIC_LIMIT_GB=${TCPING_ANSWER:-0}
-    TRAFFIC_LIMIT_GB=$(printf '%s\n' "$TRAFFIC_LIMIT_GB" | LC_ALL=C awk '
-        /^[0-9]+([.][0-9][0-9]?[0-9]?)?$/ { if ($0 + 0 <= 9000000) { printf "%.3f", $0 + 0; ok = 1 } }
-        END { if (!ok) exit 1 }
-    ') || { echo 'Traffic allowance must be 0–9000000 GB, with up to 3 decimal places.' >&2; return 1; }
-    printf 'monthly_traffic_limit_gb: %s\n' "$TRAFFIC_LIMIT_GB" > "$TMP_DIR/traffic.yaml"
-}
-
 upgrade_interactive() { [ -t 0 ]; }
 
 
@@ -588,99 +572,30 @@ configure_intervals() {
     printf 'realtime_interval: %s\ninterval: %s\n' "$REALTIME_INTERVAL" "$INTERVAL" > "$TMP_DIR/intervals.yaml"
 }
 
-configure_billing() {
-    rm -f "$TMP_DIR/billing.yaml"
-    if [ "${1:-install}" = upgrade ]; then
-        tcping_prompt 'Replace currency, amount, billing period, and renewal date? [y/N]: '
-        case "$TCPING_ANSWER" in
-            y|Y|yes|YES) ;;
-            ''|n|N|no|NO) return 0 ;;
-            *) echo 'Choose y or n.' >&2; return 1 ;;
-        esac
-        echo 'All four billing fields will be replaced. Other settings and the token are preserved.'
-    fi
-    echo 'Currency: USD, CNY, EUR, GBP, CAD, HKD, JPY, AUD, or another three-letter code.'
-    tcping_prompt 'Currency [USD]: '
-    BILLING_CURRENCY=$(printf '%s' "${TCPING_ANSWER:-USD}" | tr '[:lower:]' '[:upper:]')
-    case "$BILLING_CURRENCY" in
-        [A-Z][A-Z][A-Z]) ;;
-        *) echo 'Currency must be a three-letter code.' >&2; return 1 ;;
-    esac
-    tcping_prompt 'Amount for the entire billing period (0 = free; Enter = not configured): '
-    BILLING_AMOUNT=$TCPING_ANSWER
-    if [ -n "$BILLING_AMOUNT" ]; then
-        printf '%s\n' "$BILLING_AMOUNT" | LC_ALL=C awk -F. '
-            /^[0-9]+([.][0-9]+)?$/ && length($1) <= 12 && (NF == 1 || length($2) <= 6) { ok = 1 }
-            END { if (!ok) exit 1 }
-        ' || { echo 'Amount must be non-negative, with up to 12 integer and 6 fractional digits.' >&2; return 1; }
-    fi
-    echo 'Billing period: 1m, 3m, 6m, 12m, 24m, 36m, forever (no expiry), or skip.'
-    tcping_prompt 'Billing period [forever]: '
-    BILLING_PERIOD=${TCPING_ANSWER:-forever}
-    EXPIRES_AT=
-    case "$BILLING_PERIOD" in
-        forever) ;;
-        skip)
-            BILLING_PERIOD=
-            [ -z "$BILLING_AMOUNT" ] || { echo 'Choose a billing period when an amount is configured.' >&2; return 1; } ;;
-        1m|3m|6m|12m|24m|36m)
-            tcping_prompt 'Next renewal / top-up date (YYYY-MM-DD; actual due date, including for a transferred node): '
-            EXPIRES_AT=$TCPING_ANSWER
-            printf '%s\n' "$EXPIRES_AT" | LC_ALL=C awk -F- '
-                /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ {
-                    y=$1+0; m=$2+0; d=$3+0
-                    days[1]=31; days[2]=28+(y%4==0 && (y%100!=0 || y%400==0)); days[3]=31
-                    days[4]=30; days[5]=31; days[6]=30; days[7]=31; days[8]=31
-                    days[9]=30; days[10]=31; days[11]=30; days[12]=31
-                    if (y>=1970 && m>=1 && m<=12 && d>=1 && d<=days[m]) ok=1
-                }
-                END { if (!ok) exit 1 }
-            ' || { echo 'Invalid renewal date; use a real calendar date in YYYY-MM-DD format.' >&2; return 1; } ;;
-        *) echo 'Unsupported billing period.' >&2; return 1 ;;
-    esac
-    {
-        printf 'billing_currency: '; tcping_yaml_quote "$BILLING_CURRENCY"
-        printf '\nbilling_amount: '; tcping_yaml_quote "$BILLING_AMOUNT"
-        printf '\nbilling_period: '; tcping_yaml_quote "$BILLING_PERIOD"
-        printf '\nexpires_at: '; tcping_yaml_quote "$EXPIRES_AT"; printf '\n'
-    } > "$TMP_DIR/billing.yaml"
-}
-
 stage_tcping_config() {
-    # Change the top-level tcpping section and optionally quota/billing settings.
+    # Change only the top-level tcpping section and reporting intervals.
     # Credentials and other settings are copied verbatim, including multiline values.
     # Reject layouts we cannot safely edit instead of regenerating an identity.
     REPLACE_TCPING=0
     [ ! -f "$TMP_DIR/tcpping.yaml" ] || REPLACE_TCPING=1
     REPLACE_INTERVALS=0
     [ ! -f "$TMP_DIR/intervals.yaml" ] || REPLACE_INTERVALS=1
-    REPLACE_QUOTA=0
-    [ ! -f "$TMP_DIR/traffic.yaml" ] || REPLACE_QUOTA=1
-    REPLACE_BILLING=0
-    [ ! -f "$TMP_DIR/billing.yaml" ] || REPLACE_BILLING=1
-    awk -v tcping="$REPLACE_TCPING" -v intervals="$REPLACE_INTERVALS" -v quota="$REPLACE_QUOTA" -v billing="$REPLACE_BILLING" '
-        BEGIN { skip = 0; token = 0; documents = 0; sections = 0; quotas = 0; unsafe = 0 }
+    awk -v tcping="$REPLACE_TCPING" -v intervals="$REPLACE_INTERVALS" '
+        BEGIN { skip = 0; token = 0; documents = 0; sections = 0; unsafe = 0 }
         /^---([ \t]*#.*)?[ \t]*$/ { documents++; if (documents > 1) exit 1; print; next }
         /^\.\.\.([ \t]*#.*)?[ \t]*$/ { next }
         /^(token|"token"|\047token\047)[ \t]*:/ { token = 1 }
         tcping && /^(tcpping|"tcpping"|\047tcpping\047)[ \t]*:/ { skip = 1; sections++; if ($0 ~ /[&*]/) unsafe = 1; next }
-        quota && /^(monthly_traffic_limit_gb|"monthly_traffic_limit_gb"|\047monthly_traffic_limit_gb\047)[ \t]*:/ { skip = 1; quotas++; if ($0 ~ /[&*]/) unsafe = 1; next }
         intervals && /^[^ \t#][^:]*:/ {
             key=$0; sub(/[ \t]*:.*/, "", key); gsub(/^["\047]|["\047]$/, "", key)
             if (key=="interval" || key=="realtime_interval") {
                 skip=1; count[key]++; if(count[key]>1 || $0 ~ /[&*]/) unsafe=1; next
             }
         }
-        billing && /^[^ \t#][^:]*:/ {
-            key = $0; sub(/[ \t]*:.*/, "", key); gsub(/^["\047]|["\047]$/, "", key)
-            if (key == "billing_currency" || key == "billing_amount" || key == "billing_period" || key == "expires_at") {
-                skip = 1; count[key]++; if (count[key] > 1 || $0 ~ /[&*]/) unsafe = 1; next
-            }
-        }
         skip && /^[^ \t#][^:]*:/ { skip = 0 }
         skip && /[&*]/ { unsafe = 1 }
         !skip { print }
-        END { if (!token || documents > 1 || sections > 1 || quotas > 1 || unsafe) exit 1 }
+        END { if (!token || documents > 1 || sections > 1 || unsafe) exit 1 }
     ' "$1" > "$TMP_DIR/agent.yaml" || {
         rm -f "$TMP_DIR/agent.yaml"
         echo 'Cannot safely update this YAML layout; original configuration is unchanged. Edit the Agent settings manually.' >&2
@@ -688,15 +603,9 @@ stage_tcping_config() {
     }
     if [ -f "$TMP_DIR/tcpping.yaml" ]; then cat "$TMP_DIR/tcpping.yaml" >> "$TMP_DIR/agent.yaml"; fi
     if [ -f "$TMP_DIR/intervals.yaml" ]; then cat "$TMP_DIR/intervals.yaml" >> "$TMP_DIR/agent.yaml"; fi
-    if [ -f "$TMP_DIR/traffic.yaml" ]; then cat "$TMP_DIR/traffic.yaml" >> "$TMP_DIR/agent.yaml"; fi
-    if [ -f "$TMP_DIR/billing.yaml" ]; then cat "$TMP_DIR/billing.yaml" >> "$TMP_DIR/agent.yaml"; fi
 }
 
 choose_upgrade_config() {
-    PROFILE_MANAGED=false
-    if awk '/^[[:space:]]*["\047]?server_managed["\047]?:[[:space:]]*true([[:space:]]*(#.*)?)?$/ { found=1 } END { exit !found }' "$1"; then
-        PROFILE_MANAGED=true
-    fi
     UPGRADE_RECONFIGURE=false
     INTERVALS_ONLY=false
     case "${UPGRADE_CONFIG_MODE:-ask}" in
@@ -713,11 +622,7 @@ choose_upgrade_config() {
             if upgrade_interactive; then
                 echo 'Upgrade configuration:'
                 echo '  1) Keep existing configuration (default)'
-                if [ "$PROFILE_MANAGED" = true ]; then
-                    echo '  2) Reconfigure TCP Ping and intervals; preserve token and identity'
-                else
-                    echo '  2) Reconfigure TCP Ping, legacy allowance/billing, and intervals; preserve token and identity'
-                fi
+                echo '  2) Reconfigure TCP Ping and intervals; preserve token and identity'
                 echo '  3) Change realtime/history intervals only; preserve all other settings'
                 tcping_prompt 'Configuration choice [1]: '
                 case "${TCPING_ANSWER:-1}" in
@@ -733,12 +638,6 @@ choose_upgrade_config() {
     if [ "$UPGRADE_RECONFIGURE" = true ]; then
         if [ "$INTERVALS_ONLY" = false ]; then
             configure_tcping
-            if [ "$PROFILE_MANAGED" = false ]; then
-                configure_monthly_traffic upgrade
-                configure_billing upgrade
-            else
-                echo 'Node profile is managed on the Server; update billing and allowance in /admin.'
-            fi
         fi
         configure_intervals upgrade "$1"
         stage_tcping_config "$1"
@@ -966,7 +865,6 @@ cmd_status() {
     echo "Config:      $AGENT_YAML (present)"
     echo "  hostname:  $(yaml_value hostname "$AGENT_YAML")"
     echo "  server:    $(yaml_value server "$AGENT_YAML")"
-    echo "  region:    $(yaml_value region "$AGENT_YAML")"
   else
     echo "Config:      missing"
   fi

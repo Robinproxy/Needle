@@ -1,6 +1,6 @@
-# P0/P1 implementation and validation
+# Historical P0/P1 implementation and validation (2026-10-20)
 
-This record covers local implementation and validation. The user subsequently authorized committing and pushing the sources; an official tag, GitHub Release and production deployment still require separate authorization. Runtime gates below remain pending until their CI runs succeed.
+This is the local validation record for the 2026-10-20 source snapshot, not the current configuration guide or release status. Runtime results below describe checks at that time; use the README for current operations and the relevant Actions run for CI results.
 
 1. Server identity, permissions, consistent backups, CLI and rollback.
 2. Loopback defaults with preserved upgrades; container exposure separately.
@@ -12,9 +12,8 @@ This record covers local implementation and validation. The user subsequently au
 
 All seven implementation stages are complete locally. Real Linux/container
 runtime gates remain pending CI; this document distinguishes them from executed
-workstation checks. See the [changed file list](changed-files.md),
-[load results](load-testing.md), [release notes](next-release.md) and
-[publication gates](release-preparation.md).
+workstation checks. See the [load results](load-testing.md) and
+[current publication gates](release-preparation.md).
 
 ## Stages 1–2
 

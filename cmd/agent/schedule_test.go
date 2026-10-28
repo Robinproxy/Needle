@@ -39,7 +39,7 @@ func TestHistoryQueueDoesNotUseLatestOnlyAndLogsOverflow(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSampling(ctx, ticks, nil, sample, sample, send, send, func(format string, args ...any) {
+		runSamplingWithPolicy(historyPolicy{}, ctx, ticks, nil, sample, sample, send, send, func(format string, args ...any) {
 			select {
 			case logs <- fmt.Sprintf(format, args...):
 			default:
@@ -99,7 +99,7 @@ func TestReportFailuresRecoverWithoutLoggingHealthySamples(t *testing.T) {
 			go func() {
 				defer close(done)
 				sample := func() *agentpkg.ReportData { return &agentpkg.ReportData{CreatedAt: time.Now().Unix()} }
-				runSampling(ctx, historyTicks, realtimeTicks, sample, sample, historySend, realtimeSend,
+				runSamplingWithPolicy(historyPolicy{}, ctx, historyTicks, realtimeTicks, sample, sample, historySend, realtimeSend,
 					func(format string, args ...any) { lines <- fmt.Sprintf(format, args...) })
 			}()
 			ticks := historyTicks
@@ -151,7 +151,7 @@ func TestOldServerFallbackDoesNotTreatAuthenticationAsUnsupported(t *testing.T) 
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				runSampling(ctx, historyTicks, realtimeTicks, sample, sample,
+				runSamplingWithPolicy(historyPolicy{}, ctx, historyTicks, realtimeTicks, sample, sample,
 					func(context.Context, *agentpkg.ReportData) error { full <- struct{}{}; return nil },
 					func(context.Context, *agentpkg.ReportData) error {
 						attempts <- struct{}{}
@@ -235,7 +235,7 @@ func TestSeparateSchedulesDoNotWaitForHTTPOrPing(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				runSampling(ctx, historyTicks, realtimeChannel, hSample, rSample, blocked, blocked, func(string, ...any) {})
+				runSamplingWithPolicy(historyPolicy{}, ctx, historyTicks, realtimeChannel, hSample, rSample, blocked, blocked, func(string, ...any) {})
 			}()
 			select {
 			case <-started:
@@ -279,7 +279,7 @@ func TestProbeSchedulingDoesNotWaitForHistoricalTransport(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runSampling(ctx, historyTicks, realtimeTicks, sample, sample,
+		runSamplingWithPolicy(historyPolicy{}, ctx, historyTicks, realtimeTicks, sample, sample,
 			func(context.Context, *agentpkg.ReportData) error {
 				t.Error("history sent before probe finished")
 				return nil

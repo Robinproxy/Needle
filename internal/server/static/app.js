@@ -7,8 +7,7 @@ let cardFormat = localStorage.getItem('cardFormat') || 'card';
 let dueSortEnabled = localStorage.getItem('renewalSort') === 'due';
 let infoRefreshInFlight = false;
 let detailRequest = null;
-let currentTcppingRange = '24h';
-let currentMetricsRange = '24h';
+let currentHistoryRange = '24h';
 let currentHistoryDay = null;
 let detailDayAlerts = new Map();
 let gridCols = 4;
@@ -292,7 +291,7 @@ function renewalSortDate(a) {
 function filterAndSort(list) {
   let arr = [...list];
   if (filterRegion) {
-    arr = arr.filter(a => a.agent.region === filterRegion);
+    arr = arr.filter(a => (a.agent.region || '\u{1F310}') === filterRegion);
   }
   arr.sort((a, b) => {
     if (dueSortEnabled) {
@@ -673,7 +672,7 @@ function renderDetailContent(id) {
   const agent = agents.find(a => a.agent.id === id);
   if (!agent) return;
 
-  const range = currentMetricsRange || '24h';
+  const range = currentHistoryRange || '24h';
   const probesEnabled = agent.tcpping_enabled !== false;
   const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
   const systemInfo = systemInfoText(agent);
@@ -715,8 +714,7 @@ function renderDetailContent(id) {
       + '</div>' : '<div class="tcpping-day-nav metrics-day-nav" id="metrics-days-' + id + '" hidden></div>')
     + '</div>';
 
-  currentTcppingRange = range;
-  currentMetricsRange = range;
+  currentHistoryRange = range;
   loadDetailData(id, range);
 }
 
@@ -733,7 +731,7 @@ function detailDataURL(id, kind, range) {
 }
 
 function openHistoricalDay(id, ts) {
-  if (!overviewDays(currentMetricsRange) && !overviewDays(currentTcppingRange)) return;
+  if (!overviewDays(currentHistoryRange)) return;
   const d = new Date(ts);
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
@@ -743,8 +741,7 @@ function openHistoricalDay(id, ts) {
     end: Math.floor(Math.min(end.getTime(), todayEnd) / 1000),
     fullLabel: start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0'),
   };
-  currentMetricsRange = 'day';
-  currentTcppingRange = 'day';
+  currentHistoryRange = 'day';
   const dayBtn = document.getElementById('detail-day-btn');
   if (dayBtn) {
     dayBtn.textContent = formatHistoryDay(start.getTime());
@@ -784,7 +781,7 @@ async function loadDetailData(id, range) {
         const message = (kind === 'metrics' ? 'Metrics' : 'TCP Ping') + ' could not be refreshed ('
           + (rendering ? 'display error' : refreshErrorText(error)) + ').';
         errorEl.innerHTML = escapeHtml(message) + ' <button type="button" class="btn btn-ghost btn-sm" onclick="loadDetailData('
-          + Number(id) + ', currentMetricsRange)">Retry</button>';
+          + Number(id) + ', currentHistoryRange)">Retry</button>';
         errorEl.hidden = false;
       }
     }
@@ -892,7 +889,7 @@ function renderSparklines(id, metrics) {
   document.getElementById('spark-netin-val').innerHTML = netInData.at(-1)[1] != null ? sparkValueHTML(formatSpeed(netInData.at(-1)[1]) + '/s', formatSpeed(netInPeak)) : '—';
   document.getElementById('spark-netout-val').innerHTML = netOutData.at(-1)[1] != null ? sparkValueHTML(formatSpeed(netOutData.at(-1)[1]) + '/s', formatSpeed(netOutPeak)) : '—';
 
-  const overview = overviewDays(currentMetricsRange);
+  const overview = overviewDays(currentHistoryRange);
   const dailyAlerts = (field, averages, qualifies, severity) => {
     if (!overview) return [];
     const points = metrics.map((m, i) => [m.created_at * 1000, m[field] || 0, averages[i][1]]);
@@ -906,10 +903,10 @@ function renderSparklines(id, metrics) {
   memAlerts.forEach(p => recordDayAlert(p[0], 'Memory peak ' + p[1].toFixed(1) + '%'));
   netInAlerts.forEach(p => recordDayAlert(p[0], 'Net In peak ' + formatSpeed(p[1]) + '/s'));
   netOutAlerts.forEach(p => recordDayAlert(p[0], 'Net Out peak ' + formatSpeed(p[1]) + '/s'));
-  renderSparkline('spark-cpu', historyGaps(cpuData, id, currentMetricsRange), true);
-  renderSparkline('spark-mem', historyGaps(memData, id, currentMetricsRange), true);
-  renderSparkline('spark-netin', historyGaps(netInData, id, currentMetricsRange), false);
-  renderSparkline('spark-netout', historyGaps(netOutData, id, currentMetricsRange), false);
+  renderSparkline('spark-cpu', historyGaps(cpuData, id, currentHistoryRange), true);
+  renderSparkline('spark-mem', historyGaps(memData, id, currentHistoryRange), true);
+  renderSparkline('spark-netin', historyGaps(netInData, id, currentHistoryRange), false);
+  renderSparkline('spark-netout', historyGaps(netOutData, id, currentHistoryRange), false);
 }
 
 function sparklineColor() {
@@ -976,10 +973,9 @@ function renderSparkline(elemId, data, isPercent) {
 
 function switchDetailRange(id, range) {
   id = +id;
-  if (!currentHistoryDay && currentMetricsRange === range && currentTcppingRange === range) return;
+  if (!currentHistoryDay && currentHistoryRange === range) return;
   currentHistoryDay = null;
-  currentMetricsRange = range;
-  currentTcppingRange = range;
+  currentHistoryRange = range;
   const rangeBtns = document.querySelectorAll('#detail-' + id + ' .detail-range-group .theme-btn');
   rangeBtns.forEach(b => {
     b.classList.toggle('active', b.dataset.range === range);
@@ -991,7 +987,7 @@ function switchDetailRange(id, range) {
 
 function formatRangeAxisLabel(ts) {
   const d = new Date(ts);
-  if (currentTcppingRange === '24h' || currentTcppingRange === 'day') {
+  if (currentHistoryRange === '24h' || currentHistoryRange === 'day') {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
   return (d.getMonth() + 1) + '/' + d.getDate();
@@ -1024,17 +1020,17 @@ function renderTCPingChart(id, results) {
 
   const series = names.map((name) => {
     const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
-    return { name, type: 'line', data: historyGaps(data, id, currentTcppingRange), smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
+    return { name, type: 'line', data: historyGaps(data, id, currentHistoryRange), smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
   });
 
   const chartEl = document.getElementById('tcpping-chart-' + id);
   if (!chartEl) return;
   if (!tcppingChart) chartEl.innerHTML = '';
 
-  const is1d = currentTcppingRange === '24h' || currentTcppingRange === 'day';
+  const is1d = currentHistoryRange === '24h' || currentHistoryRange === 'day';
   const chartWin = chartWindowForResults(results);
   const chart = tcppingChart || echarts.init(chartEl);
-  const overview = overviewDays(currentTcppingRange);
+  const overview = overviewDays(currentHistoryRange);
   let tcppingAlerts = [];
   if (overview) {
     const baselines = {};
@@ -1146,7 +1142,7 @@ function tcppingStatsHTML(id, results, names) {
 function chartWindowMs() {
   if (currentHistoryDay) return [currentHistoryDay.start * 1000, currentHistoryDay.end * 1000];
   const now = Date.now();
-  const hours = currentTcppingRange === '720h' ? 720 : currentTcppingRange === '168h' ? 168 : 24;
+  const hours = currentHistoryRange === '720h' ? 720 : currentHistoryRange === '168h' ? 168 : 24;
   return [now - hours * 3600000, now];
 }
 
@@ -1190,7 +1186,7 @@ function renderDayNav(id, results, overviewWin, kind = 'tcpping') {
   const nav = document.getElementById(kind + '-days-' + id);
   if (!nav) return;
 
-  const range = kind === 'metrics' ? currentMetricsRange : currentTcppingRange;
+  const range = currentHistoryRange;
   let html = '';
   if (range === '720h' && overviewWin) {
     const win = overviewWin;
@@ -1355,7 +1351,6 @@ function updateLiveSummaries(data) {
 
       card.classList.toggle('offline', !isOnline);
       card.setAttribute?.('aria-label', (isOnline ? 'Online' : 'Offline') + ' node ' + nodeName(a) + ', open details');
-      card.setAttribute?.('data-history-stale', String(!!a.live?.history_stale));
       card.setAttribute?.('title', freshnessText(a));
       const listExpiry = card.querySelector('.list-expiry');
       if (listExpiry) listExpiry.innerHTML = a.agent.billing_period === 'forever' ? expiryBadge(a) : '';
@@ -1408,7 +1403,7 @@ function updateLiveSummaries(data) {
 
 function updateDetailCharts(id) {
   if (currentHistoryDay || detailRequest) return;
-  return loadDetailData(id, currentMetricsRange || '24h');
+  return loadDetailData(id, currentHistoryRange || '24h');
 }
 
 let eventStream = null;

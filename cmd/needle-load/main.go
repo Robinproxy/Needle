@@ -76,7 +76,7 @@ func serve() {
 		if err = store.BindToken(token, host); err != nil {
 			panic(err)
 		}
-		_, err = store.SaveReport(&server.ReportWrite{Hostname: host, BillingPeriod: "forever", Interval: 30, RealtimeInterval: 5, CreatedAt: time.Now().Unix(), Metric: &server.MetricRow{Uptime: 100000, TotalSent: 1000, TotalRecv: 2000}})
+		_, err = store.SaveReport(&server.ReportWrite{Hostname: host, ServerManaged: true, Interval: 30, RealtimeInterval: 5, CreatedAt: time.Now().Unix(), Metric: &server.MetricRow{Uptime: 100000, TotalSent: 1000, TotalRecv: 2000}})
 		if err != nil {
 			panic(err)
 		}
@@ -383,7 +383,7 @@ func load() error {
 					}
 					previousKey = fmt.Sprintf("%d:%d", id, uptime)
 					sentAt.Store(previousKey, sampleTime)
-					data := &agent.ReportData{Hostname: fmt.Sprintf("load-%04d", i), ReportID: fmt.Sprintf("%032x:%d", i+1, seq), CreatedAt: sampleTime.Unix(), Interval: 30, RealtimeInterval: 5, BillingPeriod: "forever", Uptime: uint64(uptime), CPU: &collector.CPUStats{Percent: float64(seq % 100), Cores: 4}, Network: &collector.NetworkStats{TotalSent: int64(1000 + seq*100), TotalRecv: int64(2000 + seq*200)}}
+					data := &agent.ReportData{Hostname: fmt.Sprintf("load-%04d", i), ReportID: fmt.Sprintf("%032x:%d", i+1, seq), CreatedAt: sampleTime.Unix(), Interval: 30, RealtimeInterval: 5, ServerManaged: true, Uptime: uint64(uptime), CPU: &collector.CPUStats{Percent: float64(seq % 100), Cores: 4}, Network: &collector.NetworkStats{TotalSent: int64(1000 + seq*100), TotalRecv: int64(2000 + seq*200)}}
 					if history {
 						for p := 0; p < 3; p++ {
 							data.TCPing = append(data.TCPing, collector.TCPingResult{Name: fmt.Sprintf("synthetic-%d", p), Target: "127.0.0.1:9", Success: true, LatencyMs: float64(p + 1)})

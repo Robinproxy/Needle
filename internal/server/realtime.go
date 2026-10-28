@@ -104,7 +104,6 @@ type freshness struct {
 	ReceivedAt       int64 `json:"received_at"`
 	LastFullReportAt int64 `json:"last_full_report_at"`
 	LastFullSampleAt int64 `json:"last_full_sample_at"`
-	LastPingAt       int64 `json:"last_ping_at"`
 	OfflineAfter     int   `json:"offline_after"`
 	HistoryStale     bool  `json:"history_stale"`
 }
@@ -126,7 +125,6 @@ func (h *Handler) nodeSnapshot(a AgentRow) (*agentWithMetric, error) {
 		return nil, err
 	}
 	result := &base
-	probes := result.LatestTCPing
 	if a.ExpiresAt != nil {
 		result.ExpiryDays, result.ExpiryDate = calcRenewalDue(*a.ExpiresAt, a.BillingPeriod, h.now())
 	}
@@ -135,9 +133,6 @@ func (h *Handler) nodeSnapshot(a AgentRow) (*agentWithMetric, error) {
 		result.Live.ReceivedAt = *a.LastSeen
 	}
 	result.Live.LastFullSampleAt = a.ReportSampleAt
-	for _, p := range probes {
-		result.Live.LastPingAt = max(result.Live.LastPingAt, p.CreatedAt)
-	}
 	l := h.store.live
 	l.mu.Lock()
 	entry, ok := l.nodes[a.ID]

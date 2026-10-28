@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -14,7 +13,6 @@ import (
 
 	agentpkg "needle/internal/agent"
 	"needle/internal/agent/collector"
-	"needle/internal/billing"
 	"needle/internal/logging"
 
 	"gopkg.in/yaml.v3"
@@ -25,87 +23,56 @@ type Config struct {
 	HistoryQueueCapacity      int  `yaml:"history_queue_capacity"`
 	HistoryRetryMaxAgeSeconds int  `yaml:"history_retry_max_age_seconds"`
 
-	BillingCurrency       string                   `yaml:"billing_currency"`
-	BillingAmount         *string                  `yaml:"billing_amount"`
-	MonthlyTrafficLimitGB float64                  `yaml:"monthly_traffic_limit_gb"`
-	Hostname              string                   `yaml:"hostname"`
-	Server                string                   `yaml:"server"`
-	Token                 string                   `yaml:"token"`
-	Region                string                   `yaml:"region"`
-	ExpiresAt             string                   `yaml:"expires_at"`
-	BillingPeriod         string                   `yaml:"billing_period"`
-	Interval              int                      `yaml:"interval"`
-	RealtimeInterval      int                      `yaml:"realtime_interval"`
-	TLSSkipVerify         bool                     `yaml:"tls_skip_verify"`
-	AllowPlainHTTP        bool                     `yaml:"allow_plain_http"`
-	Insecure              *bool                    `yaml:"insecure"` // Deprecated: use tls_skip_verify.
-	Interfaces            []string                 `yaml:"interfaces"`
-	TCPing                []collector.TCPingTarget `yaml:"tcpping"`
+	Hostname         string                   `yaml:"hostname"`
+	Server           string                   `yaml:"server"`
+	Token            string                   `yaml:"token"`
+	Interval         int                      `yaml:"interval"`
+	RealtimeInterval int                      `yaml:"realtime_interval"`
+	TLSSkipVerify    bool                     `yaml:"tls_skip_verify"`
+	AllowPlainHTTP   bool                     `yaml:"allow_plain_http"`
+	Interfaces       []string                 `yaml:"interfaces"`
+	TCPing           []collector.TCPingTarget `yaml:"tcpping"`
 }
 
 func (c *Config) UnmarshalYAML(node *yaml.Node) error {
+	// Decode the effective mapping first so aliases and YAML merge keys cannot
+	// silently retain settings that now belong to the Server. yaml.v3 bounds
+	// alias expansion and rejects self-referential aliases.
+	var fields map[string]any
+	if err := node.Decode(&fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"region", "billing_currency", "billing_amount", "billing_period", "expires_at", "monthly_traffic_limit_gb"} {
+		if _, exists := fields[name]; exists {
+			return fmt.Errorf("%s is no longer an Agent setting; configure static node settings in Server /admin and remove this key from agent.yaml", name)
+		}
+	}
+	if _, exists := fields["insecure"]; exists {
+		return fmt.Errorf("insecure was removed; replace it with tls_skip_verify in agent.yaml")
+	}
+	if value, exists := fields["server_managed"]; exists {
+		managed, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("server_managed must be a boolean")
+		}
+		if !managed {
+			return fmt.Errorf("server_managed: false is no longer supported; configure static node settings in Server /admin and remove this key or set it to true")
+		}
+	}
+	for _, name := range []string{"realtime_interval", "history_queue_capacity", "history_retry_max_age_seconds"} {
+		if value, exists := fields[name]; exists {
+			if _, ok := value.(int); !ok {
+				return fmt.Errorf("%s must be an integer", name)
+			}
+		}
+	}
 	type plain Config
-	var decoded plain
+	decoded := plain{ServerManaged: true}
 	if err := node.Decode(&decoded); err != nil {
 		return err
 	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == "server_managed" && node.Content[i+1].Tag != "!!bool" {
-			return fmt.Errorf("server_managed must be a boolean")
-		}
-		if (node.Content[i].Value == "realtime_interval" || node.Content[i].Value == "history_queue_capacity" || node.Content[i].Value == "history_retry_max_age_seconds") && node.Content[i+1].Tag != "!!int" {
-			return fmt.Errorf("%s must be an integer", node.Content[i].Value)
-		}
-	}
 	*c = Config(decoded)
 	return nil
-}
-
-func (c Config) billingCost() (*billing.Cost, error) {
-	if c.BillingAmount == nil && c.BillingCurrency == "" {
-		return nil, nil
-	}
-	cost := billing.Cost{Currency: c.BillingCurrency}
-	if cost.Currency == "" {
-		cost.Currency = "USD"
-	}
-	if c.BillingAmount != nil {
-		cost.Amount = *c.BillingAmount
-	}
-	cost, err := cost.Normalize()
-	if err != nil {
-		return nil, err
-	}
-	if cost.Amount != "" && c.BillingPeriod == "" {
-		return nil, fmt.Errorf("billing_period is required when billing_amount is configured")
-	}
-	return &cost, nil
-}
-
-func (c Config) effectiveTLSSkipVerify() bool {
-	return c.TLSSkipVerify || (c.Insecure != nil && *c.Insecure)
-}
-
-// Quotas use decimal GB, matching providers' traffic allowances. Zero is unset.
-func (c Config) monthlyTrafficLimitBytes() (int64, error) {
-	v := c.MonthlyTrafficLimitGB
-	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 9_000_000 {
-		return 0, fmt.Errorf("monthly_traffic_limit_gb must be between 0 and 9000000")
-	}
-	return int64(math.Round(v * 1_000_000_000)), nil
-}
-
-func (c Config) expiryUnix() (*int64, error) {
-	if c.ExpiresAt == "" || c.BillingPeriod == "forever" {
-		return nil, nil
-	}
-	date, err := time.Parse("2006-01-02", c.ExpiresAt)
-	if err != nil {
-		return nil, err
-	}
-	// Preserve the existing wire representation of configured dates.
-	unix := date.Add(12 * time.Hour).Unix()
-	return &unix, nil
 }
 
 var Version = "dev"
@@ -150,24 +117,12 @@ func main() {
 	if err := cfg.validateToken(); err != nil {
 		logging.Fatal("agent", "config_invalid", err)
 	}
-	if cfg.Insecure != nil {
-		logging.Print("WARN", "agent", "deprecated_setting", "field", "insecure", "replacement", "tls_skip_verify")
-	}
 	serverURL, err := agentpkg.ValidateServerURL(cfg.Server, cfg.AllowPlainHTTP)
 	if err != nil {
 		logging.Fatal("agent", "server_url_invalid", err)
 	}
 	if *checkConfig {
 		if err := cfg.validateProbesAndInterval(); err != nil {
-			logging.Fatal("agent", "config_invalid", err)
-		}
-		if _, err := cfg.monthlyTrafficLimitBytes(); err != nil {
-			logging.Fatal("agent", "config_invalid", err)
-		}
-		if _, err := cfg.expiryUnix(); err != nil {
-			logging.Fatal("agent", "expiry_invalid", err)
-		}
-		if _, err := cfg.billingCost(); err != nil {
 			logging.Fatal("agent", "config_invalid", err)
 		}
 		fmt.Println("Configuration is valid.")
@@ -177,7 +132,7 @@ func main() {
 		logging.Print("WARN", "agent", "plaintext_http", "action", "Token is transmitted without encryption; use HTTPS")
 	}
 
-	reporter := agentpkg.NewReporter(serverURL, cfg.Token, cfg.effectiveTLSSkipVerify())
+	reporter := agentpkg.NewReporter(serverURL, cfg.Token, cfg.TLSSkipVerify)
 	hostname := cfg.Hostname
 	if hostname == "" {
 		hostname, _ = os.Hostname()
@@ -199,19 +154,6 @@ func main() {
 	logging.Print("INFO", "agent", "started", "version", Version, "commit", BuildCommit,
 		"hostname", hostname, "history_interval_seconds", cfg.Interval, "realtime_interval_seconds", cfg.RealtimeInterval)
 
-	expiresAtUnix, err := cfg.expiryUnix()
-	if err != nil {
-		logging.Fatal("agent", "expiry_invalid", fmt.Errorf("invalid expires_at (expected YYYY-MM-DD): %w", err))
-	}
-
-	monthlyLimit, err := cfg.monthlyTrafficLimitBytes()
-	if err != nil {
-		logging.Fatal("agent", "traffic_config_invalid", err)
-	}
-	billingCost, err := cfg.billingCost()
-	if err != nil {
-		logging.Fatal("agent", "config_invalid", err)
-	}
 	systemInfo, systemErr := collector.CollectSystemInfo()
 	if systemErr != nil {
 		logging.Print("WARN", "agent", "system_info_incomplete", "error", systemErr)
@@ -242,12 +184,10 @@ func main() {
 		logging.Print("WARN", "traffic", "boot_identity_unavailable", "error", bootErr)
 	}
 	decorate := func(data *agentpkg.ReportData) {
-		data.ServerManaged = cfg.ServerManaged
+		data.ServerManaged = true
 		data.CPUModel, data.OSName, data.Arch = systemInfo.CPUModel, systemInfo.OSName, systemInfo.Arch
 		data.BootID = bootID
-		data.Hostname, data.Region = hostname, cfg.Region
-		data.ExpiresAt, data.BillingPeriod = expiresAtUnix, cfg.BillingPeriod
-		data.MonthlyTrafficLimit, data.BillingCost = monthlyLimit, billingCost
+		data.Hostname = hostname
 		data.Interval, data.RealtimeInterval = cfg.Interval, cfg.RealtimeInterval
 	}
 	sample := func(channel string) func() *agentpkg.ReportData {

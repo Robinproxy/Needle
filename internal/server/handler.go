@@ -206,17 +206,8 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	stats, err := h.store.GetStats()
-	h.logs.Check("stats", "ERROR", err)
-	if err != nil {
-		stats = &ServerStats{}
-	}
-	info := map[string]interface{}{
-		"version":  Version,
-		"db_stats": stats,
-	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	json.NewEncoder(w).Encode(map[string]string{"version": Version})
 }
 
 func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {

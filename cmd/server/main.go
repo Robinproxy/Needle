@@ -36,6 +36,10 @@ func main() {
 	showVersion := flag.Bool("version", false, "show binary version and source commit")
 	installerProtocol := flag.Bool("installer-protocol", false, "show supported installer protocol")
 	flag.Parse()
+	args := flag.Args()
+	if (*showVersion || *installerProtocol) && (len(args) != 0 || *yes || (*showVersion && *installerProtocol)) {
+		logging.Fatal("server", "arguments_invalid", fmt.Errorf("-version and -installer-protocol are standalone queries; do not combine them with a command or -y"))
+	}
 	if *showVersion {
 		fmt.Printf("needle-server %s commit=%s\n", server.Version, BuildCommit)
 		return
@@ -48,7 +52,9 @@ func main() {
 	if (*certFile == "") != (*keyFile == "") {
 		logging.Fatal("server", "tls_config_invalid", fmt.Errorf("both -cert and -key are required for TLS"))
 	}
-	args := flag.Args()
+	if err := validateCommandArgs(args, *yes); err != nil {
+		logging.Fatal("server", "arguments_invalid", err)
+	}
 	if len(args) > 0 {
 		unlock, err := lockDatabaseAdministration(*dbPath)
 		if err != nil {
@@ -64,9 +70,6 @@ func main() {
 		}
 		switch args[0] {
 		case "admin-init", "admin-reset":
-			if len(args) != 1 {
-				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> admin-init|admin-reset (interactive; no password arguments)"))
-			}
 			if err := runAdminSetup(*dbPath, args[0] == "admin-reset"); err != nil {
 				logging.Fatal("server", "command_failed", err)
 			}
@@ -87,17 +90,11 @@ func main() {
 			}
 			return
 		case "delete-agent":
-			if len(args) < 2 {
-				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> [-y] delete-agent <id|hostname>"))
-			}
 			if err := runDeleteAgent(*dbPath, args[1], *yes); err != nil {
 				logging.Fatal("server", "command_failed", err)
 			}
 			return
 		case "allow-token":
-			if len(args) < 2 {
-				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> allow-token <token>"))
-			}
 			if err := runAllowToken(*dbPath, args[1]); err != nil {
 				logging.Fatal("server", "command_failed", err)
 			}
@@ -108,15 +105,10 @@ func main() {
 			}
 			return
 		case "revoke-token":
-			if len(args) < 2 {
-				logging.Fatal("server", "arguments_invalid", fmt.Errorf("usage: needle-server -db <path> [-y] revoke-token <token>"))
-			}
 			if err := runRevokeToken(*dbPath, args[1], *yes); err != nil {
 				logging.Fatal("server", "command_failed", err)
 			}
 			return
-		default:
-			logging.Fatal("server", "command_invalid", fmt.Errorf("unknown command %q (supported: admin-init, admin-reset, list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", args[0]))
 		}
 	}
 
@@ -174,6 +166,59 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logging.Print("ERROR", "server", "shutdown_failed", "error", err)
 	}
+}
+
+// Reject malformed commands before creating an administrative lock, re-execing
+// as the database owner, or opening SQLite (which can migrate existing data).
+func validateCommandArgs(args []string, yes bool) error {
+	if len(args) == 0 {
+		if yes {
+			return fmt.Errorf("-y requires delete-agent or revoke-token")
+		}
+		return nil
+	}
+	command := args[0]
+	expected := 1
+	usage := "needle-server -db <path> " + command
+	switch command {
+	case "admin-init", "admin-reset":
+		usage += " (interactive; no password arguments)"
+	case "list-agents", "list-tokens":
+	case "delete-agent":
+		expected, usage = 2, "needle-server -db <path> [-y] delete-agent <id|hostname>"
+	case "revoke-token":
+		expected, usage = 2, "needle-server -db <path> [-y] revoke-token <token>"
+	case "allow-token":
+		expected, usage = 2, usage+" <token>"
+	case "move-agent":
+		expected, usage = 3, usage+" <id|hostname> <position>"
+	case "repair-traffic":
+		if yes {
+			return fmt.Errorf("-y is only supported before delete-agent or revoke-token")
+		}
+		_, err := parseRepairTrafficArgs(args[1:])
+		return err
+	default:
+		return fmt.Errorf("unknown command %q (supported: admin-init, admin-reset, list-agents, move-agent, delete-agent, allow-token, list-tokens, revoke-token, repair-traffic)", command)
+	}
+	if len(args) != expected {
+		return fmt.Errorf("usage: %s; place global options, including -y, before the subcommand", usage)
+	}
+	if yes && command != "delete-agent" && command != "revoke-token" {
+		return fmt.Errorf("-y is only supported before delete-agent or revoke-token")
+	}
+	for _, arg := range args[1:] {
+		if arg == "" || strings.HasPrefix(arg, "-") {
+			return fmt.Errorf("usage: %s; positional arguments cannot be empty or flags; place global options before the subcommand", usage)
+		}
+	}
+	if command == "move-agent" {
+		position, err := strconv.Atoi(args[2])
+		if err != nil || position < 1 {
+			return fmt.Errorf("position must be a positive integer")
+		}
+	}
+	return nil
 }
 
 func openStore(dbPath string) (*server.Store, error) {

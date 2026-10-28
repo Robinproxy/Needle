@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='needle-artifact-') as temp:
         output=subprocess.check_output(command+['-version'],text=True)
         assert output.strip()==f'{name} {a.version} commit={a.commit}',output
         assert subprocess.check_output(command+['-installer-protocol'],text=True).startswith('needle-install-v2 ')
-    config=folder/'verify.yaml';config.write_text('hostname: artifact-check\nserver: http://127.0.0.1:8008\ntoken: artifact-test-only\nrealtime_interval: 5\ninterval: 30\nhistory_queue_capacity: 64\nhistory_retry_max_age_seconds: 1800\nbilling_period: forever\ntcpping: []\n')
+    config=folder/'verify.yaml';config.write_text('hostname: artifact-check\nserver: http://127.0.0.1:8008\ntoken: artifact-test-only\nrealtime_interval: 5\ninterval: 30\nhistory_queue_capacity: 64\nhistory_retry_max_age_seconds: 1800\nserver_managed: true\ntcpping: []\n')
     subprocess.run(shlex.split(a.agent_runner)+[str(folder/'needle-agent'),'-check-config',str(config)],check=True)
     if (folder/'needle-server').exists():
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]

@@ -17,7 +17,7 @@ func TestMoveAgentCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"Alpha", "Router"} {
-		if _, err := s.UpsertAgent(name, "", nil, ""); err != nil {
+		if _, err := s.SaveReport(&server.ReportWrite{Hostname: name}); err != nil {
 			t.Fatal(err)
 		}
 	}

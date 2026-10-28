@@ -16,24 +16,32 @@ func TestRepairTrafficCommandPreviewApplyAndBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := s.UpsertAgent("malibu", "US", nil, "forever")
+	id, err := s.SaveReport(&server.ReportWrite{Hostname: "malibu", Region: "US", BillingPeriod: "forever"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	current := time.Now()
 	now := time.Date(current.Year(), current.Month(), 15, 12, 0, 0, 0, current.Location())
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Construct retained samples from the old accumulator directly; routing
+	// these fixtures through SaveReport would apply today's accounting rules.
 	for i, m := range []server.MetricRow{{TotalSent: 1000, TotalRecv: 2000, Uptime: 100}, {TotalSent: 1100, TotalRecv: 2200, Uptime: 130}, {TotalSent: 900, TotalRecv: 1900, Uptime: 160}} {
-		m.AgentID = id
-		if err = s.InsertMetric(&m, now.Add(time.Duration(i-2)*30*time.Second).Unix()); err != nil {
+		if _, err = db.Exec(`INSERT INTO metrics(agent_id,total_sent,total_recv,uptime,created_at) VALUES(?,?,?,?,?)`,
+			id, m.TotalSent, m.TotalRecv, m.Uptime, now.Add(time.Duration(i-2)*30*time.Second).Unix()); err != nil {
+			db.Close()
 			t.Fatal(err)
 		}
 	}
+	db.Close()
 	boundary := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
 	if err = s.EnsureTrafficBaseline(id, boundary); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
-	db, err := sql.Open("sqlite3", path)
+	db, err = sql.Open("sqlite3", path)
 	if err != nil {
 		t.Fatal(err)
 	}

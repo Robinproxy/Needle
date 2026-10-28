@@ -318,10 +318,10 @@ sudo systemctl disable needle-agent
 | --- | --- |
 | `upgrade` | Interactive choice; keeping configuration is the default |
 | `--keep-config` | Preserve the YAML unchanged; no configuration prompts |
-| `--reconfigure` | Reselect TCP Ping, allowance, optional billing, and intervals; preserve Token and identity |
+| `--reconfigure` | Reselect TCP Ping and intervals; preserve Token and identity |
 | `--configure-intervals` | Change only realtime and full-report intervals |
 
-For new `server_managed: true` configurations, `--reconfigure` changes probes and intervals only; billing and allowance stay in `/admin`. Legacy YAML billing options apply only while the node is Agent-managed. The three flags are mutually exclusive. Non-interactive upgrades keep configuration; reconfiguration requires a terminal. Reinstalling with an existing configuration enters the upgrade flow. Kept configurations do not gain new fields automatically; omitted optional fields use their defaults.
+`--reconfigure` changes probes and intervals only; region, billing, renewal dates, and traffic allowance are managed in `/admin`. The three flags are mutually exclusive. Non-interactive upgrades keep configuration; reconfiguration requires a terminal. Reinstalling with an existing configuration enters the upgrade flow. Kept configurations do not gain new fields automatically; omitted optional fields use their defaults.
 
 Upgrade migrates older root-run installations to the dedicated user, validates configuration as that user, and preserves running / autostart states. A new installation starts immediately and at boot. Failed deployment restores the old files; failed rollback retains originals under `/opt/needle-agent/recovery/` and prints the recovery path.
 
@@ -396,7 +396,7 @@ sh /tmp/needle-agent-openwrt.sh upgrade --configure-intervals
 /etc/init.d/needle-agent disable
 ```
 
-For `server_managed: true` configurations, reselection changes probes and intervals only; use `/admin` for static settings. Plain `upgrade` offers an interactive choice, defaulting to keeping configuration. `--keep-config` preserves YAML unchanged; `--reconfigure` changes probes, allowance, optional billing, and intervals; `--configure-intervals` changes only intervals. These flags are mutually exclusive and preserve Token and identity. Existing running / autostart states are preserved; a first installation starts immediately and at boot.
+Reselection changes probes and intervals only; use `/admin` for region, billing, renewal dates, and traffic allowance. Plain `upgrade` offers an interactive choice, defaulting to keeping configuration. `--keep-config` preserves YAML unchanged; `--reconfigure` changes probes and intervals; `--configure-intervals` changes only intervals. These flags are mutually exclusive and preserve Token and identity. Existing running / autostart states are preserved; a first installation starts immediately and at boot.
 
 The installer checks checksums, binary execution, configuration, and space before replacing files. It requires 64 MiB available memory, 32 MiB free in `/tmp`, and a 4 MiB installation-space reserve after staging. Startup failure restores the old files and service state; a failed recovery retains its snapshot and prints the location. A running process alone does not prove successful reporting: check logs and the Server dashboard.
 
@@ -423,6 +423,8 @@ Firmware upgrades with settings retention preserve `/etc/needle/` through `/etc/
 <summary><strong>Dashboard — Administrator and node settings</strong></summary>
 
 The dashboard and its monitoring APIs remain public. `/admin` adds authenticated editing of display name, note, region, position, billing currency/amount/period, renewal date, and monthly upload + download allowance. An Agent's stable hostname, Token, collectors, and local YAML are not changed by this page.
+
+Billing accepts `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another three-letter currency code, without exchange conversion. Enter the amount for the entire payment period: 0 means Free, empty means Not set. Periods are monthly, quarterly, half-yearly, yearly, every 2 or 3 years, or permanent. Use the actual next renewal / top-up date, including for transferred nodes. Monthly traffic is an independent upload + download allowance in decimal GB (1000 GB = 1 TB); 0 displays ♾️ and does not block traffic.
 
 Initialize one administrator **on the Server host**, after starting the Server. Use its actual database path:
 
@@ -451,11 +453,11 @@ sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-reset
 
 Upgrade compatibility and ownership:
 
-- Existing nodes keep Agent-managed settings until their first successful admin save. The editor starts with their current values; saving transfers the static profile to the Server. Later Agent reports and upgrades cannot overwrite it. Existing Agent YAML and Token need no changes or re-registration.
+- Existing values populate the editor. Saving in `/admin`, or receiving the first report from the current Server-managed Agent, transfers an existing static profile to the Server without overwriting its saved values. Later reports cannot overwrite it. Before upgrading an older Agent, remove the retired static YAML fields listed in the Agent configuration sections; keep its Token and identity.
 - New Agents installed with `server_managed: true` use Server-managed profiles from their first report. Missing billing and renewal settings show **Not set**, not Free or permanent. Monthly usage starts with reset day 1 and an unrestricted allowance; choose a finite allowance or ♾️ in the editor.
 - A display name is a label. CLI commands and Token bindings continue to use the original Agent hostname or stable numeric ID.
 - An optional note accepts up to 40 characters of single-line plain text. It appears beside uptime below the card's name, truncates to fit, and is hidden when empty. Clear it in the editor to remove it. Notes are stored on the Server; no Agent upgrade or YAML change is needed.
-- On takeover, the current monthly reset day is pinned independently of the renewal date. For a previously unconfigured node it defaults to day 1. The editor shows this day read-only. Changing price, payment period, renewal date, or allowance does not clear usage or move the monthly boundary. Legacy nodes still managed by the Agent retain their existing date-derived reset behavior.
+- On takeover, the current monthly reset day is pinned independently of the renewal date. For a previously unconfigured node it defaults to day 1. The editor shows this day read-only. Changing price, payment period, renewal date, or allowance does not clear usage or move the monthly boundary. Stored historical billing and traffic records retain their existing boundaries during migration.
 - The saved renewal anchor still projects future reminders by the payment period; it does not confirm payment. The editor shows both the saved date and projected next renewal. Short months keep the original reset day (29–31) for subsequent months.
 - Saves validate every field, use a database transaction, reject stale forms, refresh the public dashboard, and retain the latest 200 profile-change records in SQLite. A failed save does not partially change ordering or billing. Existing history and counter accounting remain intact.
 
@@ -694,13 +696,7 @@ tcpping:
 | `hostname` | Stable Agent identity; empty / omitted uses the system hostname. Token binds to it; edit the display name in `/admin` |
 | `server` | Server URL; use the public HTTPS address, e.g. `https://needle.example.com` |
 | `token` | Unique allowed credential; required, 1–256 characters, no whitespace or control characters |
-| `server_managed` | Boolean; new installs use `true` and configure static node settings in `/admin`. Omitted / false keeps legacy behavior until admin takeover |
-| `region` | Legacy Agent-managed region code, e.g. `US`, `CN`, `SG`; Server-managed nodes use `/admin` |
-| `billing_currency` | Three-letter code: `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another code; default USD when cost is configured; no exchange conversion |
-| `billing_amount` | Quoted decimal for the **entire billing period**; `"0"` = Free, `""` = Not set; up to 12 integer and 6 fractional digits. A configured amount requires a billing period |
-| `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves it unset |
-| `expires_at` | Actual next renewal / top-up date, `YYYY-MM-DD`; use `""` for `forever` |
-| `monthly_traffic_limit_gb` | Monthly upload + download allowance, decimal GB; `1000` = 1 TB; `0` / omitted = ♾️. Range 0–9000000; installer accepts up to 3 decimal places. Display only, no traffic blocking |
+| `server_managed` | Boolean; defaults to `true`. Static settings belong to `/admin`; `false` is rejected |
 | `realtime_interval` | Integer seconds: `0` disables extra live reports; otherwise 1–`interval`. New installs use 5; omitted = 0 |
 | `interval` | Full report / history / TCP Ping / traffic accounting interval in seconds; default 30, maximum 86400; legacy non-positive values use 30 |
 | `history_queue_capacity` | Optional integer, 1–1024; omitted / 0 = 64, including the in-flight report; separate 8 MiB queue limit |
@@ -710,20 +706,9 @@ tcpping:
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
-**Legacy Agent-managed billing:** new Server-managed nodes use `/admin`; the following YAML options remain supported for existing configurations. Billing inputs are separate: **currency → total amount → period → next renewal date**. At `Amount for the entire billing period...`, enter only a number such as `35`, never `12m,35`. For USD 35 per year, use:
+Configure region, billing currency/amount/period, renewal date, and traffic allowance in `/admin`. Amounts cover the entire payment period; 0 means Free and an empty amount means Not set. Renewal dates project reminders by the payment period. Monthly traffic uses the independent pinned reset day, including for annual and permanent nodes; changing billing or the allowance does not clear usage. An allowance of 0 displays ♾️.
 
-```yaml
-billing_currency: "USD"
-billing_amount: "35"
-billing_period: "12m"
-expires_at: "2027-03-03"
-```
-
-The card displays the configured amount with its period (USD 35 `/yr` here), not a monthly conversion. `"0"` means free; an empty amount means unconfigured. For transferred machines, use the existing next renewal date, not the transfer date.
-
-Finite renewal dates advance by the payment period after the due day; the due day itself shows `Due today`. This is a schedule reminder, not proof of payment. **Legacy Agent-managed traffic resets monthly** on the day of month in `expires_at`, even for annual / multi-year payments. Server-managed nodes instead keep their pinned monthly reset day shown in `/admin`. Days 29–31 clamp in shorter months. Legacy `forever` configurations reset on day 1; without an expiry date or `forever`, legacy usage is unavailable. Server-managed nodes use their pinned reset day independently of billing, including when renewal settings are not configured. Boundaries use the Server timezone.
-
-Traffic allowance is independent: a paid or free node can use `monthly_traffic_limit_gb: 0` for ♾️, or a permanent node can have a finite allowance. Changing the allowance does not clear accumulated usage; usage begins at the first observed baseline.
+The former YAML fields `region`, `billing_currency`, `billing_amount`, `billing_period`, `expires_at`, and `monthly_traffic_limit_gb` are no longer accepted. Save their values in `/admin` and remove them from YAML before upgrading. Replace `insecure` with `tls_skip_verify` if present.
 
 | Installer mode | Targets |
 | --- | --- |
@@ -735,7 +720,7 @@ Traffic allowance is independent: a paid or free node can use `monthly_traffic_l
 
 There is no connectivity auto-detection. Choose according to actual outbound IPv4 / IPv6 availability. To disable probes manually, replace the whole list with `tcpping: []`. Disabled targets disappear from detail charts while old history expires normally; cards retain `TCP Ping · Off`, and detail range controls remain available.
 
-`--keep-config` preserves the file, including old probe choices and omitted optional fields. `--reconfigure` asks for probes, allowance (Enter keeps its current value), optional billing (default No), and intervals. Replacing billing asks for all four billing values separately. `--configure-intervals` changes only the two intervals. Token, hostname, URL, and interfaces are preserved; changed settings are backed up to `agent.yaml.bak`.
+`--keep-config` preserves the file unchanged. `--reconfigure` asks for probes and intervals; `--configure-intervals` changes only the two intervals. Token, hostname, URL, and interfaces are preserved; changed settings are backed up to `agent.yaml.bak`.
 
 Validate before restarting; this check does not send probes or reports:
 
@@ -784,13 +769,7 @@ tcpping: []
 | `hostname` | Stable Agent identity; empty / omitted uses the system hostname. Token binds to it; edit the display name in `/admin` |
 | `server` | Server URL; use the public HTTPS address, e.g. `https://needle.example.com` |
 | `token` | Unique allowed credential; required, 1–256 characters, no whitespace or control characters |
-| `server_managed` | Boolean; new installs use `true` and configure static node settings in `/admin`. Omitted / false keeps legacy behavior until admin takeover |
-| `region` | Legacy Agent-managed region code, e.g. `US`, `CN`, `SG`; Server-managed nodes use `/admin` |
-| `billing_currency` | Three-letter code: `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another code; default USD when cost is configured; no exchange conversion |
-| `billing_amount` | Quoted decimal for the **entire billing period**; `"0"` = Free, `""` = Not set; up to 12 integer and 6 fractional digits. A configured amount requires a billing period |
-| `billing_period` | `1m`, `3m`, `6m`, `12m`, `24m`, `36m`, or `forever`; empty leaves it unset |
-| `expires_at` | Actual next renewal / top-up date, `YYYY-MM-DD`; use `""` for `forever` |
-| `monthly_traffic_limit_gb` | Monthly upload + download allowance, decimal GB; `1000` = 1 TB; `0` / omitted = ♾️. Range 0–9000000; installer accepts up to 3 decimal places. Display only, no traffic blocking |
+| `server_managed` | Boolean; defaults to `true`. Static settings belong to `/admin`; `false` is rejected |
 | `realtime_interval` | Integer seconds: `0` disables extra live reports; otherwise 1–`interval`. New installs use 5; omitted = 0 |
 | `interval` | Full report / history / TCP Ping / traffic accounting interval in seconds; default 30, maximum 86400; legacy non-positive values use 30 |
 | `history_queue_capacity` | Optional integer, 1–1024; omitted / 0 = 64, including the in-flight report; separate 8 MiB queue limit |
@@ -800,20 +779,9 @@ tcpping: []
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
-**Legacy Agent-managed billing:** new Server-managed nodes use `/admin`; the following YAML options remain supported for existing configurations. Billing inputs are separate: **currency → total amount → period → next renewal date**. At `Amount for the entire billing period...`, enter only a number such as `35`, never `12m,35`. For USD 35 per year, use:
+Configure region, billing currency/amount/period, renewal date, and traffic allowance in `/admin`. Amounts cover the entire payment period; 0 means Free and an empty amount means Not set. Renewal dates project reminders by the payment period. Monthly traffic uses the independent pinned reset day, including for annual and permanent nodes; changing billing or the allowance does not clear usage. An allowance of 0 displays ♾️.
 
-```yaml
-billing_currency: "USD"
-billing_amount: "35"
-billing_period: "12m"
-expires_at: "2027-03-03"
-```
-
-The card displays the configured amount with its period (USD 35 `/yr` here), not a monthly conversion. `"0"` means free; an empty amount means unconfigured. For transferred machines, use the existing next renewal date, not the transfer date.
-
-Finite renewal dates advance by the payment period after the due day; the due day itself shows `Due today`. This is a schedule reminder, not proof of payment. **Legacy Agent-managed traffic resets monthly** on the day of month in `expires_at`, even for annual / multi-year payments. Server-managed nodes instead keep their pinned monthly reset day shown in `/admin`. Days 29–31 clamp in shorter months. Legacy `forever` configurations reset on day 1; without an expiry date or `forever`, legacy usage is unavailable. Server-managed nodes use their pinned reset day independently of billing, including when renewal settings are not configured. Boundaries use the Server timezone.
-
-Traffic allowance is independent: a paid or free node can use `monthly_traffic_limit_gb: 0` for ♾️, or a permanent node can have a finite allowance. Changing the allowance does not clear accumulated usage; usage begins at the first observed baseline.
+The former YAML fields `region`, `billing_currency`, `billing_amount`, `billing_period`, `expires_at`, and `monthly_traffic_limit_gb` are no longer accepted. Save their values in `/admin` and remove them from YAML before upgrading. Replace `insecure` with `tls_skip_verify` if present.
 
 The installer recommends WAN's `l3_device` when available. Confirm it exists; multi-WAN can use multiple distinct WAN interfaces. Do not list both PPPoE and its underlying device, or LAN and WAN for the same traffic. `realtime_interval: 0` and disabled TCP Ping are optional low-overhead choices.
 
@@ -827,7 +795,7 @@ The installer recommends WAN's `l3_device` when available. Confirm it exists; mu
 
 There is no connectivity auto-detection. Choose according to actual outbound IPv4 / IPv6 availability. To disable probes manually, replace the whole list with `tcpping: []`. Disabled targets disappear from detail charts while old history expires normally; cards retain `TCP Ping · Off`, and detail range controls remain available.
 
-`--keep-config` preserves the file, including old probe choices and omitted optional fields. `--reconfigure` asks for probes, allowance (Enter keeps its current value), optional billing (default No), and intervals. Replacing billing asks for all four billing values separately. `--configure-intervals` changes only the two intervals. Token, hostname, URL, and interfaces are preserved; changed settings are backed up to `agent.yaml.bak`.
+`--keep-config` preserves the file unchanged. `--reconfigure` asks for probes and intervals; `--configure-intervals` changes only the two intervals. Token, hostname, URL, and interfaces are preserved; changed settings are backed up to `agent.yaml.bak`.
 
 Validate before restarting; this check does not send probes or reports:
 
@@ -855,7 +823,7 @@ Click the **calendar / up-arrow** button first in the header controls (renewal s
 
 Node Detail shows the CPU model, OS/version, and architecture in a muted line below its title, for example `Intel N150 · ImmortalWrt 24.10.4 · x86_64`. Long text wraps so the full information is readable directly. These details appear only in Node Detail, without hover popups; cards retain their existing height and core/load line. Missing items are omitted without placeholders.
 
-Upgrade the Server first, then Agents to populate these fields; use `upgrade --keep-config`. No YAML settings or Token registration changes are needed. The Agent reads system information once at startup and attaches it to full reports, not realtime requests or history rows. Restart the Agent after an OS upgrade to refresh it. Model names reflect what the host or hypervisor exposes. Metadata read failures are logged without disabling live CPU collection, and omitted/empty fields from older Agents preserve saved values.
+Upgrade the Server first, then Agents to populate these fields; use `upgrade --keep-config` after removing retired YAML keys as described in the upgrade checklist. No collector-specific YAML settings or Token re-registration are needed. The Agent reads system information once at startup and attaches it to full reports, not realtime requests or history rows. Restart the Agent after an OS upgrade to refresh it. Model names reflect what the host or hypervisor exposes. Metadata read failures are logged without disabling live CPU collection, and omitted/empty fields from older Agents preserve saved values.
 
 `4C` means four logical CPUs; `Load 0.14` is the one-minute system load average, not CPU percentage. Live TCP loss reflects the latest attempt (`0%` or `100%`); detail statistics summarize the selected history window. Click detail targets to toggle chart lines; this does not change Agent configuration.
 
@@ -867,8 +835,8 @@ Upgrade the Server first, then Agents to populate these fields; use `upgrade --k
 For current releases, use this checklist:
 
 1. Back up the database and upgrade the Server first. Review the [migration record](docs/p0-p1-validation.md) when upgrading an older installation.
-2. Download the current Agent installer and run `upgrade --keep-config` on Linux or OpenWrt. Existing Token, hostname, billing, dates, interfaces, and probes stay unchanged; no registration is needed again.
-3. Add only desired optional fields manually, or use `--configure-intervals` / `--reconfigure`. Missing `realtime_interval` remains disabled; retry settings already have defaults.
+2. Confirm the static settings in `/admin`, then remove the retired region/billing/date/allowance fields from Agent YAML. Replace `insecure` with `tls_skip_verify` if present. Configuration validation rejects these old keys with an actionable error.
+3. Download the matching Agent installer and run `upgrade --keep-config` on Linux or OpenWrt. Token, hostname, interfaces, and probes are retained; no re-registration is needed. Use `--configure-intervals` / `--reconfigure` only to change local monitoring settings. Missing `realtime_interval` remains disabled; retry settings have defaults.
 4. Validate edited YAML, restart, and confirm reports in logs and the dashboard. Upgrade does not require re-entering an unchanged renewal date.
 
 Use compatible binaries and installers from the same release. After database migration, avoid downgrading to a version that does not understand the current accounting and history schema.

@@ -29,6 +29,23 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 		return id, false, err
 	}
 	newNode := err == sql.ErrNoRows
+	if !newNode && !managed && r.ServerManaged {
+		// New Agents no longer send static settings. Transfer ownership before
+		// the upsert so their omitted fields cannot clear an existing profile.
+		var oldExpiry *int64
+		if expiry.Valid {
+			oldExpiry = &expiry.Int64
+		}
+		day, configured := trafficResetDay(period, oldExpiry)
+		if !configured {
+			day = 1
+		}
+		if _, err := tx.Exec(`UPDATE agents SET profile_managed=1,profile_revision=profile_revision+1,
+ traffic_reset_day=COALESCE(traffic_reset_day,?) WHERE id=?`, day, id); err != nil {
+			return 0, false, err
+		}
+		managed = true
+	}
 	var encodedCost any
 	if r.BillingCost != nil {
 		encoded, err := json.Marshal(r.BillingCost)

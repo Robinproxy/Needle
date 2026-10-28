@@ -13,6 +13,21 @@ import (
 	"needle/internal/logging"
 )
 
+func TestInfoOnlyReturnsVersionWithoutReadingMonitoringTables(t *testing.T) {
+	h, store := newTestHandler(t)
+	for _, table := range []string{"metrics", "tcpping_results", "agents"} {
+		if _, err := store.db.Exec("DROP TABLE " + table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := httptest.NewRecorder()
+	h.handleInfo(w, httptest.NewRequest(http.MethodGet, "/api/info", nil))
+	var info map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil || w.Code != http.StatusOK || len(info) != 1 || info["version"] != Version {
+		t.Fatalf("version lookup depended on monitoring storage or returned old statistics: %d %s / %v", w.Code, w.Body.String(), err)
+	}
+}
+
 func TestHandleAgentsIncludesTrafficAvailability(t *testing.T) {
 	h, store := newTestHandler(t)
 	if err := store.AllowToken("test-token"); err != nil {

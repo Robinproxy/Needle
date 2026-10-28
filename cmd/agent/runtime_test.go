@@ -67,7 +67,7 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 	}))
 	defer receiver.Close()
 	config := filepath.Join(t.TempDir(), "agent.yaml")
-	contents := fmt.Sprintf("hostname: runtime-test\nserver: %s\ntoken: isolated-runtime-token\ninterval: 1\nbilling_period: forever\ninterfaces: [%q]\ntcpping:\n  - name: loopback\n    target: %q\n", receiver.URL, loopback, strings.TrimPrefix(receiver.URL, "http://"))
+	contents := fmt.Sprintf("hostname: runtime-test\nserver: %s\ntoken: isolated-runtime-token\ninterval: 1\ninterfaces: [%q]\ntcpping:\n  - name: loopback\n    target: %q\n", receiver.URL, loopback, strings.TrimPrefix(receiver.URL, "http://"))
 	if err := os.WriteFile(config, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +110,9 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 		}
 		if report.Arch == "" {
 			t.Fatalf("Agent did not attach startup system information: %+v", report)
+		}
+		if !report.ServerManaged {
+			t.Fatalf("Agent did not initialize Server profile management when the YAML marker was omitted: %+v", report)
 		}
 		if strings.Contains(logs.String(), "WARN module=collect.") || strings.Contains(logs.String(), "ERROR module=history") || strings.Contains(logs.String(), "WARN module=realtime") {
 			t.Fatalf("Agent reported collection/transport errors: %s", logs.String())

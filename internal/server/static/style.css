@@ -165,7 +165,6 @@ header {
   padding: 0 12px;
 }
 .server-info .item:first-child { padding-left: 0; }
-.server-info .item:last-child { border-right: none; }
 .server-info .item.region-filter {
   appearance: none; border: 0; background: transparent; color: inherit;
   font: inherit; line-height: inherit; cursor: pointer; transition: opacity 0.15s;

@@ -15,11 +15,6 @@ func (c Config) validateProbesAndInterval() error {
 	if c.HistoryRetryMaxAgeSeconds < 0 || c.HistoryRetryMaxAgeSeconds > 86400 {
 		return fmt.Errorf("history_retry_max_age_seconds must be 1–86400 (omitted/0 = 1800)")
 	}
-	switch c.BillingPeriod {
-	case "", "1m", "3m", "6m", "12m", "24m", "36m", "forever":
-	default:
-		return fmt.Errorf("unsupported billing_period")
-	}
 	if c.Interval > 86400 {
 		return fmt.Errorf("interval must not exceed 86400 seconds")
 	}

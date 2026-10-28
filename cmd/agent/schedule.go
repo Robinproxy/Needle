@@ -48,13 +48,6 @@ type historyJob struct {
 // samples are FIFO, never replaced by a newer sample. With no disk spool an
 // indefinitely stalled transport cannot retain unlimited history: overflow is
 // explicitly logged rather than blocking realtime sampling or growing memory.
-func runSampling(ctx context.Context, historyTicks, realtimeTicks <-chan time.Time,
-	historySample, realtimeSample func() *agentpkg.ReportData,
-	sendHistory, sendRealtime func(context.Context, *agentpkg.ReportData) error,
-	logf func(string, ...any), prepare ...func(context.Context, *agentpkg.ReportData) (<-chan struct{}, error)) {
-	runSamplingWithPolicy(historyPolicy{Capacity: historyQueueSize}, ctx, historyTicks, realtimeTicks, historySample, realtimeSample, sendHistory, sendRealtime, logf, prepare...)
-}
-
 func runSamplingWithPolicy(policy historyPolicy, ctx context.Context, historyTicks, realtimeTicks <-chan time.Time,
 	historySample, realtimeSample func() *agentpkg.ReportData,
 	sendHistory, sendRealtime func(context.Context, *agentpkg.ReportData) error,

@@ -198,7 +198,7 @@ http_get() { printf '{"status":"ok"}'; }
     def test_reconfigure_backup_is_root_only_and_old_backup_restored_on_failure(self):
         backup = Path(str(self.config) + '.bak')
         backup.write_text('previous backup')
-        (self.download / 'agent.yaml').write_bytes(self.original + b'billing_period: forever\n')
+        (self.download / 'agent.yaml').write_bytes(self.original + b'realtime_interval: 5\n')
         result = self.run_shell(before='UPGRADE_RECONFIGURE=true; FAIL_START=1')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(backup.read_text(), 'previous backup')

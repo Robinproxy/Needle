@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"needle/internal/agent/collector"
-	"needle/internal/billing"
 )
 
 type ReportData struct {
@@ -24,23 +23,18 @@ type ReportData struct {
 
 	ReportID string `json:"report_id,omitempty"`
 
-	TCPingCreatedAt     int64                    `json:"tcpping_created_at,omitempty"`
-	Interval            int                      `json:"interval,omitempty"`
-	RealtimeInterval    int                      `json:"realtime_interval,omitempty"`
-	BillingCost         *billing.Cost            `json:"billing_cost,omitempty"`
-	CreatedAt           int64                    `json:"created_at,omitempty"`
-	MonthlyTrafficLimit int64                    `json:"monthly_traffic_limit"`
-	Hostname            string                   `json:"hostname"`
-	Region              string                   `json:"region"`
-	ExpiresAt           *int64                   `json:"expires_at,omitempty"`
-	BillingPeriod       string                   `json:"billing_period,omitempty"`
-	CPU                 *collector.CPUStats      `json:"cpu"`
-	Memory              *collector.MemoryStats   `json:"memory"`
-	Disk                *collector.DiskStats     `json:"disk"`
-	Network             *collector.NetworkStats  `json:"network"`
-	Load                *collector.LoadStats     `json:"load"`
-	Uptime              uint64                   `json:"uptime"`
-	TCPing              []collector.TCPingResult `json:"tcpping,omitempty"`
+	TCPingCreatedAt  int64                    `json:"tcpping_created_at,omitempty"`
+	Interval         int                      `json:"interval,omitempty"`
+	RealtimeInterval int                      `json:"realtime_interval,omitempty"`
+	CreatedAt        int64                    `json:"created_at,omitempty"`
+	Hostname         string                   `json:"hostname"`
+	CPU              *collector.CPUStats      `json:"cpu"`
+	Memory           *collector.MemoryStats   `json:"memory"`
+	Disk             *collector.DiskStats     `json:"disk"`
+	Network          *collector.NetworkStats  `json:"network"`
+	Load             *collector.LoadStats     `json:"load"`
+	Uptime           uint64                   `json:"uptime"`
+	TCPing           []collector.TCPingResult `json:"tcpping,omitempty"`
 }
 
 // RealtimeData deliberately cannot carry probes, billing or traffic policy.

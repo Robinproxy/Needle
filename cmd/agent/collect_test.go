@@ -155,7 +155,7 @@ func TestPartialCollectionWireReportKeepsTrafficAccounting(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		report := collectReport(c, logging.NewTracker("collect", func(string, ...any) {}))
 		report.Hostname = "partial-wire"
-		report.BillingPeriod = "forever"
+		report.ServerManaged = true
 		encoded, err := json.Marshal(report)
 		if err != nil {
 			t.Fatal(err)
