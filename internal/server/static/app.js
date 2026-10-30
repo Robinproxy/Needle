@@ -323,7 +323,6 @@ const VIEW_ICONS = {
 const THEME_ICONS = {
   light: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5.64 5.64l1.77 1.77M16.6 16.6l1.77 1.77M5.64 18.36l1.77-1.77M16.6 7.4l1.77-1.77"/></svg>',
   dark: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 9 9c-4 0-7-3-7-7 0-1 .2-2 .7-3A9 9 0 0 1 12 3z"/></svg>',
-  system: '<svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M7 4V2M17 4V2" stroke-width="1.2"/></svg>',
 };
 
 function toggleView() {
@@ -331,8 +330,7 @@ function toggleView() {
 }
 
 function cycleTheme() {
-  const modes = ['light', 'dark', 'system'];
-  setThemeMode(modes[(modes.indexOf(themeMode) + 1) % modes.length]);
+  setThemeMode(themeMode === 'light' ? 'dark' : 'light');
 }
 
 function updateHeaderIcons() {
@@ -424,9 +422,9 @@ function formatTrafficBytes(bytes) {
   return Number((bytes / (1000 ** i)).toFixed(2)) + ' ' + units[i];
 }
 
-function metricHTML(label, value, sub, title = '', valueText = null) {
+function metricHTML(label, value, sub, valueText = null) {
   const width = value == null ? 0 : Math.max(0, Math.min(100, value));
-  return '<div class="metric"' + (title ? ' title="' + escapeAttr(title) + '"' : '') + '>'
+  return '<div class="metric">'
     + '<div class="metric-header"><span class="label">' + label + '</span><span class="value ' + metricColor(value) + '">' + (valueText == null ? pct(value) : escapeHtml(valueText)) + '</span></div>'
     + '<div class="metric-bar"><div class="metric-fill ' + metricColor(value) + '" style="width:' + width.toFixed(1) + '%"></div></div>'
     + '<div class="metric-sub">' + escapeHtml(sub) + '</div></div>';
@@ -438,11 +436,10 @@ function trafficHTML(data, limit = 0) {
   const value = used != null && limit > 0 ? used / limit * 100 : null;
   const usedText = used != null ? formatTrafficBytes(used) : (data?.available ? 'No data' : 'Not configured');
   if (!(limit > 0)) {
-    return metricHTML('TRF', null, usedText + (used != null ? ' used' : ''),
-      'Monthly upload + download; no traffic allowance limit.', '♾️');
+    return metricHTML('TRF', null, usedText + (used != null ? ' used' : ''), '♾️');
   }
   const text = usedText + ' / ' + formatTrafficBytes(limit);
-  return metricHTML('TRF', value, text, 'Monthly upload + download; decimal GB/TB. Observed usage since monitoring began, not provider billing data.');
+  return metricHTML('TRF', value, text);
 }
 
 // Missing collectors are distinct from measured zero, including in old API
@@ -455,8 +452,7 @@ function cardMetricsHTML(a) {
   const m = a.latest_metric;
   const cores = a.agent.cpu_cores > 0 ? a.agent.cpu_cores : null;
   const cpuSub = m ? (cores ? cores + 'C · ' : '') + 'Load ' + (hasMetric(m, 16) ? (m.load1 || 0).toFixed(2) : '—') : 'No data';
-  const cpuTitle = (cores ? cores + ' logical CPU' + (cores === 1 ? '' : 's') + '; ' : '') + 'Load is the 1-minute system load average';
-  return metricHTML('CPU', hasMetric(m, 1) ? m.cpu_usage : null, cpuSub, cpuTitle)
+  return metricHTML('CPU', hasMetric(m, 1) ? m.cpu_usage : null, cpuSub)
     + metricHTML('MEM', m && m.memory_total > 0 ? m.memory_used / m.memory_total * 100 : null,
       hasMetric(m, 2) ? formatBytes(m.memory_used) + ' / ' + formatBytes(m.memory_total) : 'No data')
     + metricHTML('DSK', m && m.disk_total > 0 ? m.disk_used / m.disk_total * 100 : null,
@@ -483,7 +479,7 @@ function cardProbesHTML(a) {
     });
     return '<div class="probe-family probe-family-' + family.toLowerCase() + '">' + rows.map(p => {
       const loss = p.success ? 0 : 100;
-      return '<div class="probe-row" title="' + escapeAttr(p.target + ' · latest probe result') + '">'
+      return '<div class="probe-row">'
         + '<span class="probe-name">' + escapeHtml(mapCarrier(p.name)) + '</span>'
         + '<span class="probe-lat" style="color:' + valCss(p.success ? pingLatColor(p.latency_ms) : 'gray') + '">' + (p.success ? p.latency_ms.toFixed(0) + 'ms' : '—') + '</span>'
         + '<span class="probe-loss" style="color:' + valCss(pingLossColor(loss)) + '">' + Number(loss.toFixed(1)) + '%</span></div>';
@@ -500,11 +496,11 @@ function cardNetworkHTML(a) {
   const traffic = a.traffic;
   const ready = traffic?.available && traffic?.has_data;
   return '<div class="net-rates" aria-label="Current network rates">'
-    + '<span class="net-down" title="Current download rate">↓ ' + formatCardSpeed(hasMetric(m, 8) ? m.network_down : null) + '</span>'
-    + '<span class="net-up" title="Current upload rate">↑ ' + formatCardSpeed(hasMetric(m, 8) ? m.network_up : null) + '</span></div>'
+    + '<span class="net-down" aria-label="Current download rate">↓ ' + formatCardSpeed(hasMetric(m, 8) ? m.network_down : null) + '</span>'
+    + '<span class="net-up" aria-label="Current upload rate">↑ ' + formatCardSpeed(hasMetric(m, 8) ? m.network_up : null) + '</span></div>'
     + '<div class="net-totals" aria-label="Monthly network usage">'
-    + '<span class="net-down" title="Monthly download usage">↓ ' + (ready ? formatTrafficBytes(traffic.recv) : '—') + '</span>'
-    + '<span class="net-up" title="Monthly upload usage">↑ ' + (ready ? formatTrafficBytes(traffic.sent) : '—') + '</span></div>';
+    + '<span class="net-down" aria-label="Monthly download usage">↓ ' + (ready ? formatTrafficBytes(traffic.recv) : '—') + '</span>'
+    + '<span class="net-up" aria-label="Monthly upload usage">↑ ' + (ready ? formatTrafficBytes(traffic.sent) : '—') + '</span></div>';
 }
 
 function expiryBadge(a) {
@@ -537,7 +533,7 @@ function cardBillingHTML(a) {
   const due = permanent ? '<span class="card-due" aria-label="No expiration">♾️</span>'
     : date ? '<time class="card-due" datetime="' + date + '" aria-label="Due ' + date + '">' + date + '</time>'
     : '<span class="card-due">Not set</span>';
-  return '<span class="card-cost" title="' + escapeAttr(cost) + '">' + escapeHtml(cost) + '</span>' + due;
+  return '<span class="card-cost">' + escapeHtml(cost) + '</span>' + due;
 }
 
 function updateExpiryBadge(node, a) {
@@ -558,7 +554,6 @@ function renderCard(a, isActive) {
   const m = a.latest_metric;
   const isOnline = a._online || false;
   const uptime = m ? formatUptime(m.uptime) : '-';
-  const seenTs = lastSeenMs(a);
   const expiryHtml = expiryBadge(a);
 
   return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
@@ -570,7 +565,7 @@ function renderCard(a, isActive) {
     + '<div class="card-sub"><span class="card-uptime">' + uptime + '</span>'
       + (a.agent.note ? '<span class="card-note">' + escapeHtml(a.agent.note) + '</span>' : '') + expiryHtml + '</div>'
     + '<div class="card-metrics">' + cardMetricsHTML(a) + '</div>'
-    + '<div class="card-speeds" title="' + (seenTs ? 'Last report ' + escapeAttr(relativeTime(seenTs)) : 'No reports yet') + '">' + cardNetworkHTML(a) + '</div>'
+    + '<div class="card-speeds">' + cardNetworkHTML(a) + '</div>'
     + (a.tcpping_enabled === false ? '<div class="card-probes-off"><span>TCP Ping · Off</span></div>'
       : '<div class="card-probes">' + cardProbesHTML(a) + '</div>')
     + '<div class="card-billing" aria-label="Billing cost and next renewal date">' + cardBillingHTML(a) + '</div>'
@@ -676,7 +671,7 @@ function renderDetailContent(id) {
   const probesEnabled = agent.tcpping_enabled !== false;
   const dayLabel = currentHistoryDay ? formatHistoryDay(currentHistoryDay.start * 1000) : '1d';
   const systemInfo = systemInfoText(agent);
-  detailEl.innerHTML = '<div class="detail-header">'
+  detailEl.innerHTML = '<div class="detail-header" title="' + escapeAttr(freshnessText(agent)) + '">'
     + '<div class="detail-heading">'
       + '<div class="detail-title"><span class="detail-hostname">' + escapeHtml(nodeName(agent)) + '</span><span class="sub">Node Detail</span></div>'
       + '<div class="detail-system" id="detail-system-' + id + '"' + (systemInfo ? '' : ' hidden') + '>' + escapeHtml(systemInfo) + '</div>'
@@ -1277,13 +1272,6 @@ function tcppingToggleLine(id, name) {
   saveTcppingSelections(id);
 }
 
-function goHome() {
-  expandedId = null;
-  filterRegion = '';
-  renderAll();
-  fullRefresh();
-}
-
 async function fullRefresh() {
   return refreshDashboard(true);
 }
@@ -1338,6 +1326,8 @@ async function refreshDashboard(forceRender) {
 
 function updateLiveSummaries(data) {
   data.forEach(a => {
+      const detailHeader = document.getElementById('detail-' + a.agent.id)?.querySelector?.('.detail-header');
+      if (detailHeader) detailHeader.title = freshnessText(a);
       const systemInfo = document.getElementById('detail-system-' + a.agent.id);
       if (systemInfo) {
         const text = systemInfoText(a);
@@ -1351,7 +1341,6 @@ function updateLiveSummaries(data) {
 
       card.classList.toggle('offline', !isOnline);
       card.setAttribute?.('aria-label', (isOnline ? 'Online' : 'Offline') + ' node ' + nodeName(a) + ', open details');
-      card.setAttribute?.('title', freshnessText(a));
       const listExpiry = card.querySelector('.list-expiry');
       if (listExpiry) listExpiry.innerHTML = a.agent.billing_period === 'forever' ? expiryBadge(a) : '';
       const cardSub = card.querySelector('.card-sub');
@@ -1373,10 +1362,10 @@ function updateLiveSummaries(data) {
         card.querySelector('.card-sub span:first-child').textContent = m ? formatUptime(m.uptime) : '-';
         const speeds = card.querySelector('.card-speeds');
         speeds.innerHTML = cardNetworkHTML(a);
-        speeds.title = freshnessText(a);
         return;
       }
 
+      card.setAttribute?.('title', freshnessText(a));
       if (!m) return;
       const cpu = hasMetric(m, 1) ? m.cpu_usage : null;
       const memPct = hasMetric(m, 2) && m.memory_total > 0 ? (m.memory_used / m.memory_total * 100) : null;
@@ -1526,7 +1515,7 @@ function connectEvents() {
   };
 }
 
-let themeMode = localStorage.getItem('themeMode') || 'light';
+let themeMode = localStorage.getItem('themeMode') === 'dark' ? 'dark' : 'light';
 
 function setThemeMode(mode) {
   themeMode = mode;
@@ -1537,8 +1526,7 @@ function setThemeMode(mode) {
 
 function applyTheme() {
   const html = document.documentElement;
-  const dark = themeMode === 'dark' || (themeMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  html.classList.toggle('dark', dark);
+  html.classList.toggle('dark', themeMode === 'dark');
   const color = sparklineColor();
   Object.values(sparkCharts).forEach(chart => {
     chart.setOption({ series: [{ lineStyle: { color }, areaStyle: { color, opacity: 0.04 } }] });
@@ -1546,13 +1534,8 @@ function applyTheme() {
   if (tcppingChart) tcppingChart.setOption(tcpingChartTheme());
 }
 
-(function initTheme() {
-  applyTheme();
-  updateHeaderIcons();
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (themeMode === 'system') applyTheme();
-  });
-})();
+applyTheme();
+updateHeaderIcons();
 
 window.addEventListener('resize', () => {
   const prev = gridCols;

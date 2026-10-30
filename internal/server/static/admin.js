@@ -7,10 +7,10 @@ let sessionTimer = null;
 const el = id => document.getElementById(id);
 const profileForm = el('profile-form');
 const field = name => profileForm.elements.namedItem(name);
+el('refresh-admin').addEventListener('click', event => { event.preventDefault(); location.reload(); });
 
 try {
-  const theme = localStorage.getItem('themeMode');
-  document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches));
+  document.documentElement.classList.toggle('dark', localStorage.getItem('themeMode') === 'dark');
 } catch (_) {}
 
 function message(id, text) {

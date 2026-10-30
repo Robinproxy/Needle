@@ -214,6 +214,10 @@ assert.equal((sixStats.match(/class="tcpping-route-family"/g)||[]).length,2);
 assert(sixStats.indexOf('data-family="v4"')<sixStats.indexOf('data-family="v6"'));
 assert(sixStats.indexOf('data-name="CTv4"')<sixStats.indexOf('data-name="CMv6"'));
 assert(sixStats.includes('title="Average latency"'));
+for (const card of [node, dual, disabled, {...dual,agent:{...dual.agent,billing_cost:{currency:'USD',amount:'5'},billing_period:'1m'},expiry_date:'2026-11-08',expiry_days:20,traffic}]) {
+  assert(!/\btitle\s*=/.test(ctx.renderCard(card,false)), 'no area of a node card should create a hover popup');
+}
+assert(systemDetail.includes('class="detail-header" title='),'sample freshness belongs in Node Detail');
 ctx.fixture=[{...node,latest_tcpping:['CM','CU','CT'].map(name=>({name:name+'v4'}))}];
 vm.runInContext('agents = fixture',ctx);
 let chartOptions={};
@@ -237,8 +241,11 @@ ctx.fixture=[disabled];vm.runInContext('agents = fixture',ctx);
   next=[disabled];await ctx.softRefresh();assert.equal(renders,2,'disabling probes must remove live latency fields');
   // Ordinary refresh updates all four metrics, both families and the speeds.
   const elements = new Map(['.card-metrics','.card-probes','.card-billing','.card-sub span:first-child'].map(k=>[k,{innerHTML:'',textContent:''}]));
-  elements.set('.card-speeds',{title:'',innerHTML:''});
-  const fakeCard={classList:{contains:name=>name==='card',toggle:()=>{}},querySelector:key=>elements.get(key)||null};
+  const speeds={innerHTML:''};
+  Object.defineProperty(speeds,'title',{set:()=>assert.fail('live refresh must not restore the network hover popup')});
+  elements.set('.card-speeds',speeds);
+  const fakeCard={classList:{contains:name=>name==='card',toggle:()=>{}},querySelector:key=>elements.get(key)||null,
+    setAttribute:name=>assert.notEqual(name,'title','live refresh must not restore the card hover popup')};
   ctx.document.querySelector=()=>fakeCard;
   const refreshed={...dual,agent:{...dual.agent,monthly_traffic_limit:1e12,cpu_cores:4},traffic,
     latest_metric:{cpu_usage:25,memory_total:4e9,memory_used:1e9,disk_total:10e9,disk_used:2e9,network_down:2e6,network_up:3.5e6,load1:.12,uptime:86400}};
@@ -254,6 +261,12 @@ ctx.fixture=[disabled];vm.runInContext('agents = fixture',ctx);
   assert(elements.get('.card-speeds').innerHTML.includes('↓ 296 GB'));
   assert(elements.get('.card-speeds').innerHTML.includes('↑ 100 GB'));
   assert(elements.get('.card-probes').innerHTML.includes('CUv6'));
+  for (const element of elements.values()) assert(!/\btitle\s*=/.test(element.innerHTML),'live card content must remain free of hover popups');
+  const detailHeader={title:''};
+  nodes.get('detail-1').querySelector=selector=>selector==='.detail-header'?detailHeader:null;
+  ctx.updateLiveSummaries([{...refreshed,live:{sample_at:100,last_full_sample_at:90,last_full_report_at:95,history_stale:true}}]);
+  assert(detailHeader.title.includes('History saved'));
+  assert(detailHeader.title.includes('History storage delayed'),'freshness diagnostics must still update in Node Detail');
   next=[{...refreshed,traffic:{...traffic,recv:400_000_000_000}}];await ctx.softRefresh();
   assert(elements.get('.card-metrics').innerHTML.includes('500 GB / 1 TB'));
   assert(elements.get('.card-speeds').innerHTML.includes('↓ 400 GB'));
