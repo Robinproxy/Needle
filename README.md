@@ -846,7 +846,9 @@ Use compatible binaries and installers from the same release. After database mig
 <details>
 <summary><strong>Dashboard refresh troubleshooting</strong></summary>
 
-The dashboard uses SSE, with 30-second polling while SSE is unavailable. A failed refresh retains the last successful data. Retry requests a new render; ordinary requests time out after 15 seconds.
+The dashboard uses SSE, with 30-second polling while SSE is unavailable. A failed refresh retains the last successful data. Brief interruptions recover quietly; an ongoing data outage shows a small `Updates paused · Retry` notice beside the region filters after 30 seconds. Successful SSE data or polling hides it. Initial loading failures show a centered Retry control. Ordinary requests time out after 15 seconds.
+
+Returning to the page, restoring the network, or restoring a cached page immediately refreshes data and rebuilds the connection. Background pages stop connection timers; canceled pre-sleep requests cannot replace resumed data. Retry restarts updates while keeping filters, open details and the selected history day. The NEEDLE logo reloads the entire page.
 
 If failures recur, check the failing endpoint in browser developer tools, Server logs, and `/api/health`; then check proxy / Tunnel connectivity. The proxy must permit the long-lived `/api/events` stream. A healthy internal endpoint does not prove public access is working. History panels have independent Retry controls.
 

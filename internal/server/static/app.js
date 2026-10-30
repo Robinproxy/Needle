@@ -15,6 +15,8 @@ let refreshInFlight = false;
 let dashboardNeedsRender = false;
 let lastRefreshAt = null;
 let dashboardLoadingTimer = null;
+let dashboardPauseTimer = null;
+let dashboardController = null;
 const TCPPING_COLORS = ['#6485ac', '#85a6c0', '#9282ae', '#b1a1c5', '#679b96', '#91b9ad', '#818bb4'];
 const TCPPING_ORDER = ['CMv4', 'CMv6', 'CUv4', 'CUv6', 'CTv4', 'CTv6'];
 
@@ -240,15 +242,23 @@ async function refreshServerInfo() {
 }
 
 function setDashboardState(state, message) {
-  const alert = document.getElementById('dashboard-alert');
-  const alertText = document.getElementById('dashboard-alert-text');
+  const status = document.getElementById('dashboard-status');
+  const retry = document.getElementById('empty-retry');
   const empty = document.getElementById('empty-state');
   const title = document.getElementById('empty-title');
   const desc = document.getElementById('empty-desc');
 
-  alert.hidden = state !== 'stale' && state !== 'error';
-  alert.classList.toggle('error', state === 'error');
-  if (alertText) alertText.textContent = message || '';
+  if (state === 'ready' || state === 'loading') {
+    clearTimeout(dashboardPauseTimer);
+    dashboardPauseTimer = null;
+    status.hidden = true;
+  } else if (lastRefreshAt && !document.hidden && !dashboardSuspended && status.hidden && !dashboardPauseTimer) {
+    dashboardPauseTimer = setTimeout(() => {
+      dashboardPauseTimer = null;
+      if (!document.hidden && !dashboardSuspended) status.hidden = false;
+    }, 30000);
+  }
+  retry.hidden = state !== 'error' || !!lastRefreshAt;
 
   if (dashboardLoadingTimer) {
     clearTimeout(dashboardLoadingTimer);
@@ -257,7 +267,7 @@ function setDashboardState(state, message) {
   if (state !== 'loading') empty.classList.remove('loading');
 
   if (state === 'loading') {
-    if (!agents.length) {
+    if (!lastRefreshAt && !document.hidden && !dashboardSuspended) {
       // Avoid flashing a large empty-state card during normal fast loads.
       // Only reveal a compact loading hint when the request is noticeably slow.
       empty.classList.remove('visible');
@@ -271,9 +281,9 @@ function setDashboardState(state, message) {
       }, 350);
     }
   } else if (state === 'error') {
-    if (!agents.length) {
+    if (!lastRefreshAt) {
       title.textContent = 'Unable to load dashboard';
-      desc.textContent = 'Check the server connection, then retry.';
+      desc.textContent = message || 'Check the server connection, then retry.';
       empty.classList.add('visible');
     }
   }
@@ -1283,11 +1293,14 @@ async function softRefresh() {
 async function refreshDashboard(forceRender) {
   if (refreshInFlight) return;
   refreshInFlight = true;
+  const controller = new AbortController();
+  dashboardController = controller;
   refreshServerInfo();
-  if (!agents.length) setDashboardState('loading');
+  if (!lastRefreshAt) setDashboardState('loading');
   let rendering = false;
   try {
-    const data = await fetchRows('/api/agents');
+    const data = await fetchRows('/api/agents', {signal: controller.signal});
+    if (controller.signal.aborted) return;
     if (data.some(a => !a?.agent || !Number.isSafeInteger(a.agent.id))) {
       const error = new Error('/api/agents: invalid node records');
       error.kind = 'data';
@@ -1295,7 +1308,7 @@ async function refreshDashboard(forceRender) {
     }
     const previousLayout = dashboardLayoutSignature(agents);
     const previous = new Map(agents.map(a => [a.agent.id, a]));
-    agents = data.map(a => mergeLiveNode(previous.get(a.agent.id), a));
+    agents = data.map(a => mergeLiveNode(previous.get(a.agent.id), a, !eventsConnected));
     agents.forEach(a => {
       const seen = lastSeenMs(a);
       a._online = !!seen && (Date.now() - seen < (a.live?.offline_after || 120) * 1000);
@@ -1312,6 +1325,7 @@ async function refreshDashboard(forceRender) {
     dashboardNeedsRender = false;
     setDashboardState('ready');
   } catch (error) {
+    if (controller.signal.aborted) return;
     if (rendering) dashboardNeedsRender = true;
     console.error('Dashboard ' + (rendering ? 'render' : 'request') + ':', error);
     const suffix = lastRefreshAt ? ' Last updated ' + lastRefreshAt.toLocaleTimeString() + '.' : '';
@@ -1320,7 +1334,10 @@ async function refreshDashboard(forceRender) {
         + (lastRefreshAt ? ' Showing the last successful data.' : ' Please retry.');
     setDashboardState(lastRefreshAt ? 'stale' : 'error', message + suffix);
   } finally {
-    refreshInFlight = false;
+    if (dashboardController === controller) {
+      dashboardController = null;
+      refreshInFlight = false;
+    }
   }
 }
 
@@ -1401,6 +1418,8 @@ let pollingTimer = null;
 let reconnectTimer = null;
 let reconnectDelay = 5000;
 let eventWatchdog = null;
+let dashboardSuspended = false;
+let lastRecoveryAt = 0;
 
 function watchEvents(stream, timeout) {
   if (eventWatchdog) clearTimeout(eventWatchdog);
@@ -1416,9 +1435,11 @@ function freshnessText(a) {
     + (a.live?.history_stale ? ' · History storage delayed; node may still be online' : '');
 }
 
-function mergeLiveNode(previous, incoming) {
+function mergeLiveNode(previous, incoming, resetRevision = false) {
   if (!previous) return incoming;
-  if (incoming.revision > 0 && incoming.revision < (previous.revision || 0)) return previous;
+  // Revisions belong to one Server process. A new connection's first snapshot
+  // (or fallback GET) can restart at a lower number; sample times still apply.
+  if (!resetRevision && incoming.revision > 0 && incoming.revision < (previous.revision || 0)) return previous;
   const merged = {...incoming};
   if ((previous.latest_metric?.created_at || 0) > (incoming.latest_metric?.created_at || 0)) merged.latest_metric = previous.latest_metric;
   if ((previous.live?.last_full_sample_at || 0) > (incoming.live?.last_full_sample_at || 0)) {
@@ -1447,7 +1468,7 @@ function applyEventNodes(data, replace = false, resetRevision = false, historyEv
     const old = previous.get(incoming.agent.id);
     if (!replace && !resetRevision && old && (incoming.revision || 0) <= (old.revision || 0)) continue;
     if (historyEvent || (incoming.live?.last_full_sample_at || 0) > (old?.live?.last_full_sample_at || 0)) changedHistory.add(incoming.agent.id);
-    const node = mergeLiveNode(old, incoming);
+    const node = mergeLiveNode(old, incoming, resetRevision);
     const seen = lastSeenMs(node);
     node._online = !!seen && Date.now() - seen < (node.live?.offline_after || 120) * 1000;
     previous.set(node.agent.id, node); changed.push(node);
@@ -1463,6 +1484,7 @@ function applyEventNodes(data, replace = false, resetRevision = false, historyEv
 }
 
 function startPolling() {
+  if (document.hidden || dashboardSuspended) return;
   if (!pollingTimer) pollingTimer = setInterval(softRefresh, 30000);
 }
 function stopEvents() {
@@ -1474,12 +1496,13 @@ function stopEvents() {
   pollingTimer = null; reconnectTimer = null;
 }
 function connectEvents() {
-  if (eventStream) return;
+  if (eventStream || document.hidden || dashboardSuspended) return;
   if (typeof EventSource === 'undefined') { startPolling(); return; }
   const stream = new EventSource('/api/events'); eventStream = stream;
   watchEvents(stream, 20000);
   let firstSnapshot = true;
   stream.onopen = () => {
+    if (eventStream !== stream) return;
     eventsConnected = true; reconnectDelay = 5000;
     if (pollingTimer) clearInterval(pollingTimer);
     pollingTimer = null;
@@ -1509,10 +1532,39 @@ function connectEvents() {
     if (eventWatchdog) clearTimeout(eventWatchdog);
     eventWatchdog = null;
     startPolling();
-    if (lastRefreshAt) setDashboardState('stale', 'Live connection interrupted; reconnecting. Historical data is retained.');
+    if (lastRefreshAt) setDashboardState('stale');
+    softRefresh();
     reconnectTimer = setTimeout(() => { reconnectTimer = null; connectEvents(); }, reconnectDelay);
     reconnectDelay = Math.min(30000, reconnectDelay * 2);
   };
+}
+
+function abortDashboardRefresh() {
+  dashboardController?.abort();
+  dashboardController = null;
+  refreshInFlight = false;
+}
+
+function retryDashboard(quiet = false) {
+  if (document.hidden) return;
+  const now = Date.now();
+  if (now - lastRecoveryAt < 1000 && (eventStream || refreshInFlight || pollingTimer || reconnectTimer)) return;
+  lastRecoveryAt = now;
+  dashboardSuspended = false;
+  stopEvents();
+  abortDashboardRefresh();
+  reconnectDelay = 5000;
+  if (quiet) setDashboardState('loading');
+  softRefresh();
+  connectEvents();
+}
+
+function suspendDashboard() {
+  dashboardSuspended = true;
+  lastRecoveryAt = 0;
+  stopEvents();
+  abortDashboardRefresh();
+  setDashboardState('loading');
 }
 
 let themeMode = localStorage.getItem('themeMode') === 'dark' ? 'dark' : 'light';
@@ -1593,4 +1645,13 @@ document.addEventListener('click', e => {
 });
 
 fullRefresh().then(connectEvents);
-window.addEventListener('pagehide', stopEvents);
+window.addEventListener('pagehide', suspendDashboard);
+window.addEventListener('pageshow', event => { if (event.persisted) retryDashboard(true); });
+window.addEventListener('online', () => retryDashboard(true));
+window.addEventListener('focus', () => {
+  if (!lastRefreshAt || Date.now() - lastRefreshAt.getTime() > 30000) retryDashboard(true);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) suspendDashboard();
+  else retryDashboard(true);
+});

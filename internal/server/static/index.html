@@ -43,11 +43,10 @@
 
   <div class="server-info-bar container">
     <div class="server-info" id="server-info"></div>
-  </div>
-
-  <div id="dashboard-alert" class="dashboard-alert container" role="status" aria-live="polite" hidden>
-    <span id="dashboard-alert-text"></span>
-    <button class="btn btn-ghost btn-sm" type="button" onclick="fullRefresh()">Retry</button>
+    <div id="dashboard-status" class="dashboard-status" role="status" aria-live="polite" hidden>
+      <span>Updates paused</span><span aria-hidden="true">·</span>
+      <button type="button" onclick="retryDashboard()">Retry</button>
+    </div>
   </div>
 
   <main class="container">
@@ -59,6 +58,7 @@
       </div>
       <div id="empty-title" class="empty-title">Loading nodes...</div>
       <div id="empty-desc" class="empty-desc">Fetching the latest monitoring data.</div>
+      <button id="empty-retry" class="btn btn-ghost btn-sm" type="button" onclick="retryDashboard()" hidden>Retry</button>
     </div>
   </main>
 
