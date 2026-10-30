@@ -840,6 +840,8 @@ Restart to apply changes, then confirm the next full report in logs / dashboard.
 
 Cards show system usage, live upload / download rates, monthly totals, allowance, configured billing cost, and next scheduled renewal. Permanent dates and unmetered allowances display ♾️. Probe columns keep v4 left and v6 right; disabled probes retain a muted `TCP Ping · Off` area.
 
+Green / red dots indicate timely / overdue Agent reports, not confirmed power state. Cards and list rows keep normal contrast. Within the existing Server timeout, uptime stays visible; overdue reports replace it with `Seen 3m ago`, retaining the last readings and billing details. A new report restores uptime automatically. Browser connection failures retain the last confirmed node states and use the page's connection notice.
+
 The header's **calendar / up-arrow** toggles next-renewal sorting (active = stronger color) and saved manual order. Soonest dates come first; permanent / undated nodes last. Ties retain manual order; offline nodes and region filters still apply. The browser remembers the mode. Sorting changes no saved positions, billing, or traffic boundaries and needs only a Server update.
 
 Node Detail adds a wrapping system line: `AMD EPYC 7B13 · Debian 12 · x86_64 · KVM`. CPU model, OS/version, architecture, and virtualization appear here only, without hover popups or missing-value placeholders.

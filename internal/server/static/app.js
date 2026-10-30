@@ -133,11 +133,7 @@ function toggleDueSort() {
 }
 
 function renderInfoBar() {
-  const now = Date.now();
-  const online = agents.filter(a => {
-    const seen = lastSeenMs(a);
-    return seen && (now - seen < (a.live?.offline_after || 120) * 1000);
-  }).length;
+  const online = agents.filter(a => a._online).length;
   const total = agents.length;
 
   const regions = {};
@@ -561,12 +557,11 @@ function dashboardLayoutSignature(list) {
 }
 
 function renderCard(a, isActive) {
-  const m = a.latest_metric;
   const isOnline = a._online || false;
-  const uptime = m ? formatUptime(m.uptime) : '-';
+  const uptime = nodeUptimeText(a);
   const expiryHtml = expiryBadge(a);
 
-  return '<div class="card' + (isActive ? ' active' : '') + (!isOnline ? ' offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
+  return '<div class="card' + (isActive ? ' active' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<div class="card-top">'
       + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
       + '<span class="card-hostname">' + escapeHtml(nodeName(a)) + '</span>'
@@ -590,7 +585,7 @@ function renderListRow(a, idx, isActive) {
   const diskPct = m && m.disk_total > 0 ? (m.disk_used / m.disk_total * 100) : null;
   const upSpeed = hasMetric(m, 8) ? formatSpeed(m.network_up) : '—';
   const downSpeed = hasMetric(m, 8) ? formatSpeed(m.network_down) : '—';
-  const uptime = m ? formatUptime(m.uptime) : '-';
+  const uptime = nodeUptimeText(a);
   const seenTs = lastSeenMs(a);
   const region = a.agent.region;
   const regionLabel = region && region.length === 2 ? flagEmoji(region) : escapeHtml(region || '');
@@ -612,7 +607,7 @@ function renderListRow(a, idx, isActive) {
       + '</span>';
   }
 
-  return '<div class="list-row' + (isActive ? ' active' : '') + ' ' + (!isOnline ? 'offline' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
+  return '<div class="list-row' + (isActive ? ' active' : '') + '" role="button" tabindex="0" aria-expanded="' + isActive + '" aria-controls="detail-' + a.agent.id + '" aria-label="' + (isOnline ? 'Online' : 'Offline') + ' node ' + escapeAttr(nodeName(a)) + ', open details" onclick="toggleExpand(' + a.agent.id + ')" data-id="' + a.agent.id + '">'
     + '<span class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></span>'
     + '<span class="list-hostname">' + escapeHtml(nodeName(a)) + '</span>'
     + '<span class="list-region">' + regionLabel + '</span>'
@@ -626,7 +621,7 @@ function renderListRow(a, idx, isActive) {
     + '<span class="list-net">\u2193' + downSpeed + ' \u2191' + upSpeed + '</span>'
     + '<span class="list-uptime">' + uptime + '</span>'
     + '<span class="list-expiry">' + (a.agent.billing_period === 'forever' ? expiryBadge(a) : '') + '</span>'
-    + '<span class="list-time">' + (seenTs ? relativeTime(seenTs) : '') + '</span>'
+    + '<span class="list-time">' + (isOnline && seenTs ? relativeTime(seenTs) : '') + '</span>'
   + '</div>';
 }
 
@@ -635,6 +630,12 @@ function renderListRow(a, idx, isActive) {
 function lastSeenMs(a) {
   if (a.agent.last_seen) return a.agent.last_seen * 1000;
   return a.latest_metric ? a.latest_metric.created_at * 1000 : 0;
+}
+
+function nodeUptimeText(a) {
+  if (a._online) return a.latest_metric ? formatUptime(a.latest_metric.uptime) : 'No data';
+  const seen = lastSeenMs(a);
+  return seen ? 'Seen ' + relativeTime(seen) : 'No reports';
 }
 
 function relativeTime(ts) {
@@ -1323,7 +1324,7 @@ async function refreshDashboard(forceRender) {
     if (expandedId && !agents.some(a => a.agent.id === expandedId)) expandedId = null;
     if (forceRender || dashboardNeedsRender || previousLayout !== dashboardLayoutSignature(agents)) renderAll();
     else {
-      updateLiveSummaries(data);
+      updateLiveSummaries(agents);
       if (expandedId && !eventsConnected) updateDetailCharts(expandedId);
     }
     lastRefreshAt = new Date();
@@ -1361,7 +1362,6 @@ function updateLiveSummaries(data) {
       const m = a.latest_metric;
       const isOnline = a._online || false;
 
-      card.classList.toggle('offline', !isOnline);
       card.setAttribute?.('aria-label', (isOnline ? 'Online' : 'Offline') + ' node ' + nodeName(a) + ', open details');
       const listExpiry = card.querySelector('.list-expiry');
       if (listExpiry) listExpiry.innerHTML = a.agent.billing_period === 'forever' ? expiryBadge(a) : '';
@@ -1374,14 +1374,15 @@ function updateLiveSummaries(data) {
 
       const seenTs = lastSeenMs(a);
       const seenEl = card.querySelector('.list-time');
-      if (seenEl && seenTs) seenEl.textContent = relativeTime(seenTs);
+      if (seenEl) seenEl.textContent = isOnline && seenTs ? relativeTime(seenTs) : '';
+      const uptimeEl = card.querySelector('.card-uptime, .list-uptime');
+      if (uptimeEl) uptimeEl.textContent = nodeUptimeText(a);
       if (card.classList.contains('card')) {
         const billing = card.querySelector('.card-billing');
         if (billing) billing.innerHTML = cardBillingHTML(a);
         card.querySelector('.card-metrics').innerHTML = cardMetricsHTML(a);
         const probes = card.querySelector('.card-probes');
         if (probes) probes.innerHTML = cardProbesHTML(a);
-        card.querySelector('.card-sub span:first-child').textContent = m ? formatUptime(m.uptime) : '-';
         const speeds = card.querySelector('.card-speeds');
         speeds.innerHTML = cardNetworkHTML(a);
         return;
@@ -1407,8 +1408,6 @@ function updateLiveSummaries(data) {
       }
       const netEl = card.querySelector('.list-net');
       if (netEl) netEl.textContent = hasMetric(m, 8) ? '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up) : '\u2193— \u2191—';
-      const uptimeEl = card.querySelector('.list-uptime');
-      if (uptimeEl) uptimeEl.textContent = formatUptime(m.uptime);
     });
 }
 

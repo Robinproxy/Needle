@@ -39,6 +39,7 @@ jobs:
           node scripts/test-realtime-dashboard.cjs
           node scripts/test-renewal-sort.cjs
           node scripts/test-admin-sorting.cjs
+          node scripts/test-node-status.cjs
       - name: Verify real Linux Server migration and CLI permissions
         run: |
           go build -o /tmp/needle-server-security ./cmd/server

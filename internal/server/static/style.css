@@ -203,7 +203,6 @@ header {
   border-color: hsl(var(--primary) / 0.65);
   box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 2px 12px hsl(var(--primary) / 0.1);
 }
-.card.offline { opacity: 0.55; }
 
 .card-top { display: flex; align-items: center; gap: 8px; }
 .status-dot {
@@ -328,7 +327,6 @@ header {
   border-color: hsl(var(--primary) / 0.55);
   box-shadow: 0 0 0 1px hsl(var(--primary) / 0.15);
 }
-.list-row.offline { opacity: 0.55; }
 .list-row .status-dot { flex: 0 0 auto; }
 .list-hostname { font-weight: 600; min-width: 120px; }
 .server-info .fi { font-size: 11px; }
@@ -357,7 +355,7 @@ header {
 .list-ping-lat { font-weight: 600; }
 .list-ping-loss { color: hsl(var(--muted-foreground) / 0.6); }
 .list-net { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-foreground)); white-space: nowrap; width: 90px; text-align: right; }
-.list-uptime { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-foreground) / 0.7); width: 60px; text-align: right; }
+.list-uptime { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-foreground) / 0.7); width: 100px; flex-shrink: 0; white-space: nowrap; text-align: right; }
 .list-time { font-family: var(--font-mono); font-size: 11px; color: hsl(var(--muted-foreground) / 0.5); width: 60px; text-align: right; }
 
 /* INLINE DETAIL */
