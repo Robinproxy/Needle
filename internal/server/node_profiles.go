@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ func (s *Store) migrateNodeProfiles() error {
 	for _, definition := range []string{
 		"display_name TEXT NOT NULL DEFAULT ''",
 		"note TEXT NOT NULL DEFAULT ''",
+		"provider_url TEXT NOT NULL DEFAULT ''",
 		"profile_managed INTEGER NOT NULL DEFAULT 0",
 		"profile_revision INTEGER NOT NULL DEFAULT 0",
 		"traffic_reset_day INTEGER",
@@ -40,6 +42,7 @@ type NodeProfileInput struct {
 	OrderVersion          int64  `json:"order_version"`
 	DisplayName           string `json:"display_name"`
 	Note                  string `json:"note"`
+	ProviderURL           string `json:"provider_url"`
 	Region                string `json:"region"`
 	BillingCurrency       string `json:"billing_currency"`
 	BillingAmount         string `json:"billing_amount"`
@@ -60,7 +63,7 @@ type NodeProfile struct {
 
 func nodeProfile(a AgentRow, position int, orderVersion int64, now time.Time) NodeProfile {
 	p := NodeProfile{NodeProfileInput: NodeProfileInput{
-		Version: a.ProfileRevision, OrderVersion: orderVersion, DisplayName: a.DisplayName, Note: a.Note,
+		Version: a.ProfileRevision, OrderVersion: orderVersion, DisplayName: a.DisplayName, Note: a.Note, ProviderURL: a.ProviderURL,
 		Region: a.Region, BillingPeriod: a.BillingPeriod, Position: position,
 		MonthlyTrafficLimitGB: strconv.FormatInt(a.MonthlyTrafficLimit/1_000_000_000, 10),
 	}, ID: a.ID, Hostname: a.Hostname, Managed: a.ProfileManaged}
@@ -93,6 +96,21 @@ func (p *NodeProfileInput) normalize(now time.Time) (*billing.Cost, *int64, int6
 	p.Note = strings.TrimSpace(p.Note)
 	if !utf8.ValidString(p.Note) || utf8.RuneCountInString(p.Note) > 40 || hasControl(p.Note) || strings.ContainsAny(p.Note, "\u2028\u2029") {
 		return nil, nil, 0, fmt.Errorf("note must be a single line of up to 40 characters")
+	}
+	p.ProviderURL = strings.TrimSpace(p.ProviderURL)
+	if p.ProviderURL != "" {
+		website, err := url.Parse(p.ProviderURL)
+		if err != nil || !utf8.ValidString(p.ProviderURL) || len(p.ProviderURL) > 2048 ||
+			hasControl(p.ProviderURL) || strings.ContainsAny(p.ProviderURL, "\\ \u2028\u2029") ||
+			(website.Scheme != "http" && website.Scheme != "https") || website.Hostname() == "" || website.User != nil {
+			return nil, nil, 0, fmt.Errorf("provider website must be an HTTP or HTTPS URL without credentials, up to 2048 bytes")
+		}
+		if port := website.Port(); port != "" {
+			number, err := strconv.Atoi(port)
+			if err != nil || number < 1 || number > 65535 {
+				return nil, nil, 0, fmt.Errorf("invalid provider website port")
+			}
+		}
 	}
 	p.Region = strings.ToUpper(strings.TrimSpace(p.Region))
 	if p.Region != "" && !regionCodeRe.MatchString(p.Region) {
@@ -220,9 +238,9 @@ func (s *Store) UpdateNodeProfile(id int64, p NodeProfileInput, actor string) er
 		day = legacyDay
 	}
 	encoded, _ := json.Marshal(cost)
-	if _, err := tx.Exec(`UPDATE agents SET display_name=?,note=?,region=?,billing_cost=?,billing_period=?,expires_at=?,
+	if _, err := tx.Exec(`UPDATE agents SET display_name=?,note=?,provider_url=?,region=?,billing_cost=?,billing_period=?,expires_at=?,
  monthly_traffic_limit=?,profile_managed=1,profile_revision=profile_revision+1,traffic_reset_day=? WHERE id=?`,
-		p.DisplayName, p.Note, p.Region, string(encoded), p.BillingPeriod, expiry, limit, day, id); err != nil {
+		p.DisplayName, p.Note, p.ProviderURL, p.Region, string(encoded), p.BillingPeriod, expiry, limit, day, id); err != nil {
 		return err
 	}
 	if err := moveAgentTx(tx, strconv.FormatInt(id, 10), p.Position); err != nil {

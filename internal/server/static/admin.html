@@ -13,10 +13,10 @@
 <body class="admin-page">
   <header>
     <div class="container header-inner">
-      <a class="brand" href="/admin" id="refresh-admin" aria-label="Refresh management page">
+      <button class="brand" type="button" id="refresh-admin" aria-label="Refresh management page">
         <img class="brand-icon" src="/favicon.svg" width="28" height="28" alt="">
         <div class="brand-text"><h1>NEEDLE</h1><p>Manage</p></div>
-      </a>
+      </button>
       <nav class="admin-nav" aria-label="Administration">
         <a href="/">Dashboard <span aria-hidden="true">↗</span></a>
         <button id="logout" class="btn btn-ghost btn-sm" type="button" hidden>Sign out</button>
@@ -49,14 +49,13 @@
 
     <section id="management" hidden>
       <div class="admin-heading">
-        <div><span class="admin-eyebrow">ADMINISTRATION</span><h2>Node settings</h2><p id="node-summary">Loading nodes…</p></div>
-        <button id="reload-nodes" class="admin-secondary" type="button">Refresh</button>
+        <div><span class="admin-eyebrow">ADMINISTRATION</span><h2>Node settings</h2></div>
       </div>
       <p id="save-notice" class="admin-notice" role="status" hidden></p>
-      <div class="admin-columns" aria-hidden="true"><span>Node</span><span>Billing</span><span>Next renewal</span><span>Monthly traffic</span><span></span></div>
+      <div class="admin-columns"><span>Node</span><button type="button" class="admin-sort" data-sort="billing" aria-label="Billing: sort by currency, then monthly equivalent" aria-pressed="false">Billing<span class="sort-indicator" aria-hidden="true">↕</span></button><button type="button" class="admin-sort" data-sort="renewal" aria-pressed="false">Next renewal<span class="sort-indicator" aria-hidden="true">↕</span></button><button type="button" class="admin-sort" data-sort="traffic" aria-pressed="false">Monthly traffic<span class="sort-indicator" aria-hidden="true">↕</span></button><span></span></div>
       <div id="node-list" role="list" aria-label="Nodes"></div>
       <p id="no-nodes" class="admin-empty" hidden>No nodes connected yet. Install an Agent and allow its Token on the Server.</p>
-      <p class="admin-footnote">Node settings saved here stay in effect after Agent reports and upgrades. Monitoring continues independently.</p>
+      <p class="admin-footnote">Billing sorts by currency and monthly equivalent.</p>
     </section>
   </main>
 
@@ -66,6 +65,7 @@
       <div class="editor-fields">
         <label class="field-wide">Display name<input name="display_name" maxlength="253" placeholder="Use Agent hostname"></label>
         <div class="field-wide"><label>Note<input name="note" maxlength="80" placeholder="Optional" aria-describedby="node-note-hint"></label><p id="node-note-hint" class="field-hint">Up to 40 characters. Shown publicly beside uptime on the node card.</p></div>
+        <label class="field-wide">Provider website<input name="provider_url" type="url" maxlength="2048" placeholder="https://provider.example.com" autocomplete="url"></label>
         <label>Region<input name="region" maxlength="2" placeholder="US, CN, SG…" autocomplete="off"></label>
         <label>Position<input name="position" type="number" min="1" step="1" required></label>
       </div>

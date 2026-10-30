@@ -455,7 +455,7 @@ sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-init
 
 Run the matching command. Enter username (default `admin`), browser origin (`https://needle.example.com`, no path), and a password of at least 15 characters twice; hidden input displays nothing. HTTPS is required except for loopback testing. Passwords must be entered interactively, not through arguments, environment, or pipes. Only CLI setup enables editing; there is no public registration.
 
-Keep the configured origin stable and forward browser `Origin` unchanged; forwarded headers cannot override it. Open **Manage**, sign in, then **Edit** a node. Sessions expire after eight hours, sign-out, or restart. SQLite stores salted Argon2id password hashes.
+Keep the configured origin stable and forward browser `Origin` unchanged; forwarded headers cannot override it. Open **Manage**, sign in, then **Edit** a node. Click the NEEDLE / Manage logo to reload the management page. Column headers sort billing (currency, then monthly equivalent; paid lifetime plans last within each currency), next renewal, or monthly allowance; repeated clicks cycle ascending, descending, and saved order. Unconfigured values stay last; ♾️ traffic sorts as the largest allowance. Sorting changes only this list and survives saves until the page reloads. Sessions expire after eight hours, sign-out, or restart. SQLite stores salted Argon2id password hashes.
 
 Reset password, username, or origin interactively; this invalidates sessions without a restart:
 
@@ -473,6 +473,7 @@ Upgrade compatibility and ownership:
 - New `server_managed: true` Agents start with billing / renewal **Not set**, reset day 1, and unlimited allowance (♾️). Complete settings in the editor.
 - Display name is a label; CLI and Token bindings use the original hostname or stable numeric ID.
 - Note: up to 40 single-line characters, shown beside card uptime; truncated to fit, hidden when empty. Edit / clear it on the Server.
+- Provider website (`provider_url`): optional HTTP / HTTPS URL, up to 2048 bytes, without embedded credentials. Use the row's pencil icon to edit; the external-link icon opens the website in a new tab. Clear the field to hide that icon. Stored on the Server and visible only in Manage; no Agent change needed.
 - Monthly reset day is pinned on takeover (default 1), read-only, and independent of renewal. Editing price, period, date, or allowance never clears usage or moves cycle boundaries. Short months retain the original day (29–31) for later months.
 - Renewal dates project future reminders by payment period; they do not confirm payment. The editor shows the saved anchor and projected next date.
 - Saves are validated and transactional, reject stale forms, refresh the dashboard, and retain the latest 200 change records. Migration preserves existing history and accounting boundaries.
