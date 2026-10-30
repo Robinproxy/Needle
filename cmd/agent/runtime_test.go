@@ -18,6 +18,7 @@ import (
 	"time"
 
 	agentpkg "needle/internal/agent"
+	"needle/internal/agent/collector"
 )
 
 func TestAgentRuntimeHelper(t *testing.T) {
@@ -33,6 +34,7 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("run the Agent lifecycle as a non-root user")
 	}
+	systemInfo, _ := collector.CollectSystemInfo()
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +112,9 @@ func TestNonRootAgentStartsReportsAndRestarts(t *testing.T) {
 		}
 		if report.Arch == "" {
 			t.Fatalf("Agent did not attach startup system information: %+v", report)
+		}
+		if report.VirtualizationSystem != systemInfo.VirtualizationSystem || report.VirtualizationRole != systemInfo.VirtualizationRole {
+			t.Fatalf("Agent did not attach startup virtualization information: %+v, want %+v", report, systemInfo)
 		}
 		if !report.ServerManaged {
 			t.Fatalf("Agent did not initialize Server profile management when the YAML marker was omitted: %+v", report)

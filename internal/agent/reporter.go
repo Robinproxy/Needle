@@ -14,10 +14,12 @@ import (
 )
 
 type ReportData struct {
-	ServerManaged bool   `json:"server_managed,omitempty"`
-	CPUModel      string `json:"cpu_model,omitempty"`
-	OSName        string `json:"os_name,omitempty"`
-	Arch          string `json:"arch,omitempty"`
+	ServerManaged        bool   `json:"server_managed,omitempty"`
+	CPUModel             string `json:"cpu_model,omitempty"`
+	OSName               string `json:"os_name,omitempty"`
+	Arch                 string `json:"arch,omitempty"`
+	VirtualizationSystem string `json:"virtualization_system,omitempty"`
+	VirtualizationRole   string `json:"virtualization_role,omitempty"`
 
 	BootID string `json:"boot_id,omitempty"`
 

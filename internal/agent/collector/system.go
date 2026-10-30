@@ -13,9 +13,11 @@ import (
 )
 
 type SystemInfo struct {
-	CPUModel string
-	OSName   string
-	Arch     string
+	CPUModel             string
+	OSName               string
+	Arch                 string
+	VirtualizationSystem string
+	VirtualizationRole   string
 }
 
 // CollectSystemInfo runs once at startup. These optional details are separate
@@ -50,6 +52,12 @@ func CollectSystemInfo() (SystemInfo, error) {
 	}
 	if err != nil {
 		failures = append(failures, fmt.Errorf("operating system: %w", err))
+	}
+	if runtime.GOOS == "linux" {
+		info.VirtualizationSystem, info.VirtualizationRole, err = linuxVirtualization(os.ReadFile, host.Virtualization)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("virtualization: %w", err))
+		}
 	}
 	return info, errors.Join(failures...)
 }

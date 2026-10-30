@@ -211,7 +211,7 @@ func (s *Store) migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN report_interval INTEGER NOT NULL DEFAULT 30")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN realtime_interval INTEGER NOT NULL DEFAULT 0")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN cpu_cores INTEGER NOT NULL DEFAULT 0")
-	for _, column := range []string{"cpu_model", "os_name", "arch"} {
+	for _, column := range []string{"cpu_model", "os_name", "arch", "virtualization_system", "virtualization_role"} {
 		if _, err := s.db.Exec("ALTER TABLE agents ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
@@ -561,10 +561,12 @@ func insertTCPing(x execer, t *TCPingRow, createdAt int64) error {
 
 // ReportWrite is one agent report; SaveReport persists it atomically.
 type ReportWrite struct {
-	ServerManaged bool
-	CPUModel      string
-	OSName        string
-	Arch          string
+	ServerManaged        bool
+	CPUModel             string
+	OSName               string
+	Arch                 string
+	VirtualizationSystem string
+	VirtualizationRole   string
 
 	ReportID  string
 	Digest    string
@@ -689,12 +691,12 @@ func (s *Store) SaveReport(r *ReportWrite) (int64, error) {
 	return commitReport(tx, r, agentID, now)
 }
 
-const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch, display_name, profile_managed, profile_revision, traffic_reset_day, note"
+const agentColumns = "id, hostname, created_at, region, expires_at, billing_period, last_seen, monthly_traffic_limit, cpu_cores, display_order, billing_cost, report_interval, realtime_interval, COALESCE(report_sample_at,0), cpu_model, os_name, arch, display_name, profile_managed, profile_revision, traffic_reset_day, note, virtualization_system, virtualization_role"
 
 func scanAgent(row interface{ Scan(...any) error }) (AgentRow, error) {
 	var a AgentRow
 	var cost sql.NullString
-	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch, &a.DisplayName, &a.ProfileManaged, &a.ProfileRevision, &a.TrafficResetDay, &a.Note); err != nil {
+	if err := row.Scan(&a.ID, &a.Hostname, &a.CreatedAt, &a.Region, &a.ExpiresAt, &a.BillingPeriod, &a.LastSeen, &a.MonthlyTrafficLimit, &a.CPUCores, &a.DisplayOrder, &cost, &a.ReportInterval, &a.RealtimeInterval, &a.ReportSampleAt, &a.CPUModel, &a.OSName, &a.Arch, &a.DisplayName, &a.ProfileManaged, &a.ProfileRevision, &a.TrafficResetDay, &a.Note, &a.VirtualizationSystem, &a.VirtualizationRole); err != nil {
 		return a, err
 	}
 	if cost.Valid {

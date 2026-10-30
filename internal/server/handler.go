@@ -320,6 +320,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	write := &ReportWrite{
 		ServerManaged: req.ServerManaged,
 		CPUModel:      req.CPUModel, OSName: req.OSName, Arch: req.Arch,
+		VirtualizationSystem: req.VirtualizationSystem, VirtualizationRole: req.VirtualizationRole,
 		ReportID: req.ReportID, Digest: hex.EncodeToString(digest[:]),
 		Token:    token,
 		Interval: req.Interval, RealtimeInterval: req.RealtimeInterval,

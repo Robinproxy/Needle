@@ -87,9 +87,12 @@ func saveReportMetadata(tx *sql.Tx, r *ReportWrite, now time.Time, sampledAt int
 	 cpu_cores=CASE WHEN ?>0 THEN ? ELSE cpu_cores END,report_interval=?,realtime_interval=?,
 	 cpu_model=CASE WHEN ?<>'' THEN ? ELSE cpu_model END,
 	 os_name=CASE WHEN ?<>'' THEN ? ELSE os_name END,
-	 arch=CASE WHEN ?<>'' THEN ? ELSE arch END WHERE id=?`,
+	 arch=CASE WHEN ?<>'' THEN ? ELSE arch END,
+	 virtualization_system=CASE WHEN ?<>'' THEN ? ELSE virtualization_system END,
+	 virtualization_role=CASE WHEN ?<>'' THEN ? ELSE virtualization_role END WHERE id=?`,
 		sampledAt, r.MonthlyTrafficLimit, r.CPUCores, r.CPUCores, defaultReportInterval(r.Interval), r.RealtimeInterval,
-		r.CPUModel, r.CPUModel, r.OSName, r.OSName, r.Arch, r.Arch, id)
+		r.CPUModel, r.CPUModel, r.OSName, r.OSName, r.Arch, r.Arch,
+		r.VirtualizationSystem, r.VirtualizationSystem, r.VirtualizationSystem, r.VirtualizationRole, id)
 	if err == nil && newNode && r.ServerManaged {
 		day, configured := trafficResetDay(r.BillingPeriod, r.ExpiresAt)
 		if !configured {

@@ -11,10 +11,12 @@ import (
 )
 
 type reportRequest struct {
-	ServerManaged bool   `json:"server_managed,omitempty"`
-	CPUModel      string `json:"cpu_model,omitempty"`
-	OSName        string `json:"os_name,omitempty"`
-	Arch          string `json:"arch,omitempty"`
+	ServerManaged        bool   `json:"server_managed,omitempty"`
+	CPUModel             string `json:"cpu_model,omitempty"`
+	OSName               string `json:"os_name,omitempty"`
+	Arch                 string `json:"arch,omitempty"`
+	VirtualizationSystem string `json:"virtualization_system,omitempty"`
+	VirtualizationRole   string `json:"virtualization_role,omitempty"`
 
 	BootID string `json:"boot_id,omitempty"`
 
@@ -67,11 +69,17 @@ func validateReport(req *reportRequest, now time.Time) error {
 	for _, field := range []struct {
 		value *string
 		limit int
-	}{{&req.CPUModel, 256}, {&req.OSName, 256}, {&req.Arch, 32}} {
+	}{{&req.CPUModel, 256}, {&req.OSName, 256}, {&req.Arch, 32}, {&req.VirtualizationSystem, 64}, {&req.VirtualizationRole, 5}} {
 		if !utf8.ValidString(*field.value) || hasControl(*field.value) || utf8.RuneCountInString(*field.value) > field.limit {
 			return fmt.Errorf("invalid system information")
 		}
 		*field.value = strings.TrimSpace(*field.value)
+	}
+	if req.VirtualizationRole != "" && req.VirtualizationRole != "guest" && req.VirtualizationRole != "host" {
+		return fmt.Errorf("invalid virtualization role")
+	}
+	if req.VirtualizationSystem == "" && req.VirtualizationRole != "" {
+		return fmt.Errorf("virtualization role requires a system")
 	}
 	if req.ReportID != "" && (!reportIDPattern.MatchString(req.ReportID) || req.CreatedAt == nil || *req.CreatedAt <= 0) {
 		return fmt.Errorf("invalid report identity/sample time")

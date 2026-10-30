@@ -17,12 +17,12 @@
   <a href="https://github.com/Robinproxy/Needle/actions/workflows/docker.yml"><img src="https://github.com/Robinproxy/Needle/actions/workflows/docker.yml/badge.svg?branch=main" alt="Docker build"></a>
 </p>
 
-Needle consists of one Server and multiple Agents. Agents make outbound-only connections to collect CPU, memory, network traffic, and TCP Ping metrics. The Server stores them in SQLite and serves a read-only web dashboard.
+One Server, multiple Agents, SQLite storage, and a public dashboard with optional administrator editing.
 
 ## Features
 
 - CPU, memory, disk, load, uptime, network rates, and monthly upload + download usage
-- CPU model, operating system/version, and architecture in Node Detail
+- CPU model, operating system/version, architecture, and virtualization in Node Detail
 - Configurable TCP Ping targets for IPv4 / IPv6, with latency, jitter, and loss history
 - Billing costs, renewal reminders, monthly traffic allowances, and ♾️ options
 - Public dashboard with an optional single-administrator node settings page
@@ -39,11 +39,11 @@ Agent C ─┘                   │
                              └── Web Dashboard
 ```
 
-Deploy one Server and an Agent on each monitored machine. Agents make outbound connections; they need no inbound port. The Docker image contains the Server only.
+Install an Agent on each monitored machine; no inbound Agent ports are needed. The Docker image contains only the Server.
 
 ## Deployment & Operations
 
-Upgrade **Server first, then Agents**, and back up the Server database. The commands below use the default paths. Installers download the latest stable release; use the installer packaged with a release when deliberately installing an older version. Configuration examples follow **Common Paths**.
+Back up the database and upgrade **Server first, then Agents**. Commands use default paths; omit `sudo` in a root shell. Installers fetch the latest stable release; for an older release, use its packaged installer. Paths and configuration fields are listed below.
 
 <details>
 <summary><strong>1. Server — Docker Compose</strong></summary>
@@ -60,7 +60,7 @@ curl -fsSLO https://raw.githubusercontent.com/Robinproxy/Needle/main/docker-comp
 docker compose up -d
 ```
 
-The container runs as UID/GID 1000. Its database directory must belong to that user, with mode `700`. The host port defaults to `127.0.0.1:8008`. Put an HTTPS reverse proxy or Tunnel in front: use `http://127.0.0.1:8008` from the host, or `http://needle-server:8008` from the same Docker network. Agents use the public HTTPS URL.
+The container uses UID/GID 1000 and a mode-`700` database directory. Put HTTPS in front of `http://127.0.0.1:8008` (host proxy) or `http://needle-server:8008` (same Docker network). Agents use the public HTTPS URL.
 
 ### Status, logs, and upgrades
 
@@ -89,7 +89,7 @@ docker compose start needle-server
 
 Upgrade retains the mounted database, registered tokens, and node settings. It does not upgrade remote Agents.
 
-The supplied Compose file rotates this container's logs at `10m` per file, retaining three files (about 30 MB). For an existing deployment, add the `logging` block shown under **Configuration** to the local Compose file, then run `docker compose up -d --force-recreate needle-server`. A binary/image upgrade alone does not edit your Compose file. Rotation applies to the recreated container; export any old container logs you need before recreation. Database/history retention is independent of log rotation.
+Compose rotates logs at `10m` × 3 files (about 30 MB). For an existing deployment, add the **Configuration** logging block and run `docker compose up -d --force-recreate needle-server`; image upgrades do not edit Compose. Export needed logs before recreation. Log rotation does not affect database retention.
 
 ### Agents and tokens
 
@@ -121,7 +121,7 @@ sudo -u "#$(sudo stat -c '%u' data/needle.db)" \
   "SELECT hostname, token FROM agent_tokens WHERE hostname = 'Malibu';"
 ```
 
-The query runs as the database owner, reads the live database including committed WAL, and needs no Server restart. No output means no matching binding. For a hostname containing a single quote, double that quote in SQL (`O''Brien`). Keep the complete Token private.
+Read-only, as the database owner, including committed WAL; no restart needed. No output means no match. Escape hostname quotes as `O''Brien`. Keep Tokens private.
 
 If the host directory is under `/root` or another parent the database owner cannot traverse, use this temporary helper container instead of changing directory permissions. It needs no host `sqlite3`; Docker downloads `python:3.12-alpine` on first use. Replace the final `Malibu` argument with the hostname:
 
@@ -140,7 +140,7 @@ with sqlite3.connect("file:/data/needle.db?mode=ro", uri=True) as db:
 PYTHON
 ```
 
-The helper uses the same UID/GID as the Server and a read-only SQLite connection. The data mount stays writable for SQLite's shared-memory coordination; no database records are changed. The helper container is removed after the query.
+The helper uses the Server UID/GID and read-only SQLite; its writable mount permits WAL coordination. It changes no records and removes itself after the query.
 
 
 ### Backup, restore, and removal
@@ -201,7 +201,7 @@ sudo systemctl stop needle-server
 sudo systemctl start needle-server
 ```
 
-Upgrade retains `.env`, tokens, data, and supported custom DB / TLS settings. It stops the service and saves a consistent SQLite backup plus original files in `/opt/needle/recovery/migration.*`. Unsupported paths or service overrides stop migration with an explanation. If migration has begun, a failure retains the new database for recovery instead of overwriting it with an older copy. See the [migration and recovery record](docs/p0-p1-validation.md).
+Upgrade preserves `.env`, tokens, data, and supported DB / TLS settings. It stops the service and backs up SQLite and original files to `/opt/needle/recovery/migration.*`. Unsupported paths / overrides stop migration. After migration starts, failures retain the new database for recovery; see the [recovery record](docs/p0-p1-validation.md).
 
 ### Agents and tokens
 
@@ -266,13 +266,12 @@ sudo bash /tmp/needle-server.sh uninstall --purge
 Requires root access, Linux amd64 / arm64, Bash, systemd, account tools (`useradd`, `groupadd`, `userdel`, `groupdel`, `getent`), and util-linux (`runuser`, `flock`).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
-sudo bash /tmp/needle-agent.sh install
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh install
 ```
 
-Enter the Agent hostname, Server HTTPS URL, a unique Token (Enter generates one), reporting intervals, and TCP Ping mode. New installations set `server_managed: true`; set the display name, region, billing, renewal date, and monthly allowance in the Server `/admin` page after the first report. Run the printed Docker or binary `allow-token` command **on the Server**. The first successful report binds the Token to the hostname.
+This one-line install prompts for hostname, Server HTTPS URL, Token (Enter generates one), intervals, and TCP Ping mode. Run the printed `allow-token` command **on the Server**; the first report binds the Token to the hostname. New installs use `server_managed: true`; set display name, region, billing, renewal date, and allowance in `/admin`.
 
-Root installs and manages the service; the Agent runs as the non-login `needle-agent` user with no capabilities. It cannot modify its binary, configuration, or systemd unit, execute Server commands, or upgrade itself.
+Root manages installation and systemd. The service runs as non-login `needle-agent`, without capabilities, remote command execution, or self-upgrade; its binary, YAML, and unit are read-only to it.
 
 | Location | Owner | Mode |
 | --- | --- | --- |
@@ -284,15 +283,15 @@ Root installs and manages the service; the Agent runs as the non-login `needle-a
 
 ### Status, logs, and upgrades
 
-Upgrade the Server first. **Quick upgrade — download the latest installer, keep configuration, and restart the Agent:**
+**One-line upgrade — keep configuration and restart** (upgrade the Server first):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh upgrade --keep-config && sudo systemctl restart needle-agent
 ```
 
-Run on the Agent machine. This upgrades to the latest stable release without configuration prompts, preserves the complete YAML and Token, and restarts the service even if it was stopped. Boot autostart settings are unchanged. Each step runs only if the previous one succeeds; no new Token registration is needed.
+Preserves YAML, Token, and boot settings; no prompts or re-registration. The final restart starts even a previously stopped service. `&&` stops the command on failure.
 
-Other status, log, and upgrade commands (download the installer first if `/tmp` was cleared):
+Status, logs, service controls, and alternative upgrade modes:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh
@@ -321,9 +320,9 @@ sudo systemctl disable needle-agent
 | `--reconfigure` | Reselect TCP Ping and intervals; preserve Token and identity |
 | `--configure-intervals` | Change only realtime and full-report intervals |
 
-`--reconfigure` changes probes and intervals only; region, billing, renewal dates, and traffic allowance are managed in `/admin`. The three flags are mutually exclusive. Non-interactive upgrades keep configuration; reconfiguration requires a terminal. Reinstalling with an existing configuration enters the upgrade flow. Kept configurations do not gain new fields automatically; omitted optional fields use their defaults.
+Choose one mode. Non-interactive upgrades keep YAML; reconfiguration requires a terminal and preserves Token, hostname, URL, and interfaces. Static settings stay in `/admin`. Reinstalling an existing Agent uses the upgrade flow. Kept YAML gains no new fields; omitted optional fields use defaults.
 
-Upgrade migrates older root-run installations to the dedicated user, validates configuration as that user, and preserves running / autostart states. A new installation starts immediately and at boot. Failed deployment restores the old files; failed rollback retains originals under `/opt/needle-agent/recovery/` and prints the recovery path.
+Upgrade migrates root-run services to the dedicated user and validates YAML as that user. Plain upgrades preserve running / boot states; fresh installs start immediately and at boot. Failures restore old files, or retain originals under `/opt/needle-agent/recovery/` if rollback fails.
 
 For foreground troubleshooting, stop the service to avoid duplicate reports:
 
@@ -336,7 +335,15 @@ sudo systemctl start needle-agent
 
 ### Uninstall
 
-Back up `agent.yaml` first if you intend to reuse its Token; Linux uninstall removes the entire local installation, including configuration, plus the service account and group.
+**One-line complete local uninstall — deletes configuration and Token without confirmation:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh uninstall --yes && rm -f /tmp/needle-agent.sh
+```
+
+Stops/disables the service; removes its unit, `/opt/needle-agent/` (binary, YAML, backups, recovery files), dedicated user/group, and downloaded installer. Back up YAML first to reuse the Token. System journal history and the empty `/run/needle-agent-install.lock` remain under system retention / reboot cleanup.
+
+Other modes (download the installer first if needed):
 
 ```sh
 # Local uninstall; retain the Server credential and node history
@@ -345,7 +352,7 @@ sudo bash /tmp/needle-agent.sh uninstall
 sudo bash /tmp/needle-agent.sh uninstall --unregister
 ```
 
-`--unregister` requires a Server that confirms history-preserving revocation. Failure retains the local installation. Only the administrator's Server-side `delete-agent` command deletes the node and its history. Add `--yes` to skip uninstall confirmation.
+Local uninstall retains Server tokens and history. `--unregister` revokes the credential while retaining history; an incompatible / unreachable Server leaves the local installation intact. Use Server-side `delete-agent HOSTNAME_OR_ID` to remove the node, token, and history. Add `--yes` to skip confirmation.
 
 </details>
 
@@ -357,23 +364,22 @@ sudo bash /tmp/needle-agent.sh uninstall --unregister
 Requires root SSH access, procd, BusyBox-compatible `sh`, HTTPS-capable wget or curl, CA certificates, and `sha256sum`. Supports `x86_64` / amd64 and `aarch64` / arm64; no ARM 32-bit or MIPS. GitHub API and Releases must be reachable.
 
 ```sh
-wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh
-sh /tmp/needle-agent-openwrt.sh install
+wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh install
 ```
 
-Choose the actual WAN interface (`pppoe-wan`, `eth1`, etc.). Avoid counting both LAN and WAN or a PPPoE interface and its underlying device. Enter the Agent hostname, Server URL, Token, intervals, WAN interface, and probes; allow the printed Token **on the Server**. New installations set `server_managed: true`; complete region, billing, renewal date, and allowance in the Server `/admin` page.
+Run this one-line install as root. Enter hostname, Server URL, Token, intervals, actual WAN interface (`pppoe-wan`, `eth1`, etc.), and probes; run the printed `allow-token` command **on the Server**. New installs use `server_managed: true`; configure static settings in `/admin`. Do not count both LAN/WAN or PPPoE/its underlying device.
 
 The router installer uses procd and runs the Agent as root; the Linux systemd service-account setup does not apply. It does not change routing, firewall, DNS, DHCP, or package settings. It opens no listening port and writes no local metric history. The service uses nice level 10, `GOMAXPROCS=1`, a 32 MiB soft Go memory target (not an RSS cap), and a 128-file descriptor limit.
 
 ### Status, logs, and upgrades
 
-Upgrade the Server first. **Quick upgrade — download the latest installer, keep configuration, and restart the Agent:**
+**One-line upgrade — keep configuration and restart** (upgrade the Server first):
 
 ```sh
 wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh upgrade --keep-config && /etc/init.d/needle-agent restart
 ```
 
-Run as root on the router. This upgrades to the latest stable release without configuration prompts, preserves the complete YAML and Token, and restarts the service even if it was stopped. Boot autostart settings are unchanged. Each step runs only if the previous one succeeds; no new Token registration is needed.
+Run as root. Preserves YAML, Token, and boot settings; no prompts or re-registration. The final restart starts even a previously stopped service. `&&` stops the command on failure.
 
 Other status, log, and upgrade commands (re-download the installer after `/tmp` is cleared):
 
@@ -396,13 +402,23 @@ sh /tmp/needle-agent-openwrt.sh upgrade --configure-intervals
 /etc/init.d/needle-agent disable
 ```
 
-Reselection changes probes and intervals only; use `/admin` for region, billing, renewal dates, and traffic allowance. Plain `upgrade` offers an interactive choice, defaulting to keeping configuration. `--keep-config` preserves YAML unchanged; `--reconfigure` changes probes and intervals; `--configure-intervals` changes only intervals. These flags are mutually exclusive and preserve Token and identity. Existing running / autostart states are preserved; a first installation starts immediately and at boot.
+Plain `upgrade` offers a choice, defaulting to keeping YAML. Choose one flag: `--keep-config`, `--reconfigure` (probes + intervals), or `--configure-intervals`. Token and identity are preserved; static settings stay in `/admin`. Plain upgrades preserve running / boot states; fresh installs start immediately and at boot.
 
-The installer checks checksums, binary execution, configuration, and space before replacing files. It requires 64 MiB available memory, 32 MiB free in `/tmp`, and a 4 MiB installation-space reserve after staging. Startup failure restores the old files and service state; a failed recovery retains its snapshot and prints the location. A running process alone does not prove successful reporting: check logs and the Server dashboard.
+Before replacing files, the installer checks checksums, execution, YAML, and space: 64 MiB available RAM, 32 MiB free in `/tmp`, and a 4 MiB installation reserve. Startup failure rolls back; failed rollback retains its snapshot and prints the path. Confirm reporting in logs and the dashboard.
 
 For a busy router, use `interval: 30` or longer, consider `realtime_interval: 0`, and enable only the interfaces and probes you need.
 
 ### Uninstall and firmware upgrades
+
+**One-line complete local uninstall — deletes configuration and Token without confirmation:**
+
+```sh
+wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh uninstall --purge --yes && rm -f /tmp/needle-agent-openwrt.sh
+```
+
+Stops/disables the service; removes binary, init script, boot links, version, YAML/backups/staging files, Needle's `/etc/sysupgrade.conf` entry, and the downloaded installer. Removes `/etc/needle/` when empty; unrelated files and backup entries are retained. Router network settings and system log retention are unchanged.
+
+Other modes (re-download the installer if `/tmp` was cleared):
 
 ```sh
 # Remove binary/service/version; keep local configuration and Server data
@@ -413,7 +429,7 @@ sh /tmp/needle-agent-openwrt.sh uninstall --purge
 sh /tmp/needle-agent-openwrt.sh uninstall --unregister --purge
 ```
 
-Add `--yes` to skip confirmation. Revocation requires a compatible Server; failure retains local files and restores the previous running state. `--purge` removes Needle's configuration, backup, and staging files, retaining unrelated files and backup entries. Delete the Server node/history separately with `delete-agent` if required.
+Local uninstall retains Server tokens and history. `--unregister` revokes only the credential; failure retains local files and restores the prior running state. Add `--yes` to skip confirmation. Use Server-side `delete-agent HOSTNAME_OR_ID` to remove the node, token, and history.
 
 Firmware upgrades with settings retention preserve `/etc/needle/` through `/etc/sysupgrade.conf`. Reinstall the binary and service afterward; retained configuration is reused.
 
@@ -422,9 +438,9 @@ Firmware upgrades with settings retention preserve `/etc/needle/` through `/etc/
 <details>
 <summary><strong>Dashboard — Administrator and node settings</strong></summary>
 
-The dashboard and its monitoring APIs remain public. `/admin` adds authenticated editing of display name, note, region, position, billing currency/amount/period, renewal date, and monthly upload + download allowance. An Agent's stable hostname, Token, collectors, and local YAML are not changed by this page.
+Dashboard / monitoring APIs are public. `/admin` edits display name, note, region, position, billing currency/amount/period, renewal date, and monthly allowance. Agent identity, Token, and local collection settings remain on the Agent.
 
-Billing accepts `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another three-letter currency code, without exchange conversion. Enter the amount for the entire payment period: 0 means Free, empty means Not set. Periods are monthly, quarterly, half-yearly, yearly, every 2 or 3 years, or permanent. Use the actual next renewal / top-up date, including for transferred nodes. Monthly traffic is an independent upload + download allowance in decimal GB (1000 GB = 1 TB); 0 displays ♾️ and does not block traffic.
+Currencies: `USD`, `CNY`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, `AUD`, or another three-letter code; no conversion. Amount covers the whole period: 0 = Free, empty = Not set. Periods: 1, 3, 6, 12, 24, 36 months or permanent. Enter the actual next renewal / top-up date. Monthly upload + download uses decimal GB (1000 GB = 1 TB); allowance 0 = ♾️. Allowances are display-only limits.
 
 Initialize one administrator **on the Server host**, after starting the Server. Use its actual database path:
 
@@ -437,11 +453,11 @@ docker compose exec needle-server needle-server -db /data/needle.db admin-init
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-init
 ```
 
-Run only the command matching your deployment. The interactive setup asks for a username (default `admin`), the **browser-facing origin** (e.g. `https://needle.example.com`, without `/admin` or any other path), and a password of at least 15 characters, entered twice without echo. HTTPS is required; loopback HTTP is allowed for local testing. No password is accepted in command arguments, environment variables, or piped input. No public registration or initialization endpoint exists; editing stays disabled until CLI initialization succeeds.
+Run the matching command. Enter username (default `admin`), browser origin (`https://needle.example.com`, no path), and a password of at least 15 characters twice; hidden input displays nothing. HTTPS is required except for loopback testing. Passwords must be entered interactively, not through arguments, environment, or pipes. Only CLI setup enables editing; there is no public registration.
 
-The configured origin is used for request validation and secure cookies behind HTTPS reverse proxies; forwarded headers are not trusted to select it. Keep the public origin stable and forward browser `Origin` headers unchanged. Open **Manage** in the dashboard header, sign in, and select **Edit** beside a node. Sessions last eight hours, end on sign-out, and are lost when the Server restarts. Passwords are stored as salted Argon2id hashes in the existing database.
+Keep the configured origin stable and forward browser `Origin` unchanged; forwarded headers cannot override it. Open **Manage**, sign in, then **Edit** a node. Sessions expire after eight hours, sign-out, or restart. SQLite stores salted Argon2id password hashes.
 
-Reset a forgotten password, change the username, or update the public origin interactively. Existing sessions are invalidated without restarting the Server:
+Reset password, username, or origin interactively; this invalidates sessions without a restart:
 
 ```sh
 # Docker, from ~/needle
@@ -453,15 +469,15 @@ sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db admin-reset
 
 Upgrade compatibility and ownership:
 
-- Existing values populate the editor. Saving in `/admin`, or receiving the first report from the current Server-managed Agent, transfers an existing static profile to the Server without overwriting its saved values. Later reports cannot overwrite it. Before upgrading an older Agent, remove the retired static YAML fields listed in the Agent configuration sections; keep its Token and identity.
-- New Agents installed with `server_managed: true` use Server-managed profiles from their first report. Missing billing and renewal settings show **Not set**, not Free or permanent. Monthly usage starts with reset day 1 and an unrestricted allowance; choose a finite allowance or ♾️ in the editor.
-- A display name is a label. CLI commands and Token bindings continue to use the original Agent hostname or stable numeric ID.
-- An optional note accepts up to 40 characters of single-line plain text. It appears beside uptime below the card's name, truncates to fit, and is hidden when empty. Clear it in the editor to remove it. Notes are stored on the Server; no Agent upgrade or YAML change is needed.
-- On takeover, the current monthly reset day is pinned independently of the renewal date. For a previously unconfigured node it defaults to day 1. The editor shows this day read-only. Changing price, payment period, renewal date, or allowance does not clear usage or move the monthly boundary. Stored historical billing and traffic records retain their existing boundaries during migration.
-- The saved renewal anchor still projects future reminders by the payment period; it does not confirm payment. The editor shows both the saved date and projected next renewal. Short months keep the original reset day (29–31) for subsequent months.
-- Saves validate every field, use a database transaction, reject stale forms, refresh the public dashboard, and retain the latest 200 profile-change records in SQLite. A failed save does not partially change ordering or billing. Existing history and counter accounting remain intact.
+- Saving or receiving a current Agent's first report transfers static settings to Server ownership, preserving saved values. Later Agent reports cannot overwrite them. Remove retired YAML fields before upgrading older Agents.
+- New `server_managed: true` Agents start with billing / renewal **Not set**, reset day 1, and unlimited allowance (♾️). Complete settings in the editor.
+- Display name is a label; CLI and Token bindings use the original hostname or stable numeric ID.
+- Note: up to 40 single-line characters, shown beside card uptime; truncated to fit, hidden when empty. Edit / clear it on the Server.
+- Monthly reset day is pinned on takeover (default 1), read-only, and independent of renewal. Editing price, period, date, or allowance never clears usage or moves cycle boundaries. Short months retain the original day (29–31) for later months.
+- Renewal dates project future reminders by payment period; they do not confirm payment. The editor shows the saved anchor and projected next date.
+- Saves are validated and transactional, reject stale forms, refresh the dashboard, and retain the latest 200 change records. Migration preserves existing history and accounting boundaries.
 
-Administrator cookies and Agent Tokens are separate credentials. The management API accepts only authenticated, same-origin JSON writes with CSRF protection. It provides profile editing only; Token registration, node deletion, and Agent service/configuration management remain terminal operations. Database backups contain the password hash as well as Agent credentials and should remain private.
+Admin sessions and Agent Tokens are separate. Editing requires same-origin authenticated JSON with CSRF protection. Token registration, node deletion, and Agent management remain CLI operations. Database backups contain credentials and password hashes; keep them private.
 
 </details>
 
@@ -512,11 +528,13 @@ Custom database paths remain in the service's `ExecStart`; inspect with `sudo sy
 | Backup before settings reselection | `/opt/needle-agent/agent.yaml.bak` |
 | systemd unit | `/etc/systemd/system/needle-agent.service` |
 | Failed rollback originals, if retained | `/opt/needle-agent/recovery/` |
+| Downloaded installer | `/tmp/needle-agent.sh` |
+| Installer lock (empty; retained until reboot) | `/run/needle-agent-install.lock` |
 | Logs | `journalctl -u needle-agent` |
 
-The configuration contains the Token; root manages the file and the service user can only read it. Historical data lives on the Server; the Agent retry queue is memory-only.
+Root manages Token-bearing YAML; the Agent can only read it. History lives on the Server; Agent retries are memory-only.
 
-Linux Server and Agent logs use the existing system journal and its retention policy; Needle creates no separate log files and does not change global journald settings. Use `sudo journalctl -u needle-agent --since "1 hour ago" --no-pager` (or `-u needle-server`) for recent logs.
+Linux logs use system journal retention, with no separate files or global journald changes. Recent logs: `sudo journalctl -u needle-agent --since "1 hour ago" --no-pager` (or `-u needle-server`).
 
 </details>
 
@@ -532,11 +550,13 @@ Linux Server and Agent logs use the existing system journal and its retention po
 | procd service | `/etc/init.d/needle-agent` |
 | Firmware backup list | `/etc/sysupgrade.conf` (Needle entry: `/etc/needle/`) |
 | Downloaded installer | `/tmp/needle-agent-openwrt.sh` (temporary; cleared on reboot) |
+| Installer lock (removed on exit) | `/tmp/needle-agent-installer.lock/` |
+| Staging / failed recovery snapshot | `/tmp/needle-agent.XXXXXX/` (actual path printed on failure) |
 | Logs | `logread -e needle-agent` |
 
 The configuration contains the Token. Normal uninstall retains it; `--purge` removes it. Recovery snapshots are temporary; a failed recovery prints the retained path.
 
-The Agent sends output to the system logger. With OpenWrt's default memory ring buffer, old entries are overwritten and logs do not survive reboot. Needle does not enable persistent flash logging or change the router's global log buffer. Use `logread -e needle-agent` or `logread -f -e needle-agent` to view or follow entries.
+Logs use OpenWrt's system logger; its default RAM ring buffer overwrites old entries and clears on reboot. No flash logging / global buffer changes. View with `logread -e needle-agent`; follow with `logread -f -e needle-agent`.
 
 </details>
 
@@ -550,20 +570,20 @@ realtime_interval: 5 # Extra live-only reports, seconds; 0 disables
 interval: 30        # Full history, TCP Ping, and monthly traffic accounting
 ```
 
-Fresh installs use `5 / 30`. Old YAML without `realtime_interval` uses `0 / interval`; `--keep-config` does not enable it. Enabled realtime must be an integer from 1 through `interval`. Edit YAML and restart, or use `upgrade --configure-intervals`.
+Fresh installs use `5 / 30`; omitted `realtime_interval` stays 0, including after `--keep-config`. Enabled realtime must be an integer from 1 to `interval`. Edit and restart, or use `upgrade --configure-intervals`.
 
-Realtime updates memory only; full reports save history and update billing / traffic. The dashboard normally uses SSE and falls back to 30-second polling when unavailable. Raw history remains seven days and hourly history 90 days, regardless of realtime frequency.
+Realtime updates memory only; full reports save history and traffic accounting. SSE falls back to 30-second polling. Retention stays seven days raw / 90 days hourly.
 
-Full reports retry only after confirming the Server's persistent-deduplication capability. Default buffering is 64 reports including the in-flight report, independently capped at 8 MiB; retries expire 1800 seconds after sampling. The queue is memory-only, so restarting the Agent loses unsent reports. Increasing capacity does not guarantee recovery of an entire outage. See [validation details](docs/p0-p1-validation.md) for protocol and retry behavior.
+Retries require Server persistent deduplication. Defaults: 64 reports including in-flight, an independent 8 MiB cap, and 1800-second sample age. The memory-only queue is lost on restart and may not cover a full outage. See [protocol details](docs/p0-p1-validation.md).
 
 </details>
 
 <details>
 <summary><strong>Traffic counter continuity and migration</strong></summary>
 
-Full reports include kernel boot identity and the counted interface scope. The Server uses counter deltas within a stable scope, preserves high watermarks on counter decreases, and rebases when interfaces change. A confirmed newer boot can add its counters without erasing already accumulated usage.
+Full reports carry boot / interface identities. Stable-scope counter deltas accumulate usage; decreases retain high watermarks, interface changes rebase, and confirmed newer boots add new counters without clearing prior usage.
 
-The first strong-identity report after migration retains existing usage and establishes a new baseline. Ambiguous transitions can undercount; they never justify adding an entire existing interface counter as new usage. Needle cannot recover traffic from before monitoring, missing pre-reboot counters, or an unobserved monthly boundary. Changing the allowance does not reset usage. No automatic historical correction is performed; see the recovery reference below.
+Migration preserves usage and establishes an identity baseline. Ambiguous transitions may undercount, but never add an entire old counter. Pre-monitoring traffic, missing pre-reboot samples, and unobserved monthly boundaries cannot be reconstructed. Allowance edits do not reset usage; historical repair is manual.
 
 </details>
 
@@ -620,7 +640,7 @@ docker compose up -d needle-server
 curl -fsS http://127.0.0.1:8088/api/health
 ```
 
-Update the host proxy / Tunnel origin to `http://127.0.0.1:8088`. Compose `.env` supplies interpolation values; it is separate from the binary Server's environment file. Recreate with `up -d` after changing Compose settings; `restart` alone does not apply them. Keep the Server timezone stable because monthly boundaries use it.
+Point the host proxy / Tunnel to `http://127.0.0.1:8088`. Compose `.env` supplies substitutions; it is separate from binary configuration. Apply changes with `up -d`, not `restart`. Keep the Server timezone stable for monthly boundaries.
 
 </details>
 
@@ -651,7 +671,7 @@ sudo journalctl -u needle-server -n 50 --no-pager
 | `-y` | Skip `delete-agent` / `revoke-token` confirmation; place before the subcommand |
 | `-version` | Print version and source commit without opening the database |
 
-The binary does not read `.env` itself; systemd loads it. The supplied unit uses `-l` and `-db`; putting TLS filenames in `.env` does not enable HTTPS. Prefer the default service behind an HTTPS proxy / Tunnel. Native TLS requires explicitly configuring both flags in the service or a manual invocation:
+Systemd loads `.env`; the binary does not. The unit uses `-l` / `-db`; TLS filenames in `.env` do not enable HTTPS. Prefer an HTTPS proxy / Tunnel, or explicitly supply both TLS flags:
 
 ```sh
 ./needle-server -l 127.0.0.1:8443 -db ./data/needle.db -cert /path/to/fullchain.pem -key /path/to/privkey.pem
@@ -670,7 +690,7 @@ Edit the configuration as root (`nano` if installed, otherwise `vi`):
 sudo nano /opt/needle-agent/agent.yaml
 ```
 
-Example; replace hostname, URL, Token, and interfaces for your machine. Configure billing and other static node settings in `/admin`. See also [agent.yaml.example](agent.yaml.example).
+Replace hostname, URL, Token, and interfaces; static settings belong in `/admin`. See [agent.yaml.example](agent.yaml.example).
 
 ```yaml
 hostname: "my-vps"
@@ -706,7 +726,7 @@ tcpping:
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
-Configure region, billing currency/amount/period, renewal date, and traffic allowance in `/admin`. Amounts cover the entire payment period; 0 means Free and an empty amount means Not set. Renewal dates project reminders by the payment period. Monthly traffic uses the independent pinned reset day, including for annual and permanent nodes; changing billing or the allowance does not clear usage. An allowance of 0 displays ♾️.
+In `/admin`, configure region, billing currency/amount/period, renewal date, and allowance. Amount: whole period, 0 = Free, empty = Not set. Allowance: 0 = ♾️. Traffic resets monthly on its pinned day, independent of payment period / renewal; editing these settings does not clear usage.
 
 The former YAML fields `region`, `billing_currency`, `billing_amount`, `billing_period`, `expires_at`, and `monthly_traffic_limit_gb` are no longer accepted. Save their values in `/admin` and remove them from YAML before upgrading. Replace `insecure` with `tls_skip_verify` if present.
 
@@ -718,9 +738,9 @@ The former YAML fields `region`, `billing_currency`, `billing_amount`, `billing_
 | `4) Custom` | Selected presets and / or custom TCP targets |
 | `5) Disabled` | No probes; system monitoring continues |
 
-There is no connectivity auto-detection. Choose according to actual outbound IPv4 / IPv6 availability. To disable probes manually, replace the whole list with `tcpping: []`. Disabled targets disappear from detail charts while old history expires normally; cards retain `TCP Ping · Off`, and detail range controls remain available.
+Choose based on outbound IPv4 / IPv6 availability; no auto-detection. `tcpping: []` disables probes and hides their detail chart; cards keep `TCP Ping · Off`, range controls remain, and old history expires normally.
 
-`--keep-config` preserves the file unchanged. `--reconfigure` asks for probes and intervals; `--configure-intervals` changes only the two intervals. Token, hostname, URL, and interfaces are preserved; changed settings are backed up to `agent.yaml.bak`.
+Upgrade flags preserve Token / identity: `--keep-config` keeps YAML; `--reconfigure` changes probes + intervals; `--configure-intervals` changes intervals only. Reselection backs up YAML to `agent.yaml.bak`.
 
 Validate before restarting; this check does not send probes or reports:
 
@@ -736,7 +756,7 @@ sudo grep '^token:' /opt/needle-agent/agent.yaml
 
 To confirm the service user can read the file, run `sudo runuser -u needle-agent -- /opt/needle-agent/bin/needle-agent -check-config /opt/needle-agent/agent.yaml`. Preserve `root:needle-agent` ownership and mode `640` when replacing the file.
 
-Settings apply after restart; there is no hot reload or remote configuration. Check logs and the dashboard after the next full report. Keep Tokens and configuration files private.
+Restart to apply changes, then confirm the next full report in logs / dashboard. No hot reload or remote configuration. Keep YAML / Tokens private.
 
 </details>
 
@@ -749,7 +769,7 @@ Edit the configuration as root (`nano` if installed, otherwise `vi`):
 nano /etc/needle/agent.yaml
 ```
 
-Example; replace hostname, URL, Token, and interfaces for your machine. Configure billing and other static node settings in `/admin`. See also [agent.yaml.example](agent.yaml.example).
+Replace hostname, URL, Token, and interfaces; static settings belong in `/admin`. See [agent.yaml.example](agent.yaml.example).
 
 ```yaml
 hostname: "home-router"
@@ -779,7 +799,7 @@ tcpping: []
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
-Configure region, billing currency/amount/period, renewal date, and traffic allowance in `/admin`. Amounts cover the entire payment period; 0 means Free and an empty amount means Not set. Renewal dates project reminders by the payment period. Monthly traffic uses the independent pinned reset day, including for annual and permanent nodes; changing billing or the allowance does not clear usage. An allowance of 0 displays ♾️.
+In `/admin`, configure region, billing currency/amount/period, renewal date, and allowance. Amount: whole period, 0 = Free, empty = Not set. Allowance: 0 = ♾️. Traffic resets monthly on its pinned day, independent of payment period / renewal; editing these settings does not clear usage.
 
 The former YAML fields `region`, `billing_currency`, `billing_amount`, `billing_period`, `expires_at`, and `monthly_traffic_limit_gb` are no longer accepted. Save their values in `/admin` and remove them from YAML before upgrading. Replace `insecure` with `tls_skip_verify` if present.
 
@@ -793,9 +813,9 @@ The installer recommends WAN's `l3_device` when available. Confirm it exists; mu
 | `4) Custom` | Selected presets and / or custom TCP targets |
 | `5) Disabled` | No probes; system monitoring continues |
 
-There is no connectivity auto-detection. Choose according to actual outbound IPv4 / IPv6 availability. To disable probes manually, replace the whole list with `tcpping: []`. Disabled targets disappear from detail charts while old history expires normally; cards retain `TCP Ping · Off`, and detail range controls remain available.
+Choose based on outbound IPv4 / IPv6 availability; no auto-detection. `tcpping: []` disables probes and hides their detail chart; cards keep `TCP Ping · Off`, range controls remain, and old history expires normally.
 
-`--keep-config` preserves the file unchanged. `--reconfigure` asks for probes and intervals; `--configure-intervals` changes only the two intervals. Token, hostname, URL, and interfaces are preserved; changed settings are backed up to `agent.yaml.bak`.
+Upgrade flags preserve Token / identity: `--keep-config` keeps YAML; `--reconfigure` changes probes + intervals; `--configure-intervals` changes intervals only. Reselection backs up YAML to `agent.yaml.bak`.
 
 Validate before restarting; this check does not send probes or reports:
 
@@ -808,7 +828,7 @@ logread -e needle-agent
 grep '^token:' /etc/needle/agent.yaml
 ```
 
-Settings apply after restart; there is no hot reload or remote configuration. Check logs and the dashboard after the next full report. Keep Tokens and configuration files private.
+Restart to apply changes, then confirm the next full report in logs / dashboard. No hot reload or remote configuration. Keep YAML / Tokens private.
 
 </details>
 
@@ -819,11 +839,13 @@ Settings apply after restart; there is no hot reload or remote configuration. Ch
 
 Cards show system usage, live upload / download rates, monthly totals, allowance, configured billing cost, and next scheduled renewal. Permanent dates and unmetered allowances display ♾️. Probe columns keep v4 left and v6 right; disabled probes retain a muted `TCP Ping · Off` area.
 
-Click the **calendar / up-arrow** button first in the header controls (renewal sort, view, theme) to sort cards or list rows by the next renewal date, soonest first; click again to restore the saved manual order. A stronger icon color indicates renewal sorting is active. Permanent nodes and nodes without a valid date appear last. Ties keep manual order, offline nodes are included, and region filters still apply. The current browser remembers the mode across reloads and live updates. Sorting uses the Server's projected next renewal date; it does not change stored node positions, payment dates, or monthly traffic boundaries. This sorting feature requires only a Server update.
+The header's **calendar / up-arrow** toggles next-renewal sorting (active = stronger color) and saved manual order. Soonest dates come first; permanent / undated nodes last. Ties retain manual order; offline nodes and region filters still apply. The browser remembers the mode. Sorting changes no saved positions, billing, or traffic boundaries and needs only a Server update.
 
-Node Detail shows the CPU model, OS/version, and architecture in a muted line below its title, for example `Intel N150 · ImmortalWrt 24.10.4 · x86_64`. Long text wraps so the full information is readable directly. These details appear only in Node Detail, without hover popups; cards retain their existing height and core/load line. Missing items are omitted without placeholders.
+Node Detail adds a wrapping system line: `AMD EPYC 7B13 · Debian 12 · x86_64 · KVM`. CPU model, OS/version, architecture, and virtualization appear here only, without hover popups or missing-value placeholders.
 
-Upgrade the Server first, then Agents to populate these fields; use `upgrade --keep-config` after removing retired YAML keys as described in the upgrade checklist. No collector-specific YAML settings or Token re-registration are needed. The Agent reads system information once at startup and attaches it to full reports, not realtime requests or history rows. Restart the Agent after an OS upgrade to refresh it. Model names reflect what the host or hypervisor exposes. Metadata read failures are logged without disabling live CPU collection, and omitted/empty fields from older Agents preserve saved values.
+Upgrade Server then Agents to populate system information; no new YAML / Token registration. It is read at startup and sent with full reports, not realtime or history rows. Restart after OS / environment changes. Hardware names depend on what the host exposes. Read failures are logged without stopping CPU monitoring; omitted / empty metadata preserves saved values.
+
+Linux virtualization uses read-only container markers, DMI, and the existing library; no commands or privileges added. Examples: `KVM`, `QEMU`, `VMware`, `Hyper-V`, `LXC`, `Docker`; host roles add `Host`. Container evidence takes priority over an outer VM. Unknown is omitted, not labeled bare metal. Docker merely installed on a host does not mean the Agent is containerized.
 
 `4C` means four logical CPUs; `Load 0.14` is the one-minute system load average, not CPU percentage. Live TCP loss reflects the latest attempt (`0%` or `100%`); detail statistics summarize the selected history window. Click detail targets to toggle chart lines; this does not change Agent configuration.
 
@@ -832,12 +854,10 @@ Upgrade the Server first, then Agents to populate these fields; use `upgrade --k
 <details>
 <summary><strong>Upgrade checklist</strong></summary>
 
-For current releases, use this checklist:
-
-1. Back up the database and upgrade the Server first. Review the [migration record](docs/p0-p1-validation.md) when upgrading an older installation.
-2. Confirm the static settings in `/admin`, then remove the retired region/billing/date/allowance fields from Agent YAML. Replace `insecure` with `tls_skip_verify` if present. Configuration validation rejects these old keys with an actionable error.
-3. Download the matching Agent installer and run `upgrade --keep-config` on Linux or OpenWrt. Token, hostname, interfaces, and probes are retained; no re-registration is needed. Use `--configure-intervals` / `--reconfigure` only to change local monitoring settings. Missing `realtime_interval` remains disabled; retry settings have defaults.
-4. Validate edited YAML, restart, and confirm reports in logs and the dashboard. Upgrade does not require re-entering an unchanged renewal date.
+1. Back up SQLite and upgrade Server first; see the [migration record](docs/p0-p1-validation.md) for older installations.
+2. Confirm static settings in `/admin`; remove retired YAML keys and replace `insecure` with `tls_skip_verify`.
+3. Run the Agent's one-line `upgrade --keep-config` above. Token, hostname, interfaces, and probes stay unchanged. Missing `realtime_interval` stays disabled; retry defaults apply. Use reselection flags only to change collection settings.
+4. Validate edited YAML, restart, and confirm reports. Unchanged renewal dates need no re-entry.
 
 Use compatible binaries and installers from the same release. After database migration, avoid downgrading to a version that does not understand the current accounting and history schema.
 
@@ -846,24 +866,24 @@ Use compatible binaries and installers from the same release. After database mig
 <details>
 <summary><strong>Dashboard refresh troubleshooting</strong></summary>
 
-The dashboard uses SSE, with 30-second polling while SSE is unavailable. A failed refresh retains the last successful data. Brief interruptions recover quietly; an ongoing data outage shows a small `Updates paused · Retry` notice beside the region filters after 30 seconds. Successful SSE data or polling hides it. Initial loading failures show a centered Retry control. Ordinary requests time out after 15 seconds.
+SSE falls back to 30-second polling; failed refreshes keep the last good data. Brief interruptions are silent; after 30 seconds of data outage, `Updates paused · Retry` appears beside filters and clears on recovery. First-load errors show a centered Retry. Ordinary requests time out after 15 seconds.
 
-Returning to the page, restoring the network, or restoring a cached page immediately refreshes data and rebuilds the connection. Background pages stop connection timers; canceled pre-sleep requests cannot replace resumed data. Retry restarts updates while keeping filters, open details and the selected history day. The NEEDLE logo reloads the entire page.
+Wake / network return refreshes and reconnects immediately. Background timers stop; canceled older requests cannot overwrite resumed data. Retry keeps filters, details, and history selection; the NEEDLE logo reloads the page.
 
-If failures recur, check the failing endpoint in browser developer tools, Server logs, and `/api/health`; then check proxy / Tunnel connectivity. The proxy must permit the long-lived `/api/events` stream. A healthy internal endpoint does not prove public access is working. History panels have independent Retry controls.
+For repeated failures, check browser requests, Server logs, `/api/health`, and public proxy / Tunnel access. Allow long-lived `/api/events`; internal health alone does not prove public connectivity. History panels retry independently.
 
-Runtime messages use `INFO`, `WARN`, or `ERROR` with `module` and `event` fields. Startup includes version and source commit. Healthy samples/reports are silent. Continuous failures log immediately, then at most once a minute per tracked operation; `count` is the outage's total failures and `suppressed` counts repeats omitted since the previous message. The same operation's next success emits one `event=recovered` entry. History/realtime collectors are tracked separately; TCP Ping recovery means its permission issue cleared, not that a target became reachable. Rejected credentials are aggregated across hostnames and do not emit recovery on another Agent's successful request.
+Logs use `INFO` / `WARN` / `ERROR`, `module`, and `event`; startup adds version / commit. Healthy reports are silent. Repeated failures log immediately, then at most once per minute per operation: `count` = total failures, `suppressed` = omitted repeats. Recovery emits `event=recovered`. History / realtime tracking is separate; TCP Ping recovery concerns permission errors, not reachability. Credential failures aggregate across hostnames and do not recover on another Agent's success.
 
-Tracking is bounded in memory and resets when the process restarts. Minute summaries are emitted on the next failed attempt, without a background timer. Levels are plain-text labels, not a promise of matching system-journal priority filters. Token headers, full configuration, and upstream HTTP response bodies are not logged; HTTP errors include the status instead. Error text is quoted and length-limited. Existing `journalctl`, `logread`, and `docker compose logs` commands remain the way to inspect logs.
+Tracking is bounded and resets on restart; summaries appear on the next failure, without background timers. Levels are text labels, not journal priorities. Logs omit Tokens, full YAML, and HTTP response bodies; errors use status codes and bounded quoted text. Read via `journalctl`, `logread`, or `docker compose logs`.
 
 </details>
 
 <details>
 <summary><strong>Traffic counter regressions and recovery</strong></summary>
 
-Current accounting prevents a counter decrease from being charged as an entire new counter. Existing inflated totals are not automatically rewritten. Modern Agents provide boot / interface identities; legacy Agents use uptime and high watermarks. Missing counters are unavailable, not valid zeros.
+Counter decreases never add a whole new counter. Modern Agents use boot / interface identities; legacy Agents use uptime and high watermarks. Missing counters are unavailable, not zero. Old inflated totals are not rewritten automatically.
 
-`repair-traffic` is a **legacy-only** tool for supported inflation in retained raw history. Strong-identity accumulators refuse legacy repair. Preview first; apply only after confirming the faulty deployment time and the proposed changes. Missing history cannot be reconstructed from hourly maxima. See the [validation record](docs/p0-p1-validation.md).
+`repair-traffic` repairs supported **legacy-only** inflation in retained raw history; strong-identity accumulators refuse it. Preview before applying, using the confirmed faulty deployment time. Hourly maxima cannot reconstruct missing raw samples. See the [validation record](docs/p0-p1-validation.md).
 
 For a binary deployment (replace timestamp and node ID with confirmed values):
 
@@ -902,7 +922,7 @@ Use a timestamp such as `2026-10-18T03:17:38Z` only if it matches your actual fa
 | Hourly history | 90 days |
 | Monthly traffic records | Old cycle starts beyond 62 days are cleaned, except protected migration records |
 
-Rollups and cleanup commit together; late samples and repeated maintenance do not duplicate counts. Historical gaps remain gaps. Deleting a node removes its history, rollups, traffic records, and migration evidence. Maintenance and retention details are in the [validation record](docs/p0-p1-validation.md).
+Rollups / cleanup commit together; late samples and repeated maintenance do not duplicate counts. Gaps stay gaps. Node deletion removes history, rollups, traffic, and migration evidence. See [retention details](docs/p0-p1-validation.md).
 
 </details>
 

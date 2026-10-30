@@ -25,6 +25,9 @@ type AgentRow struct {
 	ExpiresAt           *int64        `json:"expires_at"`
 	BillingPeriod       string        `json:"billing_period"`
 	LastSeen            *int64        `json:"last_seen"` // server receipt time of the latest report
+
+	VirtualizationSystem string `json:"virtualization_system,omitempty"`
+	VirtualizationRole   string `json:"virtualization_role,omitempty"`
 }
 
 type MetricRow struct {

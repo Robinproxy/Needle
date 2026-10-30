@@ -186,6 +186,7 @@ func main() {
 	decorate := func(data *agentpkg.ReportData) {
 		data.ServerManaged = true
 		data.CPUModel, data.OSName, data.Arch = systemInfo.CPUModel, systemInfo.OSName, systemInfo.Arch
+		data.VirtualizationSystem, data.VirtualizationRole = systemInfo.VirtualizationSystem, systemInfo.VirtualizationRole
 		data.BootID = bootID
 		data.Hostname = hostname
 		data.Interval, data.RealtimeInterval = cfg.Interval, cfg.RealtimeInterval

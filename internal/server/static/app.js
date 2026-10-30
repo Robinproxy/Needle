@@ -666,7 +666,12 @@ function destroyDetailCharts() {
 function systemInfoText(a) {
   const info = a.agent;
   const arch = info.arch === 'aarch64' || info.arch === 'arm64' ? 'ARM64' : info.arch;
-  return [info.cpu_model, info.os_name, arch].filter(value => typeof value === 'string' && value.trim())
+  const system = typeof info.virtualization_system === 'string' ? info.virtualization_system.trim() : '';
+  const names = {kvm:'KVM',qemu:'QEMU',vmware:'VMware',xen:'Xen',hyperv:'Hyper-V',vbox:'VirtualBox',
+    lxc:'LXC',docker:'Docker',podman:'Podman',openvz:'OpenVZ','systemd-nspawn':'systemd-nspawn',rkt:'rkt','linux-vserver':'Linux-VServer'};
+  const virtualization = system && !['unknown','none'].includes(system.toLowerCase())
+    ? (Object.hasOwn(names,system) ? names[system] : system) + (info.virtualization_role === 'host' ? ' Host' : '') : '';
+  return [info.cpu_model, info.os_name, arch, virtualization].filter(value => typeof value === 'string' && value.trim())
     .map(value => value.trim()).join(' · ');
 }
 
