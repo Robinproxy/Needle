@@ -33,6 +33,7 @@ jobs:
           python3 scripts/test-tcpping-selection.py
           python3 scripts/test-agent-upgrade-config.py
           node scripts/test-tcpping-dashboard.cjs
+          node scripts/test-tcpping-despike.cjs
           node scripts/test-dashboard-refresh.cjs
           node scripts/test-sparkline-hover.cjs
           node scripts/test-card-billing.cjs

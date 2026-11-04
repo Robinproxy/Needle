@@ -852,6 +852,8 @@ Linux virtualization uses read-only container markers, DMI, and the existing lib
 
 `4C` means four logical CPUs; `Load 0.14` is the one-minute system load average, not CPU percentage. Live TCP loss reflects the latest attempt (`0%` or `100%`); detail statistics summarize the selected history window. Click detail targets to toggle chart lines; this does not change Agent configuration.
 
+**Despike** reduces isolated high-latency points in 1d / daily-detail charts only. It defaults off and the browser remembers the choice. Hover shows the original latency and, when changed, the displayed value. Timeouts, missing data, sustained high latency, statistics, and anomaly markers retain their original meaning. The button is disabled in aggregated 7d / 30d views. Requires only a Server update.
+
 </details>
 
 <details>

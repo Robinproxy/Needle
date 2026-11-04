@@ -416,7 +416,8 @@ header {
   width: auto; min-width: 32px; height: 20px;
   padding: 0 10px; font-size: 11px; font-family: var(--font-sans);
 }
-.tcpping-controls { display: flex; align-items: center; }
+.tcpping-controls { display: flex; align-items: center; gap: 8px; }
+.tcpping-controls .theme-btn:disabled { opacity: 0.4; cursor: default; color: hsl(var(--muted-foreground)); }
 .tcpping-chart-wrap {
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   padding: 12px; margin-bottom: 10px;

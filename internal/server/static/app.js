@@ -2,6 +2,7 @@ let agents = [];
 let expandedId = null;
 let sparkCharts = {};
 let tcppingChart = null;
+let tcppingDespike = localStorage.getItem('tcppingDespike') === 'true';
 let filterRegion = '';
 let cardFormat = localStorage.getItem('cardFormat') || 'card';
 let dueSortEnabled = localStorage.getItem('renewalSort') === 'due';
@@ -712,7 +713,8 @@ function renderDetailContent(id) {
           + '</div>'
         + '</div>'
         + (probesEnabled ? '<div class="tcpping-controls">'
-          + '<div class="theme-btn-group">'
+          + '<div class="theme-btn-group"><button type="button" id="tcpping-despike-' + id + '" class="theme-btn" aria-pressed="false" onclick="toggleTcppingDespike(' + id + ')">Despike</button></div>'
+          + '<div class="theme-btn-group tcpping-visibility">'
             + '<button class="theme-btn active" onclick="setTcppingSelection(\'' + id + '\',true)">Show</button>'
             + '<button class="theme-btn" onclick="setTcppingSelection(\'' + id + '\',false)">Hide</button>'
           + '</div>'
@@ -726,6 +728,7 @@ function renderDetailContent(id) {
     + '</div>';
 
   currentHistoryRange = range;
+  updateTcppingDespikeButton(id);
   loadDetailData(id, range);
 }
 
@@ -753,6 +756,7 @@ function openHistoricalDay(id, ts) {
     fullLabel: start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0'),
   };
   currentHistoryRange = 'day';
+  updateTcppingDespikeButton(id);
   const dayBtn = document.getElementById('detail-day-btn');
   if (dayBtn) {
     dayBtn.textContent = formatHistoryDay(start.getTime());
@@ -987,6 +991,7 @@ function switchDetailRange(id, range) {
   if (!currentHistoryDay && currentHistoryRange === range) return;
   currentHistoryDay = null;
   currentHistoryRange = range;
+  updateTcppingDespikeButton(id);
   const rangeBtns = document.querySelectorAll('#detail-' + id + ' .detail-range-group .theme-btn');
   rangeBtns.forEach(b => {
     b.classList.toggle('active', b.dataset.range === range);
@@ -1011,6 +1016,95 @@ function activeTcppingResults(id, results) {
   return (results || []).filter(r => activeNames.has(r.name));
 }
 
+function tcppingCanDespike() {
+  return currentHistoryRange === '24h' || currentHistoryRange === 'day';
+}
+
+function updateTcppingDespikeButton(id) {
+  const button = document.getElementById('tcpping-despike-' + id);
+  if (!button) return;
+  const available = tcppingCanDespike();
+  const active = available && tcppingDespike;
+  button.disabled = !available;
+  button.classList.toggle('active', active);
+  button.setAttribute('aria-pressed', String(active));
+  button.title = available ? 'Reduce isolated latency spikes; hover for original values'
+    : 'Available in 1d and daily detail; 7d / 30d use aggregated data';
+}
+
+// A conservative, high-only Hampel filter for raw probe samples. Require two
+// good neighbours on each side and only replace isolated runs of at most two
+// samples / 90 seconds. Never infer a baseline across timeouts or missing data.
+// The input remains untouched: accounting, statistics and tooltips use originals.
+function despikeLatency(points) {
+  const output = points.map(p => p[1]);
+  const gaps = points.slice(1).map((p, i) => p[0] - points[i][0]).filter(gap => gap > 0);
+  const step = median(gaps);
+  if (!step || step > 90000) return output;
+  const maxGap = Math.min(step * 3, 90000);
+  const candidates = points.map((point, i) => {
+    if (point[1] == null) return null;
+    let left = i, right = i;
+    const connected = (a, b) => points[b][1] != null && points[b][0] > points[a][0]
+      && points[b][0] - points[a][0] <= maxGap;
+    while (left > Math.max(0, i - 3) && connected(left - 1, left) && points[left - 1][1] != null
+      && point[0] - points[left - 1][0] <= 210000) left--;
+    while (right < Math.min(points.length - 1, i + 3) && connected(right, right + 1)
+      && points[right + 1][0] - point[0] <= 210000) right++;
+    if (i - left < 2 || right - i < 2) return null;
+    const values = points.slice(left, right + 1).map(p => p[1]);
+    const baseline = median(values);
+    const deviation = Math.max(1, median(values.map(v => Math.abs(v - baseline))));
+    const threshold = Math.max(20, 3 * 1.4826 * deviation);
+    return point[1] > baseline + threshold ? { baseline, threshold } : null;
+  });
+  for (let start = 0; start < candidates.length; start++) {
+    if (!candidates[start]) continue;
+    let end = start;
+    while (end + 1 < candidates.length && candidates[end + 1]) end++;
+    if (end - start < 2 && points[end][0] - points[start][0] + step <= 90000) {
+      const baseline = median(candidates.slice(start, end + 1).map(c => c.baseline));
+      const threshold = Math.max(...candidates.slice(start, end + 1).map(c => c.threshold));
+      const flanks = [start - 2, start - 1, end + 1, end + 2];
+      if (flanks.every(i => points[i]?.[1] != null && Math.abs(points[i][1] - baseline) <= threshold)) {
+        for (let i = start; i <= end; i++) output[i] = candidates[i].baseline;
+      }
+    }
+    start = end;
+  }
+  return output;
+}
+
+function tcppingPlotData(points) {
+  const values = tcppingDespike && tcppingCanDespike() ? despikeLatency(points) : points.map(p => p[1]);
+  return points.map((p, i) => [p[0], values[i], p[1]]);
+}
+
+function toggleTcppingDespike(id) {
+  if (!tcppingCanDespike()) return;
+  tcppingDespike = !tcppingDespike;
+  try { localStorage.setItem('tcppingDespike', String(tcppingDespike)); } catch (_) {}
+  if (tcppingChart) {
+    const series = tcppingChart.getOption().series.map(s => ({
+      name: s.name,
+      data: tcppingPlotData(s.data.map(p => [p[0], p[2]])),
+    }));
+    tcppingChart.setOption({ series });
+  }
+  updateTcppingDespikeButton(id);
+}
+
+function tcppingTooltip(params) {
+  if (!params.length) return '';
+  const timestamp = params[0].data[0];
+  return escapeHtml(new Date(timestamp).toLocaleString()) + params.map(p => {
+    const raw = p.data[2], displayed = p.data[1];
+    const value = raw == null ? 'timeout' : raw.toFixed(1) + ' ms';
+    return '<br/>' + (p.marker || '') + escapeHtml(mapCarrier(p.seriesName)) + ': ' + value
+      + (raw != null && displayed !== raw ? '<br/>Displayed: ' + displayed.toFixed(1) + ' ms' : '');
+  }).join('');
+}
+
 function renderTCPingChart(id, results) {
   results = activeTcppingResults(id, results);
   if (!results || !results.length) {
@@ -1031,7 +1125,9 @@ function renderTCPingChart(id, results) {
 
   const series = names.map((name) => {
     const data = results.filter(r => r.name === name).map(r => [r.created_at * 1000, r.success ? r.latency_ms : null]);
-    return { name, type: 'line', data: historyGaps(data, id, currentHistoryRange), smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
+    return { name, type: 'line', data: tcppingPlotData(historyGaps(data, id, currentHistoryRange)),
+      dimensions: ['time', 'latency', 'rawLatency'], encode: { x: 0, y: 1 },
+      smooth: true, symbol: 'none', connectNulls: false, lineStyle: { width: 1.5, color: tcppingColor(name) } };
   });
 
   const chartEl = document.getElementById('tcpping-chart-' + id);
@@ -1072,7 +1168,7 @@ function renderTCPingChart(id, results) {
   renderDayNav(id, results, chartWin);
   chart.setOption({
     tooltip: {
-      trigger: 'axis', valueFormatter: v => v ? v.toFixed(1) + ' ms' : 'timeout',
+      trigger: 'axis', formatter: tcppingTooltip,
       textStyle: { fontSize: 11 },
     },
     legend: { show: false, selected },
@@ -1252,7 +1348,7 @@ function applyTcppingSelections(id, names) {
     r.setAttribute('aria-pressed', String(isSelected));
   });
   const allHidden = names.every(n => selected[n] === false);
-  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
+  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .tcpping-visibility .theme-btn').forEach((b, i) => {
     b.classList.toggle('active', i === (allHidden ? 1 : 0));
   });
 }
@@ -1267,7 +1363,7 @@ function setTcppingSelection(id, visible) {
     r.setAttribute('aria-pressed', String(visible));
   });
   saveTcppingSelections(id);
-  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .theme-btn').forEach((b, i) => {
+  document.querySelectorAll('#tcpping-section-' + id + ' .tcpping-controls .tcpping-visibility .theme-btn').forEach((b, i) => {
     b.classList.toggle('active', i === (visible ? 0 : 1));
   });
 }
