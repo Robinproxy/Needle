@@ -24,6 +24,10 @@
 .login-card .admin-primary { width: 100%; }
 .login-card .login-note { margin-top: 24px; font-size: 10px; text-align: center; }
 .admin-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
+.cost-settings { margin-bottom: 24px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.cost-settings summary { cursor: pointer; width: fit-content; }
+.cost-settings form { display: flex; align-items: flex-end; gap: 12px; margin: 14px 0 8px; }
+.cost-settings label { width: 150px; }
 .admin-columns, .admin-node { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(125px, 1fr) minmax(115px, 1fr) minmax(120px, 1fr) 72px; align-items: center; gap: 20px; }
 .admin-columns { font-size: 10px; color: hsl(var(--muted-foreground)); padding: 0 20px 10px; }
 .admin-sort { display: inline-flex; align-items: center; justify-self: start; gap: 6px; min-height: 28px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }

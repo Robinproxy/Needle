@@ -13,7 +13,7 @@ import (
 	"needle/internal/logging"
 )
 
-func TestInfoOnlyReturnsVersionWithoutReadingMonitoringTables(t *testing.T) {
+func TestInfoReturnsVersionAndCostMetadataWithoutReadingMonitoringTables(t *testing.T) {
 	h, store := newTestHandler(t)
 	for _, table := range []string{"metrics", "tcpping_results", "agents"} {
 		if _, err := store.db.Exec("DROP TABLE " + table); err != nil {
@@ -22,8 +22,8 @@ func TestInfoOnlyReturnsVersionWithoutReadingMonitoringTables(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	h.handleInfo(w, httptest.NewRequest(http.MethodGet, "/api/info", nil))
-	var info map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil || w.Code != http.StatusOK || len(info) != 1 || info["version"] != Version {
+	var info map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil || w.Code != http.StatusOK || len(info) != 2 || string(info["version"]) != fmt.Sprintf("%q", Version) || !strings.Contains(string(info["cost_display"]), `"currency":"CNY"`) {
 		t.Fatalf("version lookup depended on monitoring storage or returned old statistics: %d %s / %v", w.Code, w.Body.String(), err)
 	}
 }

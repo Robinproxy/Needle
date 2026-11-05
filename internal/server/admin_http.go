@@ -168,6 +168,35 @@ func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		adminJSON(w, 200, map[string]string{"status": "ok"})
 		return
 	}
+	if r.URL.Path == "/api/admin/cost-display" {
+		if r.Method == http.MethodPatch {
+			var input struct {
+				Currency string `json:"currency"`
+			}
+			if !adminBody(w, r, &input) {
+				return
+			}
+			if len(input.Currency) != 3 || !strings.Contains(displayCurrencies, " "+input.Currency+" ") {
+				adminError(w, 422, "Unsupported display currency")
+				return
+			}
+			if err := h.store.setCostCurrency(input.Currency); err != nil {
+				adminError(w, 500, "Could not save display currency")
+				return
+			}
+			logging.Print("INFO", "admin", "cost_currency_updated", "currency", input.Currency, "actor", session.Username)
+		} else if r.Method != http.MethodGet {
+			adminError(w, 405, "Method not allowed")
+			return
+		}
+		status, err := h.store.exchangeStatus(h.now())
+		if err != nil {
+			adminError(w, 500, "Could not load exchange rates")
+			return
+		}
+		adminJSON(w, 200, status)
+		return
+	}
 	if r.URL.Path == "/api/admin/nodes" && r.Method == http.MethodGet {
 		h.fullMu.Lock()
 		nodes, revision, err := h.store.NodeProfiles()

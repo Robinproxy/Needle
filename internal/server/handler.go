@@ -207,7 +207,11 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"version": Version})
+	info := map[string]any{"version": Version}
+	if status, err := h.store.exchangeStatus(h.now()); err == nil {
+		info["cost_display"] = status.costDisplay
+	}
+	json.NewEncoder(w).Encode(info)
 }
 
 func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {

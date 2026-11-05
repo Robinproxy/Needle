@@ -149,12 +149,12 @@ header {
 
 /* SERVER INFO */
 .server-info-bar {
-  display: flex; align-items: center; gap: 0;
-  height: 34px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px;
+  min-height: 34px; padding-top: 6px; padding-bottom: 6px;
 }
 .server-info {
   display: flex; align-items: center; gap: 0;
-  flex: 1; min-width: 0;
+  flex: 1 1 280px; min-width: 0;
   font-family: var(--font-mono); font-size: 11px;
   color: hsl(var(--muted-foreground));
   overflow-x: auto; white-space: nowrap;
@@ -175,6 +175,11 @@ header {
 .server-info .label { color: hsl(var(--muted-foreground) / 0.6); }
 .server-info .value { color: hsl(var(--foreground)); font-weight: 500; }
 .server-info .value.pri { color: hsl(var(--primary)); }
+.cost-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-left: auto; font: 11px var(--font-mono); }
+.cost-summary[hidden] { display: none; }
+.cost-label, .cost-note { color: hsl(var(--muted-foreground) / .7); }
+.cost-value { color: hsl(var(--foreground)); font-weight: 500; white-space: nowrap; }
+@media (max-width: 639px) { .cost-summary { margin-left: 0; } }
 /* CARD GRID */
 .card-grid {
   display: grid;

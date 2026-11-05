@@ -7,6 +7,7 @@ let filterRegion = '';
 let cardFormat = localStorage.getItem('cardFormat') || 'card';
 let dueSortEnabled = localStorage.getItem('renewalSort') === 'due';
 let infoRefreshInFlight = false;
+let costDisplay = null;
 let detailRequest = null;
 let currentHistoryRange = '24h';
 let currentHistoryDay = null;
@@ -156,6 +157,8 @@ function renderInfoBar() {
     '<button type="button" class="item region-filter' + (!filterRegion ? ' active' : '') + '" data-region="" aria-pressed="' + (!filterRegion) + '" aria-label="Show all nodes, ' + online + ' online out of ' + total + '"><span class="label">NODES</span> <span class="value">' + online + '/' + total + '</span></button>'
     + regionHtml;
 
+  renderCostSummary();
+
   const dueButton = document.getElementById('due-sort');
   if (dueButton) {
     dueButton.classList.toggle('active', dueSortEnabled);
@@ -164,6 +167,81 @@ function renderInfoBar() {
       ? 'Renewal date order; activate to restore manual order'
       : 'Sort by next renewal date, soonest first');
   }
+}
+
+// Exact decimals and rational cross-rates: round once after all recurring costs
+// are added. 72 is divisible by every supported payment period in months.
+function monthlyCostTotal(nodes, display) {
+  const groups = new Map();
+  let unpriced = 0, unconverted = 0, counted = 0;
+  const months = {'1m':1,'3m':3,'6m':6,'12m':12,'24m':24,'36m':36};
+  for (const {agent:a} of nodes) {
+    if (a.billing_period === 'forever') { counted++; continue; }
+    const cost = a.billing_cost;
+    if (!cost || typeof cost.amount !== 'string' || !/^\d{1,12}(\.\d{1,6})?$/.test(cost.amount)
+      || !/^[A-Z]{3}$/.test(cost.currency)) { unpriced++; continue; }
+    const [whole, fraction = ''] = cost.amount.split('.');
+    const amount = BigInt(whole + fraction.padEnd(6, '0'));
+    if (amount === 0n) { counted++; continue; }
+    if (!Object.hasOwn(months, a.billing_period)) { unpriced++; continue; }
+    const value = amount * (72n / BigInt(months[a.billing_period]));
+    const group = groups.get(cost.currency) || {value:0n, count:0};
+    groups.set(cost.currency, {value:group.value + value, count:group.count + 1});
+  }
+  const rate = currency => {
+    const value = display.rates[currency];
+    if (typeof value !== 'string' || !/^\d{1,8}(\.\d{1,8})?$/.test(value)) return 0n;
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole + fraction.padEnd(8, '0'));
+  };
+  const gcd = (a,b) => { while (b) [a,b] = [b,a % b]; return a; };
+  let numerator = 0n, denominator = 1n;
+  for (const [currency, group] of groups) {
+    let from = 1n, to = 1n;
+    if (currency !== display.currency) { from = rate(currency); to = rate(display.currency); }
+    if (!from || !to) { unconverted += group.count; continue; }
+    const n = group.value * to, d = 72000000n * from;
+    const common = gcd(denominator,d);
+    numerator = numerator * (d/common) + n * (denominator/common);
+    denominator *= d/common;
+    const reduction = gcd(numerator,denominator);
+    numerator /= reduction; denominator /= reduction;
+    counted += group.count;
+  }
+  const precision = display.currency === 'JPY' ? 0 : 2;
+  const scale = 10n ** BigInt(precision);
+  const rounded = (numerator * scale * 2n + denominator) / (2n * denominator);
+  const whole = (rounded/scale).toLocaleString('en-US');
+  const amount = counted ? whole + (precision ? '.' + String(rounded % scale).padStart(precision,'0') : '') : null;
+  return {amount,unpriced,unconverted};
+}
+
+function applyCostDisplay(value) {
+  if (!value || !/^[A-Z]{3}$/.test(value.currency) || value.source !== 'ECB'
+    || typeof value.stale !== 'boolean' || typeof value.date !== 'string'
+    || (value.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(value.date))
+    || !value.rates || typeof value.rates !== 'object' || Array.isArray(value.rates)
+    || Object.keys(value.rates).length > 64) return;
+  costDisplay = value;
+  renderCostSummary();
+}
+
+function renderCostSummary() {
+  const el = document.getElementById('cost-summary');
+  if (!el) return;
+  el.hidden = !costDisplay || !agents.length;
+  if (el.hidden) return;
+  const nodes = filterRegion ? agents.filter(a => (a.agent.region || '\u{1F310}') === filterRegion) : agents;
+  const total = monthlyCostTotal(nodes, costDisplay);
+  const notes = [];
+  if (total.unpriced) notes.push(total.unpriced + ' unpriced');
+  if (total.unconverted && total.amount != null) notes.push(total.unconverted + ' unconverted');
+  if (costDisplay.stale && total.amount != null) notes.push('Rates: ' + costDisplay.date);
+  const symbols = {USD:'US$',CNY:'CN¥',EUR:'€',GBP:'£',CAD:'CA$',HKD:'HK$',JPY:'JP¥',AUD:'AU$'};
+  const amount = total.amount == null ? (total.unconverted ? 'Rates unavailable' : 'Not set')
+    : '≈ ' + (symbols[costDisplay.currency] || costDisplay.currency + ' ') + total.amount;
+  el.innerHTML = '<span class="cost-label">MONTHLY</span><span class="cost-value">' + escapeHtml(amount)
+    + '</span>' + (notes.length ? '<span class="cost-note">' + escapeHtml(notes.join(' · ')) + '</span>' : '');
 }
 
 async function fetchJSON(url, { signal, timeoutMs = 15000 } = {}) {
@@ -224,6 +302,7 @@ async function refreshServerInfo() {
   try {
     const info = await fetchJSON('/api/info');
     if (!info || typeof info !== 'object' || Array.isArray(info)) throw new Error('/api/info: expected an object');
+    applyCostDisplay(info.cost_display);
     const version = document.getElementById('version-label');
     if (version) {
       const value = String(info.version || '');
@@ -1613,6 +1692,11 @@ function connectEvents() {
     watchEvents(stream, 40000);
     try { applyEventNodes(JSON.parse(event.data), true, firstSnapshot, firstSnapshot); firstSnapshot = false; }
     catch (error) { console.error('Event snapshot:', error); stream.onerror(); }
+  });
+  stream.addEventListener('costs', event => {
+    if (eventStream !== stream) return;
+    try { applyCostDisplay(JSON.parse(event.data)); }
+    catch (error) { console.warn('Cost display update:', error); }
   });
   stream.addEventListener('node', event => {
     if (eventStream !== stream) return;

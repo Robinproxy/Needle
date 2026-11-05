@@ -95,7 +95,37 @@ async function loadNodes() {
   if (!Array.isArray(data.nodes) || data.nodes.some(node => !Number.isSafeInteger(node.id))) throw new Error('Invalid node list');
   adminNodes = data.nodes;
   renderNodes();
+  await loadCostSettings();
 }
+
+function showExchangeStatus(data) {
+  const time = stamp => stamp ? new Date(stamp * 1000).toLocaleString() : 'Never';
+  el('display-currency').value = data.currency;
+  el('exchange-status').textContent = 'ECB · Rates: ' + (data.date || 'Not available')
+    + ' · Last success: ' + time(data.last_success)
+    + (data.last_error ? ' · Update failed; ' + (data.date ? 'using cached rates' : 'awaiting rates') + ' · Last attempt: ' + time(data.last_attempt)
+      : data.last_attempt ? (data.stale ? ' · Rates are over 7 days old' : ' · Updated') : ' · Awaiting first update');
+}
+
+async function loadCostSettings() {
+  try {
+    const data = await adminFetch('cost-display');
+    if (!/^[A-Z]{3}$/.test(data.currency) || data.source !== 'ECB') throw new Error('Could not load exchange rates');
+    if (adminCSRF) showExchangeStatus(data);
+    message('cost-display-error','');
+  } catch (error) { message('cost-display-error',error.message); }
+}
+
+el('cost-display-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button');
+  button.disabled = true; message('cost-display-error','');
+  try {
+    const data = await adminFetch('cost-display', {method:'PATCH',body:JSON.stringify({currency:el('display-currency').value})});
+    if (adminCSRF) showExchangeStatus(data);
+  } catch (error) { message('cost-display-error',error.message); }
+  finally { button.disabled = false; }
+});
 
 function decimalSortValue(value, precision) {
   if (typeof value !== 'string' || !new RegExp('^\\d+(\\.\\d{1,' + precision + '})?$').test(value)) return null;

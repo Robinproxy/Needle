@@ -24,6 +24,7 @@ One Server, multiple Agents, SQLite storage, and a public dashboard with optiona
 - CPU, memory, disk, load, uptime, network rates, and monthly upload + download usage
 - CPU model, operating system/version, architecture, and virtualization in Node Detail
 - Configurable TCP Ping targets for IPv4 / IPv6, with latency, jitter, and loss history
+- Monthly cost estimate in one display currency, using cached ECB reference rates
 - Billing costs, renewal reminders, monthly traffic allowances, and ♾️ options
 - Public dashboard with an optional single-administrator node settings page
 - Cards and list views, region filters, themes, persistent node ordering, and live SSE updates
@@ -457,6 +458,8 @@ Run the matching command. Enter username (default `admin`), browser origin (`htt
 
 Keep the configured origin stable and forward browser `Origin` unchanged; forwarded headers cannot override it. Open **Manage**, sign in, then **Edit** a node. Click the NEEDLE / Manage logo to reload the management page. Column headers sort billing (currency, then monthly equivalent; paid lifetime plans last within each currency), next renewal, or monthly allowance; repeated clicks cycle ascending, descending, and saved order. Unconfigured values stay last; ♾️ traffic sorts as the largest allowance. Sorting changes only this list and survives saves until the page reloads. Sessions expire after eight hours, sign-out, or restart. SQLite stores salted Argon2id password hashes.
 
+Expand **Cost display** to set the dashboard's shared currency: `CNY` (default), `USD`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, or `AUD`. It also shows the ECB observation date, last successful fetch, and update status. This setting is stored in SQLite; it does not change individual node prices or Agent YAML.
+
 Reset password, username, or origin interactively; this invalidates sessions without a restart:
 
 ```sh
@@ -839,6 +842,10 @@ Restart to apply changes, then confirm the next full report in logs / dashboard.
 <summary><strong>Node cards and live probe results</strong></summary>
 
 Cards show system usage, live upload / download rates, monthly totals, allowance, configured billing cost, and next scheduled renewal. Permanent dates and unmetered allowances display ♾️. Probe columns keep v4 left and v6 right; disabled probes retain a muted `TCP Ping · Off` area.
+
+The header shows **MONTHLY ≈ CN¥320.50** (example), a recurring monthly estimate rather than payment history. Prices are divided by their payment periods, converted using one dated ECB rate set, summed exactly, then rounded for display. Offline nodes count; country filters show their subtotal. Free nodes add zero; permanent one-off purchases add no monthly expense. Missing prices / unsupported currencies are marked `unpriced` / `unconverted`, never silently counted as free. If no configured costs can be converted yet, the header says `Rates unavailable` instead of showing a false zero; no prices configured shows `Not set`.
+
+The serving Server fetches [ECB's official XML](https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml) over HTTPS once per 24 hours, retrying failures at most hourly. No API Key or new dependency is required. Good rates, source date, and attempt status persist in the existing `needle.db` (`cost_display` table); failed / malformed / older responses never replace them. Rates remain usable indefinitely, including after restart: after more than seven calendar days, only a small `Rates: YYYY-MM-DD` note appears beside the estimate. New node prices continue to recalculate against cached rates. Requests run in the background and contain no node data or Tokens. CLI commands and Agents do not fetch rates. Requires only a Server update.
 
 Green / red dots indicate timely / overdue Agent reports, not confirmed power state. Cards and list rows keep normal contrast. Within the existing Server timeout, uptime stays visible; overdue reports replace it with `Seen 3m ago`, retaining the last readings and billing details. A new report restores uptime automatically. Browser connection failures retain the last confirmed node states and use the page's connection notice.
 

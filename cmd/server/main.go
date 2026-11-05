@@ -128,6 +128,8 @@ func main() {
 		logging.Fatal("server", "database_open_failed", err)
 	}
 	defer store.Close()
+	stopExchangeRates := store.StartExchangeRates()
+	defer stopExchangeRates()
 
 	mux := http.NewServeMux()
 	handler := server.NewHandler(store)

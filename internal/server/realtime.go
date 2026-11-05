@@ -388,7 +388,14 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return write("snapshot", nodes)
+		if err := write("snapshot", nodes); err != nil {
+			return err
+		}
+		// Small, same-origin metadata; no outbound exchange request on this path.
+		if status, err := h.store.exchangeStatus(h.now()); err == nil {
+			return write("costs", status.costDisplay)
+		}
+		return nil
 	}
 	if resync() != nil {
 		return

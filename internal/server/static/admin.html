@@ -52,6 +52,11 @@
         <div><span class="admin-eyebrow">ADMINISTRATION</span><h2>Node settings</h2></div>
       </div>
       <p id="save-notice" class="admin-notice" role="status" hidden></p>
+      <details class="cost-settings"><summary>Cost display</summary>
+        <form id="cost-display-form"><label>Display currency<select id="display-currency"><option>CNY</option><option>USD</option><option>EUR</option><option>GBP</option><option>CAD</option><option>HKD</option><option>JPY</option><option>AUD</option></select></label><button type="submit" class="admin-secondary">Save</button></form>
+        <p id="exchange-status">Loading exchange rates…</p>
+        <p id="cost-display-error" class="form-error" role="status" hidden></p>
+      </details>
       <div class="admin-columns"><span>Node</span><button type="button" class="admin-sort" data-sort="billing" aria-label="Billing: sort by currency, then monthly equivalent" aria-pressed="false">Billing<span class="sort-indicator" aria-hidden="true">↕</span></button><button type="button" class="admin-sort" data-sort="renewal" aria-pressed="false">Next renewal<span class="sort-indicator" aria-hidden="true">↕</span></button><button type="button" class="admin-sort" data-sort="traffic" aria-pressed="false">Monthly traffic<span class="sort-indicator" aria-hidden="true">↕</span></button><span></span></div>
       <div id="node-list" role="list" aria-label="Nodes"></div>
       <p id="no-nodes" class="admin-empty" hidden>No nodes connected yet. Install an Agent and allow its Token on the Server.</p>

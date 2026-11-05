@@ -234,7 +234,10 @@ func (s *Store) migrate() error {
 	if err := s.migrateReportReceipts(); err != nil {
 		return err
 	}
-	return s.migrateAdminRevision()
+	if err := s.migrateAdminRevision(); err != nil {
+		return err
+	}
+	return s.migrateExchangeRates()
 }
 
 // migrateDropAutoIncrement rebuilds tables that historically used AUTOINCREMENT.
