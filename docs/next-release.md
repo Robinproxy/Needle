@@ -1,17 +1,16 @@
-# v0.7.12 — Bounded reporting and history queries
+# v0.7.13 — Agent redirect security
 
-- Authenticate full-report Tokens before reading request bodies; limit full
-  reports to 16 concurrent requests and return retry hints when overloaded.
-- Close rejected HTTP/1 requests without waiting for unread slow bodies.
-  Keep transactional hostname binding and persistent report deduplication.
-- Apply one history sampling policy to relative and explicit time windows,
-  rejecting invalid, ambiguous, and overflowing parameters before querying.
-- Preserve normal daily raw detail; aggregate dense results without dropping
-  peaks or probe success/loss counts. Bound metric and probe response sizes.
-- Limit history queries to four concurrent requests and ten seconds. Propagate
-  browser cancellation to SQLite, including running aggregations.
-- Add security regressions and document admission and history limits.
+- Apply one redirect policy to realtime reports, historical reports, capability
+  negotiation, and history-preserving unregister.
+- Reject HTTPS-to-HTTP, cross-host, subdomain, port-changing, and embedded-
+  credential redirects, even when plaintext HTTP is explicitly enabled.
+- Reject redirects that change the request method and bound redirect chains
+  to ten requests. Keep safe same-origin redirects and POST replay via 307/308.
+- Handle rejected redirects through bounded status responses without logging
+  the supplied redirect URL or response body; do not retry rejected redirects.
+- Add security regressions, verified TLS redirect fixtures, and configuration
+  and troubleshooting documentation.
 
-Upgrade the Server to apply these changes. Existing Agents do not need an
-upgrade or configuration changes for this release. Tokens, stored history,
-traffic accounting, and retention rules remain unchanged.
+Upgrade the Agent on Linux and OpenWrt/ImmortalWrt to apply this fix. The Server
+requires no changes. Keep existing configuration and Tokens; if the configured
+Server URL redirects to a different origin, set it to the final Server address.

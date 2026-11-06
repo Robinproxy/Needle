@@ -720,7 +720,7 @@ tcpping:
 | Field | Meaning / default |
 | --- | --- |
 | `hostname` | Stable Agent identity; empty / omitted uses the system hostname. Token binds to it; edit the display name in `/admin` |
-| `server` | Server URL; use the public HTTPS address, e.g. `https://needle.example.com` |
+| `server` | Final Server URL; use HTTPS, e.g. `https://needle.example.com`. Redirects must preserve scheme, hostname, effective port, and HTTP method |
 | `token` | Unique allowed credential; required, 1–256 characters, no whitespace or control characters |
 | `server_managed` | Boolean; defaults to `true`. Static settings belong to `/admin`; `false` is rejected |
 | `realtime_interval` | Integer seconds: `0` disables extra live reports; otherwise 1–`interval`. New installs use 5; omitted = 0 |
@@ -729,7 +729,7 @@ tcpping:
 | `history_retry_max_age_seconds` | Optional integer, 1–86400; omitted / 0 = 1800, counted from original sample time |
 | `interfaces` | Exact NIC whitelist, e.g. `["eth0"]`; omitted / empty counts automatically selected physical interfaces, excluding loopback and common virtual / VPN devices |
 | `tls_skip_verify` | Default `false`; `true` skips HTTPS certificate verification |
-| `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
+| `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it. Does not permit HTTPS-to-HTTP redirects |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
 In `/admin`, configure region, billing currency/amount/period, renewal date, and allowance. Amount: whole period, 0 = Free, empty = Not set. Allowance: 0 = ♾️. Traffic resets monthly on its pinned day, independent of payment period / renewal; editing these settings does not clear usage.
@@ -793,7 +793,7 @@ tcpping: []
 | Field | Meaning / default |
 | --- | --- |
 | `hostname` | Stable Agent identity; empty / omitted uses the system hostname. Token binds to it; edit the display name in `/admin` |
-| `server` | Server URL; use the public HTTPS address, e.g. `https://needle.example.com` |
+| `server` | Final Server URL; use HTTPS, e.g. `https://needle.example.com`. Redirects must preserve scheme, hostname, effective port, and HTTP method |
 | `token` | Unique allowed credential; required, 1–256 characters, no whitespace or control characters |
 | `server_managed` | Boolean; defaults to `true`. Static settings belong to `/admin`; `false` is rejected |
 | `realtime_interval` | Integer seconds: `0` disables extra live reports; otherwise 1–`interval`. New installs use 5; omitted = 0 |
@@ -802,7 +802,7 @@ tcpping: []
 | `history_retry_max_age_seconds` | Optional integer, 1–86400; omitted / 0 = 1800, counted from original sample time |
 | `interfaces` | Exact NIC whitelist; select the real WAN (`pppoe-wan`, `eth1`, etc.). Omitted / empty uses automatic filtering and can double-count router traffic |
 | `tls_skip_verify` | Default `false`; `true` skips HTTPS certificate verification |
-| `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it |
+| `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it. Does not permit HTTPS-to-HTTP redirects |
 | `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
 In `/admin`, configure region, billing currency/amount/period, renewal date, and allowance. Amount: whole period, 0 = Free, empty = Not set. Allowance: 0 = ♾️. Traffic resets monthly on its pinned day, independent of payment period / renewal; editing these settings does not clear usage.
@@ -887,6 +887,8 @@ Wake / network return refreshes and reconnects immediately. Background timers st
 For repeated failures, check browser requests, Server logs, `/api/health`, and public proxy / Tunnel access. Allow long-lived `/api/events`; internal health alone does not prove public connectivity. History panels retry independently.
 
 Logs use `INFO` / `WARN` / `ERROR`, `module`, and `event`; startup adds version / commit. Healthy reports are silent. Repeated failures log immediately, then at most once per minute per operation: `count` = total failures, `suppressed` = omitted repeats. Recovery emits `event=recovered`. History / realtime tracking is separate; TCP Ping recovery concerns permission errors, not reachability. Credential failures aggregate across hostnames and do not recover on another Agent's success.
+
+Agent report errors with a `3xx` status indicate a rejected redirect or redirect loop. Set `server` to the final address; same-origin, method-preserving redirects allow at most ten requests per chain.
 
 Tracking is bounded and resets on restart; summaries appear on the next failure, without background timers. Levels are text labels, not journal priorities. Logs omit Tokens, full YAML, and HTTP response bodies; errors use status codes and bounded quoted text. Read via `journalctl`, `logread`, or `docker compose logs`.
 

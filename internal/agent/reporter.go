@@ -95,7 +95,7 @@ func NewReporter(serverURL, token string, tlsSkipVerify bool) *Reporter {
 	return &Reporter{
 		serverURL: serverURL,
 		token:     token,
-		client:    &http.Client{Transport: tr, Timeout: 15 * time.Second},
+		client:    &http.Client{Transport: tr, Timeout: 15 * time.Second, CheckRedirect: checkReportRedirect},
 	}
 }
 
