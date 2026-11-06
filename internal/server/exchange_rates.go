@@ -20,6 +20,7 @@ var rateCurrencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 
 type costDisplay struct {
 	Currency string            `json:"currency"`
+	Hidden   bool              `json:"hidden"`
 	Source   string            `json:"source"`
 	Date     string            `json:"date"`
 	Stale    bool              `json:"stale"`
@@ -39,14 +40,21 @@ func (s *Store) migrateExchangeRates() error {
  rate_date TEXT NOT NULL DEFAULT '', rates_json TEXT NOT NULL DEFAULT '{}',
  last_attempt INTEGER NOT NULL DEFAULT 0, last_success INTEGER NOT NULL DEFAULT 0,
  last_error TEXT NOT NULL DEFAULT ''); INSERT OR IGNORE INTO cost_display(id) VALUES(1)`)
-	return err
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE cost_display ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) exchangeStatus(now time.Time) (exchangeStatus, error) {
 	status := exchangeStatus{costDisplay: costDisplay{Source: "ECB"}}
 	var encoded string
-	err := s.db.QueryRow(`SELECT currency,rate_date,rates_json,last_attempt,last_success,last_error FROM cost_display WHERE id=1`).Scan(
-		&status.Currency, &status.Date, &encoded, &status.LastAttempt, &status.LastSuccess, &status.LastError)
+	err := s.db.QueryRow(`SELECT currency,hidden,rate_date,rates_json,last_attempt,last_success,last_error FROM cost_display WHERE id=1`).Scan(
+		&status.Currency, &status.Hidden, &status.Date, &encoded, &status.LastAttempt, &status.LastSuccess, &status.LastError)
 	if err != nil {
 		return status, err
 	}
@@ -60,11 +68,11 @@ func (s *Store) exchangeStatus(now time.Time) (exchangeStatus, error) {
 	return status, nil
 }
 
-func (s *Store) setCostCurrency(currency string) error {
-	if !strings.Contains(displayCurrencies, " "+currency+" ") || len(currency) != 3 {
+func (s *Store) setCostDisplay(currency string, hidden *bool) error {
+	if currency != "" && (!strings.Contains(displayCurrencies, " "+currency+" ") || len(currency) != 3) {
 		return fmt.Errorf("unsupported display currency")
 	}
-	_, err := s.db.Exec(`UPDATE cost_display SET currency=? WHERE id=1`, currency)
+	_, err := s.db.Exec(`UPDATE cost_display SET currency=COALESCE(NULLIF(?,''),currency),hidden=COALESCE(?,hidden) WHERE id=1`, currency, hidden)
 	return err
 }
 

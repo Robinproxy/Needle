@@ -172,19 +172,20 @@ func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch {
 			var input struct {
 				Currency string `json:"currency"`
+				Hidden   *bool  `json:"hidden"`
 			}
 			if !adminBody(w, r, &input) {
 				return
 			}
-			if len(input.Currency) != 3 || !strings.Contains(displayCurrencies, " "+input.Currency+" ") {
+			if input.Currency == "" && input.Hidden == nil || input.Currency != "" && (len(input.Currency) != 3 || !strings.Contains(displayCurrencies, " "+input.Currency+" ")) {
 				adminError(w, 422, "Unsupported display currency")
 				return
 			}
-			if err := h.store.setCostCurrency(input.Currency); err != nil {
+			if err := h.store.setCostDisplay(input.Currency, input.Hidden); err != nil {
 				adminError(w, 500, "Could not save display currency")
 				return
 			}
-			logging.Print("INFO", "admin", "cost_currency_updated", "currency", input.Currency, "actor", session.Username)
+			logging.Print("INFO", "admin", "cost_display_updated", "actor", session.Username)
 		} else if r.Method != http.MethodGet {
 			adminError(w, 405, "Method not allowed")
 			return

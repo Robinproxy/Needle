@@ -106,5 +106,23 @@ const click = key=>buttons.find(button=>button.dataset.sort===key).events.click(
   assert.deepEqual(order(),[10,9],'large allowances one byte apart must keep their order');
   ctx.fixtures=[];await ctx.loadNodes();
   assert.equal(get('no-nodes').hidden,false);
+  // Hiding the summary must not overwrite the remembered currency. Choosing a
+  // currency again explicitly restores visibility in the same authenticated save.
+  const saved=[];
+  vm.runInContext("adminCSRF = 'test-csrf';",ctx);
+  ctx.adminFetch=async(route,options)=>{
+    saved.push({route,...JSON.parse(options.body)});
+    return {currency:'EUR',hidden:saved.at(-1).hidden,date:'2026-11-05',last_success:1};
+  };
+  ctx.showExchangeStatus({currency:'EUR',hidden:true});
+  assert.equal(get('display-currency').value,'hidden');
+  const costForm=get('cost-display-form');
+  await costForm.events.submit({preventDefault(){},currentTarget:costForm});
+  assert.deepEqual(saved[0],{route:'cost-display',hidden:true});
+  get('display-currency').value='EUR';
+  await costForm.events.submit({preventDefault(){},currentTarget:costForm});
+  assert.deepEqual(saved[1],{route:'cost-display',currency:'EUR',hidden:false});
+  assert.equal(get('display-currency').value,'EUR');
+  assert.match(html, /<option value="hidden">Hidden<\/option>/);
   console.log('Admin checks passed: same-page refresh, three sorting modes, exact values, unchanged positions, correct editor selection, and safe optional provider links.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

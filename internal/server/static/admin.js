@@ -100,7 +100,7 @@ async function loadNodes() {
 
 function showExchangeStatus(data) {
   const time = stamp => stamp ? new Date(stamp * 1000).toLocaleString() : 'Never';
-  el('display-currency').value = data.currency;
+  el('display-currency').value = data.hidden ? 'hidden' : data.currency;
   el('exchange-status').textContent = 'ECB · Rates: ' + (data.date || 'Not available')
     + ' · Last success: ' + time(data.last_success)
     + (data.last_error ? ' · Update failed; ' + (data.date ? 'using cached rates' : 'awaiting rates') + ' · Last attempt: ' + time(data.last_attempt)
@@ -121,7 +121,9 @@ el('cost-display-form').addEventListener('submit', async event => {
   const button = event.currentTarget.querySelector('button');
   button.disabled = true; message('cost-display-error','');
   try {
-    const data = await adminFetch('cost-display', {method:'PATCH',body:JSON.stringify({currency:el('display-currency').value})});
+    const value = el('display-currency').value;
+    const settings = value === 'hidden' ? {hidden:true} : {currency:value,hidden:false};
+    const data = await adminFetch('cost-display', {method:'PATCH',body:JSON.stringify(settings)});
     if (adminCSRF) showExchangeStatus(data);
   } catch (error) { message('cost-display-error',error.message); }
   finally { button.disabled = false; }

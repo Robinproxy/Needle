@@ -218,6 +218,7 @@ function monthlyCostTotal(nodes, display) {
 
 function applyCostDisplay(value) {
   if (!value || !/^[A-Z]{3}$/.test(value.currency) || value.source !== 'ECB'
+    || (value.hidden != null && typeof value.hidden !== 'boolean')
     || typeof value.stale !== 'boolean' || typeof value.date !== 'string'
     || (value.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(value.date))
     || !value.rates || typeof value.rates !== 'object' || Array.isArray(value.rates)
@@ -229,8 +230,8 @@ function applyCostDisplay(value) {
 function renderCostSummary() {
   const el = document.getElementById('cost-summary');
   if (!el) return;
-  el.hidden = !costDisplay || !agents.length;
-  if (el.hidden) return;
+  el.hidden = !costDisplay || costDisplay.hidden === true || !agents.length;
+  if (el.hidden) { el.innerHTML = ''; return; }
   const nodes = filterRegion ? agents.filter(a => (a.agent.region || '\u{1F310}') === filterRegion) : agents;
   const total = monthlyCostTotal(nodes, costDisplay);
   const notes = [];

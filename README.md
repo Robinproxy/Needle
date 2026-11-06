@@ -458,7 +458,7 @@ Run the matching command. Enter username (default `admin`), browser origin (`htt
 
 Keep the configured origin stable and forward browser `Origin` unchanged; forwarded headers cannot override it. Open **Manage**, sign in, then **Edit** a node. Click the NEEDLE / Manage logo to reload the management page. Column headers sort billing (currency, then monthly equivalent; paid lifetime plans last within each currency), next renewal, or monthly allowance; repeated clicks cycle ascending, descending, and saved order. Unconfigured values stay last; ♾️ traffic sorts as the largest allowance. Sorting changes only this list and survives saves until the page reloads. Sessions expire after eight hours, sign-out, or restart. SQLite stores salted Argon2id password hashes.
 
-Expand **Cost display** to set the dashboard's shared currency: `CNY` (default), `USD`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, or `AUD`. It also shows the ECB observation date, last successful fetch, and update status. This setting is stored in SQLite; it does not change individual node prices or Agent YAML.
+Expand **Cost display** to set the dashboard's shared currency: `CNY` (default), `USD`, `EUR`, `GBP`, `CAD`, `HKD`, `JPY`, or `AUD`. Choose **Hidden** and save to hide the header's monthly total for everyone; choose a currency to show it again. Visibility survives refresh / restart and preserves the last currency, rates, and node prices; card prices and Manage remain visible. This controls presentation, not access to the public billing data. The section also shows the ECB observation date, last successful fetch, and update status. Settings are stored in SQLite; Agent YAML is unchanged.
 
 Reset password, username, or origin interactively; this invalidates sessions without a restart:
 

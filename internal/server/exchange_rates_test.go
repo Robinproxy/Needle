@@ -66,7 +66,7 @@ func TestExchangeCacheRetainsGoodDataAcrossFailureRestartAndAge(t *testing.T) {
 	if err := s.updateExchangeRates(context.Background(), fxClient(t, 200, ecbFixture("2026-11-04")), now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.setCostCurrency("USD"); err != nil {
+	if err := s.setCostDisplay("USD", nil); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := s.exchangeStatus(now)
@@ -102,7 +102,7 @@ func TestExchangeCacheRetainsGoodDataAcrossFailureRestartAndAge(t *testing.T) {
 	if boundary.Stale {
 		t.Fatal("weekends/7-day boundary treated as expired")
 	}
-	if err := s.setCostCurrency("XYZ"); err == nil {
+	if err := s.setCostDisplay("XYZ", nil); err == nil {
 		t.Fatal("unknown display currency accepted")
 	}
 	if err := s.migrateExchangeRates(); err != nil {
@@ -147,16 +147,46 @@ func TestExchangeSchedulingAndAuthenticatedSettings(t *testing.T) {
 	if w := adminCall(h, "PATCH", "cost-display", `{"currency":"USD"}`, cookie, csrf); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	before, _ := s.exchangeStatus(h.now())
+	if w := adminCall(h, "PATCH", "cost-display", `{"hidden":"true"}`, cookie, csrf); w.Code != 400 {
+		t.Fatal("invalid visibility accepted", w.Code)
+	}
+	if w := adminCall(h, "PATCH", "cost-display", `{"hidden":true}`, cookie, "wrong"); w.Code != 403 {
+		t.Fatal("visibility changed without CSRF", w.Code)
+	}
+	if w := adminCall(h, "PATCH", "cost-display", `{"hidden":true}`, cookie, csrf); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	after, _ := s.exchangeStatus(h.now())
+	if !after.Hidden || before.Currency != after.Currency || !reflect.DeepEqual(before.Rates, after.Rates) || before.Date != after.Date {
+		t.Fatal("visibility change erased settings", before, after)
+	}
+	reopened, err := NewStoreCLI(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, _ := reopened.exchangeStatus(h.now())
+	reopened.Close()
+	if !persisted.Hidden || persisted.Currency != "USD" {
+		t.Fatal("visibility not persisted", persisted)
+	}
 	w := httptest.NewRecorder()
 	h.handleInfo(w, httptest.NewRequest("GET", "/api/info", nil))
 	var info struct {
 		Display costDisplay `json:"cost_display"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil || info.Display.Currency != "USD" {
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil || info.Display.Currency != "USD" || !info.Display.Hidden {
 		t.Fatal(w.Body.String(), err)
 	}
 	if strings.Contains(w.Body.String(), "last_error") || strings.Contains(w.Body.String(), "last_attempt") {
 		t.Fatal("public API exposed diagnostic details")
+	}
+	if w := adminCall(h, "PATCH", "cost-display", `{"currency":"CNY","hidden":false}`, cookie, csrf); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	restored, _ := s.exchangeStatus(h.now())
+	if restored.Hidden || restored.Currency != "CNY" {
+		t.Fatal("could not restore cost display", restored)
 	}
 	if _, err := s.db.Exec(`DROP TABLE cost_display`); err != nil {
 		t.Fatal(err)
@@ -175,5 +205,30 @@ func TestExchangeSchedulingAndAuthenticatedSettings(t *testing.T) {
 	status, _ := other.exchangeStatus(now)
 	if status.LastAttempt != 0 {
 		t.Fatal("CLI unexpectedly fetched rates")
+	}
+}
+
+func TestCostDisplayVisibilityMigrationFromV0710(t *testing.T) {
+	_, s := newTestHandler(t)
+	if _, err := s.db.Exec(`ALTER TABLE cost_display DROP COLUMN hidden; UPDATE cost_display SET currency='EUR',rate_date='2026-11-05',rates_json='{"EUR":"1","CNY":"8"}',last_success=123`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrateExchangeRates(); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.exchangeStatus(time.Now())
+	if err != nil || status.Hidden || status.Currency != "EUR" || status.Date != "2026-11-05" || status.Rates["CNY"] != "8" || status.LastSuccess != 123 {
+		t.Fatal("migration changed existing cost settings", status, err)
+	}
+	hidden := true
+	if err := s.setCostDisplay("", &hidden); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrateExchangeRates(); err != nil {
+		t.Fatal(err)
+	}
+	status, _ = s.exchangeStatus(time.Now())
+	if !status.Hidden || status.Currency != "EUR" {
+		t.Fatal("migration reset saved visibility", status)
 	}
 }
