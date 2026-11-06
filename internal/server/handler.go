@@ -98,13 +98,19 @@ type Handler struct {
 	realtimeGlobal  globalLimiter
 	realtimeLimiter *tokenLimiter
 	fullMu          sync.Mutex
+	reportSlots     chan struct{}
 	realtimeSlots   chan struct{}
 	logs            *logging.Tracker
 	admin           *adminState
 }
 
 func NewHandler(store *Store) *Handler {
-	return &Handler{store: store, committed: make(map[int64]committedEntry), tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(), realtimeSlots: make(chan struct{}, 16), now: time.Now, logs: logging.NewTracker("server.api", log.Printf), admin: newAdminState()}
+	return &Handler{
+		store: store, committed: make(map[int64]committedEntry),
+		tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(),
+		reportSlots: make(chan struct{}, maxConcurrentReports), realtimeSlots: make(chan struct{}, 16),
+		now: time.Now, logs: logging.NewTracker("server.api", log.Printf), admin: newAdminState(),
+	}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -173,25 +179,6 @@ func bearerToken(r *http.Request) (string, bool) {
 	return fields[1], true
 }
 
-// authorizeAgent checks whitelist token and hostname binding rules.
-// First binding is committed atomically with the report in SaveReport.
-func (h *Handler) authorizeAgent(token, hostname string) (*TokenRow, error) {
-	if token == "" || hostname == "" {
-		return nil, ErrTokenNotFound
-	}
-	row, err := h.store.LookupToken(token)
-	if err != nil {
-		return nil, err
-	}
-	if row.Hostname == "" {
-		return row, nil
-	}
-	if row.Hostname != hostname {
-		return nil, ErrTokenAlreadyBound
-	}
-	return row, nil
-}
-
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -256,16 +243,59 @@ func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// Do not let net/http drain a slow, unread HTTP/1 body after rejecting it.
+// HTTP/2 closes the request stream without closing unrelated connections.
+func rejectUnreadReport(w http.ResponseWriter, r *http.Request, message string, status int) {
+	if r.ProtoMajor == 1 {
+		w.Header().Set("Connection", "close")
+	}
+	http.Error(w, message, status)
+}
+
 func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		rejectUnreadReport(w, r, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	now := h.now()
 	if !h.globalLimiter.Allow(now) {
 		w.Header().Set("Retry-After", "1")
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		rejectUnreadReport(w, r, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
+	token, ok := bearerToken(r)
+	if !ok {
+		rejectUnreadReport(w, r, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Bound credential lookups, body decoding and queued commits together.
+	// Never wait for a slot while holding an incoming request open.
+	select {
+	case h.reportSlots <- struct{}{}:
+		defer func() { <-h.reportSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		rejectUnreadReport(w, r, "report concurrency limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	tokenRow, err := h.store.LookupToken(token)
+	if err != nil {
+		if errors.Is(err, ErrTokenNotFound) {
+			h.logs.Check("credential_lookup", "ERROR", nil)
+			h.logs.Check("authorization", "WARN", err, "status", 401)
+			rejectUnreadReport(w, r, "unauthorized", http.StatusUnauthorized)
+		} else {
+			h.logs.Check("credential_lookup", "ERROR", err)
+			rejectUnreadReport(w, r, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	h.logs.Check("credential_lookup", "ERROR", nil)
+	if !h.tokenLimiter.Allow(tokenRow.ID, now) {
+		w.Header().Set("Retry-After", "1")
+		rejectUnreadReport(w, r, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -285,29 +315,11 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, ok := bearerToken(r)
-	if !ok {
+	// Reading a body must never bind a token. SaveReport checks the current
+	// token and hostname again inside the transaction before any writes.
+	if tokenRow.Hostname != "" && tokenRow.Hostname != req.Hostname {
+		h.logs.Check("authorization", "WARN", ErrTokenAlreadyBound, "hostname", req.Hostname, "status", 401)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	tokenRow, err := h.authorizeAgent(token, req.Hostname)
-	if err != nil {
-		if errors.Is(err, ErrTokenNotFound) || errors.Is(err, ErrTokenAlreadyBound) {
-			h.logs.Check("credential_lookup", "ERROR", nil)
-			// Aggregate rejections across untrusted hostnames; never retain a
-			// map entry or print a new line for every presented credential.
-			h.logs.Check("authorization", "WARN", err, "hostname", req.Hostname, "status", 401)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-		} else {
-			h.logs.Check("credential_lookup", "ERROR", err, "hostname", req.Hostname)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		}
-		return
-	}
-	h.logs.Check("credential_lookup", "ERROR", nil)
-	if !h.tokenLimiter.Allow(tokenRow.ID, now) {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 

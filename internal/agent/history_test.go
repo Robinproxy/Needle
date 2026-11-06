@@ -95,6 +95,49 @@ func TestHistoryAgeMeasuredFromSampleAndRetryAfter(t *testing.T) {
 	}
 }
 
+func TestHistoryRetriesServerOverloadWithSameReport(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			now := time.Unix(10000, 0)
+			var bodies []string
+			r := NewReporter("http://localhost", "test", false)
+			r.client.Transport = transportFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/api/report-capabilities" {
+					return response(200, `{"protocol":"persistent-report-v1"}`), nil
+				}
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				bodies = append(bodies, string(body))
+				if len(bodies) == 1 {
+					resp := response(status, "server overloaded")
+					resp.Header.Set("Retry-After", "2")
+					return resp, nil
+				}
+				return response(200, `{"protocol":"persistent-report-v1","report_id":"overload-test"}`), nil
+			})
+			sender := NewHistorySender(r, time.Minute, func(string, ...any) {})
+			sender.now = func() time.Time { return now }
+			waits := 0
+			sender.wait = func(_ context.Context, delay time.Duration) error {
+				waits++
+				if delay < 2*time.Second {
+					t.Fatalf("Retry-After ignored: %s", delay)
+				}
+				now = now.Add(delay)
+				return nil
+			}
+			if err := sender.Send(context.Background(), &ReportData{CreatedAt: now.Unix(), ReportID: "overload-test", Hostname: "test"}); err != nil {
+				t.Fatal(err)
+			}
+			if len(bodies) != 2 || bodies[0] != bodies[1] || waits != 1 {
+				t.Fatalf("overload retry changed or lost report: bodies=%v waits=%d", bodies, waits)
+			}
+		})
+	}
+}
+
 func TestCapabilityNegotiationCanRecoverBeforeAnyReportIsSent(t *testing.T) {
 	now := time.Unix(10000, 0)
 	caps, reports := 0, 0

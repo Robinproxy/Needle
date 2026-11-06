@@ -580,6 +580,8 @@ Realtime updates memory only; full reports save history and traffic accounting. 
 
 Retries require Server persistent deduplication. Defaults: 64 reports including in-flight, an independent 8 MiB cap, and 1800-second sample age. The memory-only queue is lost on restart and may not cover a full outage. See [protocol details](docs/p0-p1-validation.md).
 
+The Server checks Tokens before reading full-report bodies and admits up to 16 concurrent full reports. Rate / concurrency limits return `429` / `503` with `Retry-After`; current Agents retry within their existing queue and age limits.
+
 </details>
 
 <details>

@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	globalReportLimit   = 200
-	perTokenReportLimit = 2
-	maxLimiterEntries   = 4096
+	globalReportLimit    = 200
+	perTokenReportLimit  = 2
+	maxConcurrentReports = 16
+	maxLimiterEntries    = 4096
 )
 
 type globalLimiter struct {

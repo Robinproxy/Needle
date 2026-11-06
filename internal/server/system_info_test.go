@@ -72,10 +72,13 @@ func TestSystemInformationWireStorageAndCompatibility(t *testing.T) {
 
 func TestSystemInformationValidationAndRealtimeIsolation(t *testing.T) {
 	h, store := newTestHandler(t)
+	now := h.now()
+	h.now = func() time.Time { return now }
 	if err := store.AllowToken("system-test"); err != nil {
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{"cpu_model": strings.Repeat("x", 257), "os_name": "Linux\nforged", "arch": strings.Repeat("x", 33), "virtualization_system": strings.Repeat("x", 65), "virtualization_role": "other"} {
+		now = now.Add(time.Second) // Exercise validation independently of admission limits.
 		payload, _ := json.Marshal(map[string]any{"hostname": "node", key: value})
 		if w := sendReport(t, h, "Bearer system-test", string(payload)); w.Code != http.StatusBadRequest {
 			t.Fatalf("invalid %s accepted: %d", key, w.Code)
@@ -86,6 +89,7 @@ func TestSystemInformationValidationAndRealtimeIsolation(t *testing.T) {
 		`{"hostname":"node","virtualization_system":"kvm","virtualization_role":"other"}`,
 		`{"hostname":"node","virtualization_role":"host"}`,
 	} {
+		now = now.Add(time.Second)
 		if w := sendReport(t, h, "Bearer system-test", body); w.Code != http.StatusBadRequest {
 			t.Fatalf("invalid virtualization accepted: %d / %s", w.Code, body)
 		}
