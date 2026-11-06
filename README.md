@@ -624,7 +624,7 @@ services:
 
 | Setting | Meaning / default |
 | --- | --- |
-| `image` | `latest` follows published builds; use a published version tag to pin a release |
+| `image` | `latest` follows tested builds of the current `main` commit; version-tag builds do not move it. Use a published version tag to pin a release |
 | `ports` | Host loopback only; left port is the host, right port is the container |
 | `NEEDLE_PORT` | Optional Compose substitution, default `8008`; set in `~/needle/.env` |
 | `NEEDLE_LISTEN` | Container listener, `:8008`; keep aligned with the mapping and health check |

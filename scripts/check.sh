@@ -6,6 +6,7 @@ go vet ./...
 bash -n scripts/needle-server.sh
 bash -n scripts/needle-agent.sh
 bash -n scripts/test-docker.sh
+bash -n scripts/promote-docker-latest.sh
 sh -n scripts/needle-agent-openwrt.sh
 for test in scripts/test-*.py; do
   case "$test" in *systemd.py) continue;; esac

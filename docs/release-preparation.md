@@ -54,3 +54,18 @@ archives are executed using QEMU during validation.
 A source push to `main` triggers Docker checks and image publication; it does not
 create a GitHub Release or deploy a service. Real Linux systemd and Docker checks
 run in CI and must not be reported as locally passed on macOS.
+
+Docker builds publish only their own `ci-RUN_ID-RUN_ATTEMPT` candidate or version
+tag. A separate main-only job promotes the tested image by digest to `latest`.
+All promotions share a noncanceling concurrency group with pending jobs retained
+using GitHub's [`queue: max`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency);
+inside that lock the guard rereads remote `main` and skips superseded commits.
+Keep the group name stable across workflow revisions. Reordering, old reruns,
+and version-tag builds using this workflow cannot roll back `latest`.
+
+For the first rollout, cancel any queued or running Docker jobs using the old
+workflow before publishing with the new policy. Archived workflow definitions
+are not retroactively changed: do not rerun them or publish tags on pre-policy
+commits without backporting the workflow fix. Rebuild using the current `main`
+workflow instead. Registry publication and the GitHub concurrency queue still
+require CI verification; local tests use disposable Git repos and a fake registry.

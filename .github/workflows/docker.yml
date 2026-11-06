@@ -5,6 +5,9 @@ on:
     branches: [main]
     tags: [v*]
 
+env:
+  NEEDLE_IMAGE: ghcr.io/robinproxy/needle
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,6 +15,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_ref: ${{ steps.publish.outputs.image_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +33,7 @@ jobs:
           go test -race -run '^TestUnprivilegedLinuxCollectors$' -count=20 ./internal/agent/collector
           go vet ./...
           python3 scripts/test-server-installer.py
+          python3 scripts/test-docker-publication.py
       - name: Verify Server migration, CLI permissions and complete lifecycle
         run: |
           go build -o /tmp/needle-server-security ./cmd/server
@@ -44,7 +50,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and verify candidate
         env:
           RELEASE_REF_TYPE: ${{ github.ref_type }}
           RELEASE_REF_NAME: ${{ github.ref_name }}
@@ -54,9 +60,52 @@ jobs:
           else
             VERSION=$(git describe --tags --always 2>/dev/null || echo "$GITHUB_SHA" | cut -c1-7)
           fi
-          docker build --build-arg VERSION="$VERSION" --build-arg COMMIT="$GITHUB_SHA" -t ghcr.io/robinproxy/needle:latest .
-          bash scripts/test-docker.sh ghcr.io/robinproxy/needle:latest
+          docker build --build-arg VERSION="$VERSION" --build-arg COMMIT="$GITHUB_SHA" -t needle-candidate .
+          bash scripts/test-docker.sh needle-candidate
+
+      - name: Publish candidate or version image
+        id: publish
+        env:
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+        run: |
           if [ "$RELEASE_REF_TYPE" = "tag" ]; then
-            docker tag ghcr.io/robinproxy/needle:latest "ghcr.io/robinproxy/needle:$RELEASE_REF_NAME"
+            TARGET_TAG="$RELEASE_REF_NAME"
+          else
+            TARGET_TAG="ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           fi
-          docker push --all-tags ghcr.io/robinproxy/needle
+          docker tag needle-candidate "$NEEDLE_IMAGE:$TARGET_TAG"
+          docker push "$NEEDLE_IMAGE:$TARGET_TAG"
+          IMAGE_REF=$(docker image inspect --format '{{index .RepoDigests 0}}' "$NEEDLE_IMAGE:$TARGET_TAG")
+          printf 'image_ref=%s\n' "$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+  latest:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    # Only this job writes latest. Retain pending promotions: an older rerun
+    # must not displace a newer commit's pending promotion.
+    concurrency:
+      group: needle-docker-latest
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Apply the current promotion policy even when rerunning an old build.
+          ref: main
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote tested digest if commit is still main
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_IMAGE: ${{ needs.build.outputs.image_ref }}
+        run: bash scripts/promote-docker-latest.sh "$SOURCE_COMMIT" "$SOURCE_IMAGE"
