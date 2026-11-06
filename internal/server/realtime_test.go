@@ -84,7 +84,7 @@ func TestNewerRealtimeDoesNotAdvanceHistoricalOrderOrTraffic(t *testing.T) {
 	if err != nil || node.Metric.CPUUsage != 77 || usage.Sent != 60 || usage.Recv != 80 || a.ReportSampleAt != base.Add(30*time.Second).Unix() {
 		t.Fatalf("snapshot=%+v usage=%+v metadata=%+v err=%v", node, usage, a, err)
 	}
-	rows, _ := s.GetMetricsWindowSampled(id, base.Unix(), 0, 0)
+	rows, _ := s.GetMetricsWindowSampled(context.Background(), id, base.Unix(), 0, 0)
 	if len(rows) != 2 || rows[1].CPUUsage != 20 {
 		t.Fatalf("historical sample lost: %+v", rows)
 	}

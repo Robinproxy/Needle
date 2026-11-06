@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -50,11 +51,11 @@ func TestTCPingAggregatesAgreeAcrossSourcesAndBatches(t *testing.T) {
 			at := hourStart
 			check := func(want summary) {
 				t.Helper()
-				raw, err := store.GetTCPingResultsWindowSampled(agentID, hourStart.Unix(), 0, 3600)
+				raw, err := store.GetTCPingResultsWindowSampled(context.Background(), agentID, hourStart.Unix(), 0, 3600)
 				if err != nil {
 					t.Fatal(err)
 				}
-				hourly, err := store.GetTCPingHourly(agentID, hourStart.Unix(), 0)
+				hourly, err := store.GetTCPingHourly(context.Background(), agentID, hourStart.Unix(), 0)
 				if err != nil {
 					t.Fatal(err)
 				}

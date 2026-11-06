@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -11,13 +12,13 @@ func TestHistoryBucketSeconds(t *testing.T) {
 		duration time.Duration
 		want     int64
 	}{
-		{time.Hour, 0},
-		{24 * time.Hour, 0},
-		{7 * 24 * time.Hour, 900},
+		{time.Hour, 60},
+		{24 * time.Hour, 120},
+		{7 * 24 * time.Hour, 840},
 		{30 * 24 * time.Hour, 3600},
 	}
 	for _, tt := range tests {
-		if got := historyBucketSeconds(tt.duration); got != tt.want {
+		if got := historyBucketSeconds(int64(tt.duration / time.Second)); got != tt.want {
 			t.Fatalf("historyBucketSeconds(%s) = %d, want %d", tt.duration, got, tt.want)
 		}
 	}
@@ -40,7 +41,7 @@ func TestGetMetricsSampledAggregatesTimeBuckets(t *testing.T) {
 		}
 	}
 
-	metrics, err := store.GetMetricsWindowSampled(agentID, base, 0, 120)
+	metrics, err := store.GetMetricsWindowSampled(context.Background(), agentID, base, 0, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestGetTCPingResultsSampledPreservesLossCounts(t *testing.T) {
 		}
 	}
 
-	results, err := store.GetTCPingResultsWindowSampled(agentID, base, 0, 120)
+	results, err := store.GetTCPingResultsWindowSampled(context.Background(), agentID, base, 0, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestHistoryWindowExcludesFollowingDay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	metrics, err := store.GetMetricsWindowSampled(agentID, base, base+120, 0)
+	metrics, err := store.GetMetricsWindowSampled(context.Background(), agentID, base, base+120, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

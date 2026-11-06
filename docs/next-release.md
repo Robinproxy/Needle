@@ -1,13 +1,17 @@
-# v0.7.11 — Go security update
+# v0.7.12 — Bounded reporting and history queries
 
-- Build Server and Agent releases with Go 1.27.3, including the standard-library
-  security fixes for GO-2026-6609 and subsequent certificate validation fixes.
-- Pin the Docker builder to the same Go version and reject implicit toolchain
-  downloads inside the builder.
-- Gate binary and Docker publication on a pinned govulncheck scan.
-- Add a regression test for excessive HTTP Range requests while preserving
-  normal partial-content responses.
-- Add the Manage display option to hide the dashboard monthly cost summary.
+- Authenticate full-report Tokens before reading request bodies; limit full
+  reports to 16 concurrent requests and return retry hints when overloaded.
+- Close rejected HTTP/1 requests without waiting for unread slow bodies.
+  Keep transactional hostname binding and persistent report deduplication.
+- Apply one history sampling policy to relative and explicit time windows,
+  rejecting invalid, ambiguous, and overflowing parameters before querying.
+- Preserve normal daily raw detail; aggregate dense results without dropping
+  peaks or probe success/loss counts. Bound metric and probe response sizes.
+- Limit history queries to four concurrent requests and ten seconds. Propagate
+  browser cancellation to SQLite, including running aggregations.
+- Add security regressions and document admission and history limits.
 
-Rebuild and upgrade existing Server and Agent installations to apply the Go
-security fixes. Agent configuration and Tokens remain unchanged.
+Upgrade the Server to apply these changes. Existing Agents do not need an
+upgrade or configuration changes for this release. Tokens, stored history,
+traffic accounting, and retention rules remain unchanged.

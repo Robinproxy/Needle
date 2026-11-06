@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,7 @@ func TestRollUpSurvivesRawPurge(t *testing.T) {
 		t.Fatalf("raw metrics after purge = %d, want 0", rawCount)
 	}
 
-	metrics, err := store.GetMetricsHourly(agentID, 0, 0)
+	metrics, err := store.GetMetricsHourly(context.Background(), agentID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestRollUpSurvivesRawPurge(t *testing.T) {
 		t.Fatalf("hourly metric = %+v, want avg cpu 20 / peak 30 / mem peak 80%% / net avg 200 peak 300", m)
 	}
 
-	pings, err := store.GetTCPingHourly(agentID, 0, 0)
+	pings, err := store.GetTCPingHourly(context.Background(), agentID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestRollUpIdempotentAndUpdating(t *testing.T) {
 	}
 	mustRollUpHourly(t, store)
 
-	metrics, err := store.GetMetricsHourly(agentID, 0, 0)
+	metrics, err := store.GetMetricsHourly(context.Background(), agentID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ func TestPurgeRemovesExpiredHourlyRows(t *testing.T) {
 	}
 	store.PurgeOldData()
 
-	metrics, err := store.GetMetricsHourly(agentID, 0, 0)
+	metrics, err := store.GetMetricsHourly(context.Background(), agentID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

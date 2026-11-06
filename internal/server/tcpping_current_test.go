@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -71,7 +72,7 @@ func TestTCPingCurrentTracksLatestReportAndRetainsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	history, err := store.GetTCPingResultsWindowSampled(id, h.now().Add(-time.Hour).Unix(), 0, 0)
+	history, err := store.GetTCPingResultsWindowSampled(context.Background(), id, h.now().Add(-time.Hour).Unix(), 0, 0)
 	if err != nil || len(history) != 4 {
 		t.Fatalf("history: %+v, %v", history, err)
 	}

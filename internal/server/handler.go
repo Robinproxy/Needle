@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -9,7 +10,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"math"
 	"mime"
 	"net/http"
 	"regexp"
@@ -98,6 +98,7 @@ type Handler struct {
 	realtimeGlobal  globalLimiter
 	realtimeLimiter *tokenLimiter
 	fullMu          sync.Mutex
+	historySlots    chan struct{}
 	reportSlots     chan struct{}
 	realtimeSlots   chan struct{}
 	logs            *logging.Tracker
@@ -108,7 +109,8 @@ func NewHandler(store *Store) *Handler {
 	return &Handler{
 		store: store, committed: make(map[int64]committedEntry),
 		tokenLimiter: newTokenLimiter(), realtimeLimiter: newTokenLimiter(),
-		reportSlots: make(chan struct{}, maxConcurrentReports), realtimeSlots: make(chan struct{}, 16),
+		historySlots: make(chan struct{}, maxConcurrentHistoryQueries),
+		reportSlots:  make(chan struct{}, maxConcurrentReports), realtimeSlots: make(chan struct{}, 16),
 		now: time.Now, logs: logging.NewTracker("server.api", log.Printf), admin: newAdminState(),
 	}
 }
@@ -461,62 +463,51 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := h.now()
-	since := now.Add(-1 * time.Hour).Unix()
-	until := int64(0)
-	bucketSeconds := int64(0)
-	useHourly := false
-	sinceStr, untilStr := r.URL.Query().Get("since"), r.URL.Query().Get("until")
-	if untilStr != "" {
-		var parseErr error
-		since, parseErr = strconv.ParseInt(sinceStr, 10, 64)
-		if parseErr == nil {
-			until, parseErr = strconv.ParseInt(untilStr, 10, 64)
-		}
-		// Windows up to a week: day drill-down (~24h) and week drill-down (~7d).
-		if parseErr != nil || until <= since || until-since > int64((8*24*time.Hour)/time.Second) || until > now.Add(5*time.Minute).Unix() {
-			http.Error(w, "invalid time window", http.StatusBadRequest)
+	if len(parts) != 2 || (parts[1] != "metrics" && parts[1] != "tcpping" && parts[1] != "traffic") {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if parts[1] == "traffic" {
+		sent, recv, err := h.store.GetTraffic(agentID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		// Windows starting before raw retention read the hourly rollups; this
-		// also gives straddling windows a complete (if coarser) picture.
-		if since < now.Add(-rawRetention).Unix() {
-			useHourly = true
-		} else if dur := until - since; dur > int64((25*time.Hour)/time.Second) {
-			// Day windows stay raw; longer (week) windows aim for ~720
-			// points, in whole minutes.
-			bucketSeconds = (dur/720 + 59) / 60 * 60
-			if bucketSeconds < 60 {
-				bucketSeconds = 60
-			}
-		}
-	} else if rangeStr := r.URL.Query().Get("range"); rangeStr != "" {
-		if d, err := time.ParseDuration(rangeStr); err == nil {
-			// 30d is the longest view, backed by hourly rollups (90d retention).
-			if d > 720*time.Hour {
-				d = 720 * time.Hour
-			}
-			since = now.Add(-d).Unix()
-			if d > 168*time.Hour {
-				// Beyond raw retention: read the hourly tables directly.
-				useHourly = true
-			} else {
-				bucketSeconds = historyBucketSeconds(d)
-			}
-		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]int64{"sent": sent, "recv": recv})
+		return
 	}
+	window, err := parseHistoryWindow(r.URL.Query(), h.now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	select {
+	case h.historySlots <- struct{}{}:
+		defer func() { <-h.historySlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "history concurrency limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), historyQueryTimeout)
+	defer cancel()
+	since, until, bucketSeconds := window.since, window.until, window.bucketSeconds
 
 	switch parts[1] {
 	case "metrics":
 		var metrics []MetricRow
 		var err error
-		if useHourly {
-			metrics, err = h.store.GetMetricsHourly(agentID, since, until)
+		if window.useHourly {
+			metrics, err = h.store.GetMetricsHourly(ctx, agentID, since, until)
 		} else {
-			metrics, err = h.store.GetMetricsWindowSampled(agentID, since, until, bucketSeconds)
+			metrics, err = h.store.GetMetricsWindowSampled(ctx, agentID, since, until, bucketSeconds)
+		}
+		if errors.Is(err, errHistoryTooLarge) && !window.useHourly && bucketSeconds == 0 {
+			metrics, err = h.store.GetMetricsWindowSampled(ctx, agentID, since, until, historyBucketSeconds(until-since))
 		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeHistoryError(w, r, err)
 			return
 		}
 		for i := range metrics {
@@ -533,42 +524,24 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	case "tcpping":
 		var results []TCPingRow
 		var err error
-		if useHourly {
-			results, err = h.store.GetTCPingHourly(agentID, since, until)
+		if window.useHourly {
+			results, err = h.store.GetTCPingHourly(ctx, agentID, since, until)
 		} else {
-			results, err = h.store.GetTCPingResultsWindowSampled(agentID, since, until, bucketSeconds)
+			results, err = h.store.GetTCPingResultsWindowSampled(ctx, agentID, since, until, bucketSeconds)
+		}
+		if errors.Is(err, errHistoryTooLarge) && !window.useHourly && bucketSeconds == 0 {
+			results, err = h.store.GetTCPingResultsWindowSampled(ctx, agentID, since, until, historyBucketSeconds(until-since))
 		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeHistoryError(w, r, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
 
-	case "traffic":
-		sent, recv, err := h.store.GetTraffic(agentID)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]int64{"sent": sent, "recv": recv})
-
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
-}
-
-func historyBucketSeconds(d time.Duration) int64 {
-	if d < 7*24*time.Hour {
-		return 0
-	}
-	bucket := int64(math.Ceil(d.Seconds() / 720))
-	if bucket < 900 {
-		bucket = 900
-	}
-	// Whole-minute buckets keep chart timestamps and query plans predictable.
-	return ((bucket + 59) / 60) * 60
 }
 
 func metricFromReport(req *reportRequest) (*MetricRow, int) {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"path/filepath"
@@ -55,9 +56,9 @@ func TestPartialCollectorsDoNotDistortAverages(t *testing.T) {
 		var rows []MetricRow
 		if hourly {
 			mustRollUpHourly(t, s)
-			rows, err = s.GetMetricsHourly(id, 0, 0)
+			rows, err = s.GetMetricsHourly(context.Background(), id, 0, 0)
 		} else {
-			rows, err = s.GetMetricsWindowSampled(id, 0, 0, 900)
+			rows, err = s.GetMetricsWindowSampled(context.Background(), id, 0, 0, 900)
 		}
 		if err != nil || len(rows) != 1 {
 			t.Fatalf("hourly=%v: %+v %v", hourly, rows, err)
@@ -144,7 +145,7 @@ func TestHistoryFailureRollsBackBothStreamsAndCheckpoint(t *testing.T) {
 	if err := s.maintainHistory(true); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.GetTCPingHourly(id, 0, 0)
+	rows, err := s.GetTCPingHourly(context.Background(), id, 0, 0)
 	if err != nil || len(rows) != 1 || rows[0].SampleCount != 2 || rows[0].LatencyMs != 60 {
 		t.Fatalf("retry duplicated a sample: %+v %v", rows, err)
 	}
@@ -173,7 +174,7 @@ func TestLegacyRollupMigrationPreservesAmbiguousHours(t *testing.T) {
 			t.Fatalf("%s must retain only ambiguous old evidence", table)
 		}
 	}
-	rows, err := s.GetMetricsHourly(id, 0, 0)
+	rows, err := s.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil || len(rows) != 2 || rows[0].CPUUsage != 20 || rows[1].CPUUsage != 50 {
 		t.Fatalf("migration guessed an old overlap or missed recent rebuild: %+v %v", rows, err)
 	}
@@ -191,8 +192,8 @@ func TestLegacyRollupMigrationPreservesAmbiguousHours(t *testing.T) {
 	if err := s.maintainHistory(true); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = s.GetMetricsHourly(id, 0, 0)
-	pings, pingErr := s.GetTCPingHourly(id, 0, 0)
+	rows, err = s.GetMetricsHourly(context.Background(), id, 0, 0)
+	pings, pingErr := s.GetTCPingHourly(context.Background(), id, 0, 0)
 	if err != nil || pingErr != nil || rows[0].CPUUsage != 30 || pings[0].LatencyMs != 60 || pings[0].SampleCount != 3 || pings[0].SuccessCount != 2 {
 		t.Fatalf("post-migration sample was not merged once: %+v %+v %v %v", rows, pings, err, pingErr)
 	}
@@ -209,7 +210,7 @@ func TestLegacyRollupMigrationPreservesAmbiguousHours(t *testing.T) {
 	if err := reopened.maintainHistory(true); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = reopened.GetMetricsHourly(id, 0, 0)
+	rows, err = reopened.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil || rows[0].CPUUsage != 30 {
 		t.Fatalf("restart duplicated archive: %+v %v", rows, err)
 	}
@@ -330,7 +331,7 @@ func TestDeleteCleansAccountingEvidenceBeforeIDReuse(t *testing.T) {
 	}
 	insertTrafficMetric(t, s, newID, now, 10000, 20000)
 	mustRollUpHourly(t, s)
-	rows, err := s.GetMetricsHourly(newID, 0, 0)
+	rows, err := s.GetMetricsHourly(context.Background(), newID, 0, 0)
 	if err != nil || len(rows) != 1 || rows[0].TotalSent != 10000 {
 		t.Fatalf("reused ID inherited history: %+v %v", rows, err)
 	}
@@ -405,7 +406,7 @@ func TestIncrementalHourlyMeansKeepPrecisionAndResourceCounts(t *testing.T) {
 		}
 		mustRollUpHourly(t, s)
 	}
-	metrics, err := s.GetMetricsHourly(id, 0, 0)
+	metrics, err := s.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil || len(metrics) != 1 {
 		t.Fatalf("rows %+v %v", metrics, err)
 	}

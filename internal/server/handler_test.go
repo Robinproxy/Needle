@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -236,7 +237,7 @@ func TestHandleReportRateLimitDoesNotWrite(t *testing.T) {
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("agents = %d, err = %v", len(agents), err)
 	}
-	metrics, err := store.GetMetricsWindowSampled(agents[0].ID, 0, 0, 0)
+	metrics, err := store.GetMetricsWindowSampled(context.Background(), agents[0].ID, 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

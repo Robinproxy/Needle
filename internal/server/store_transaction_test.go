@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -138,7 +139,7 @@ func TestReusedAgentIDStartsClean(t *testing.T) {
 	if id != seed.id {
 		t.Fatalf("expected id reuse (%d), got %d", seed.id, id)
 	}
-	hourly, err := store.GetMetricsHourly(id, 0, 0)
+	hourly, err := store.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -71,11 +72,11 @@ func TestAuditPurgeMustRollUpExpiredRawAfterDowntime(t *testing.T) {
 	}
 	insertPingRaw(t, store, id, at, "CMv4", 70, true)
 	store.PurgeOldData()
-	metrics, err := store.GetMetricsHourly(id, 0, 0)
+	metrics, err := store.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pings, err := store.GetTCPingHourly(id, 0, 0)
+	pings, err := store.GetTCPingHourly(context.Background(), id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +101,11 @@ func TestAuditPurgeMustNotOverwritePartialRetentionHour(t *testing.T) {
 	if got := auditCount(t, store, "metrics"); got != 2 {
 		t.Fatalf("boundary raw hour must stay complete: got %d samples", got)
 	}
-	metrics, err := store.GetMetricsHourly(id, 0, 0)
+	metrics, err := store.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pings, err := store.GetTCPingHourly(id, 0, 0)
+	pings, err := store.GetTCPingHourly(context.Background(), id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +151,7 @@ func TestAuditLateSampleMustMergeIntoAlreadyArchivedHour(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.PurgeOldData()
-	metrics, err := store.GetMetricsHourly(id, 0, 0)
+	metrics, err := store.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestAuditLateSampleMustMergeIntoAlreadyArchivedHour(t *testing.T) {
 		t.Fatalf("late sample must merge once, without replacing/double-counting the archive: %+v", metrics)
 	}
 	store.PurgeOldData()
-	metrics, err = store.GetMetricsHourly(id, 0, 0)
+	metrics, err = store.GetMetricsHourly(context.Background(), id, 0, 0)
 	if err != nil || len(metrics) != 1 || metrics[0].CPUUsage != 30 {
 		t.Fatalf("repeated purge changed the merged archive: rows=%+v err=%v", metrics, err)
 	}

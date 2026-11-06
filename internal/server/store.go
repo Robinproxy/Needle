@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -757,14 +758,14 @@ func (s *Store) GetLatestMetric(agentID int64) (*MetricRow, error) {
 	return &m, nil
 }
 
-func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
+func (s *Store) GetMetricsWindowSampled(ctx context.Context, agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
 	if bucketSeconds > 0 {
-		return s.getMetricsAggregated(agentID, since, until, bucketSeconds)
+		return s.getMetricsAggregated(ctx, agentID, since, until, bucketSeconds)
 	}
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, agent_id, `+rawMetricValues+`, `+metricMaskSQL(false)+`
-		 FROM metrics WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?) ORDER BY created_at`,
-		agentID, since, until, until,
+		 FROM metrics WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?) ORDER BY created_at LIMIT ?`,
+		agentID, since, until, until, maxMetricHistoryRows+1,
 	)
 	if err != nil {
 		return nil, err
@@ -773,6 +774,9 @@ func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSecon
 
 	var metrics []MetricRow
 	for rows.Next() {
+		if len(metrics) >= maxMetricHistoryRows {
+			return nil, errHistoryTooLarge
+		}
 		var m MetricRow
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
@@ -784,8 +788,8 @@ func (s *Store) GetMetricsWindowSampled(agentID int64, since, until, bucketSecon
 	return metrics, rows.Err()
 }
 
-func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
-	rows, err := s.db.Query(
+func (s *Store) getMetricsAggregated(ctx context.Context, agentID int64, since, until, bucketSeconds int64) ([]MetricRow, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT MAX(id), agent_id, COALESCE(AVG(cpu_usage),0),
 			CAST(ROUND(COALESCE(AVG(memory_total),0)) AS INTEGER), CAST(ROUND(COALESCE(AVG(memory_used),0)) AS INTEGER),
 			CAST(ROUND(COALESCE(AVG(disk_total),0)) AS INTEGER), CAST(ROUND(COALESCE(AVG(disk_used),0)) AS INTEGER),
@@ -794,8 +798,8 @@ func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds 
 			COALESCE(MAX(cpu_usage),0), COALESCE(MAX(CASE WHEN memory_total > 0 THEN memory_used * 100.0 / memory_total END),0),
 			COALESCE(MAX(network_up),0), COALESCE(MAX(network_down),0), `+metricMaskSQL(true)+`
 		 FROM metrics WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?)
-		 GROUP BY agent_id, created_at / ? ORDER BY created_at`,
-		agentID, since, until, until, bucketSeconds,
+		 GROUP BY agent_id, created_at / ? ORDER BY created_at LIMIT ?`,
+		agentID, since, until, until, bucketSeconds, maxMetricHistoryRows+1,
 	)
 	if err != nil {
 		return nil, err
@@ -804,6 +808,9 @@ func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds 
 
 	var metrics []MetricRow
 	for rows.Next() {
+		if len(metrics) >= maxMetricHistoryRows {
+			return nil, errHistoryTooLarge
+		}
 		var m MetricRow
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
@@ -818,9 +825,9 @@ func (s *Store) getMetricsAggregated(agentID int64, since, until, bucketSeconds 
 
 // GetMetricsHourly serves windows beyond raw retention from metrics_hourly,
 // in the same avg+peak row shape as getMetricsAggregated. At 1h granularity a
-// 30d window is at most 720 rows — no query-time aggregation needed.
-func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, error) {
-	rows, err := s.db.Query(
+// 30d window is at most 721 rows — no query-time aggregation needed.
+func (s *Store) GetMetricsHourly(ctx context.Context, agentID, since, until int64) ([]MetricRow, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT 0, agent_id, COALESCE(cpu_avg, 0), CAST(ROUND(COALESCE(memory_total, 0)) AS INTEGER), CAST(ROUND(COALESCE(memory_used, 0)) AS INTEGER),
 			CAST(ROUND(COALESCE(disk_total, 0)) AS INTEGER), CAST(ROUND(COALESCE(disk_used, 0)) AS INTEGER), COALESCE(net_up_avg, 0), COALESCE(net_down_avg, 0),
 			COALESCE(total_sent, 0), COALESCE(total_recv, 0), COALESCE(load1, 0), COALESCE(load5, 0),
@@ -832,8 +839,8 @@ func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, erro
 			 CASE WHEN COALESCE(network_samples,CASE WHEN net_up_avg IS NULL THEN 0 ELSE sample_count END)=0 THEN 8 ELSE 0 END +
 			 CASE WHEN COALESCE(load_samples,CASE WHEN load1 IS NULL THEN 0 ELSE sample_count END)=0 THEN 16 ELSE 0 END)
 		 FROM metrics_hourly WHERE agent_id = ? AND hour_start >= ? AND (? = 0 OR hour_start < ?)
-		 ORDER BY hour_start`,
-		agentID, since, until, until,
+		 ORDER BY hour_start LIMIT ?`,
+		agentID, since, until, until, maxMetricHistoryRows+1,
 	)
 	if err != nil {
 		return nil, err
@@ -842,6 +849,9 @@ func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, erro
 
 	var metrics []MetricRow
 	for rows.Next() {
+		if len(metrics) >= maxMetricHistoryRows {
+			return nil, errHistoryTooLarge
+		}
 		var m MetricRow
 		if err := rows.Scan(&m.ID, &m.AgentID, &m.CPUUsage, &m.MemoryTotal, &m.MemoryUsed,
 			&m.DiskTotal, &m.DiskUsed, &m.NetworkUp, &m.NetworkDown,
@@ -856,14 +866,14 @@ func (s *Store) GetMetricsHourly(agentID, since, until int64) ([]MetricRow, erro
 
 // GetTCPingHourly mirrors GetMetricsHourly for TCPing lines. Target is not
 // kept in the rollup; the dashboard keys series by name only.
-func (s *Store) GetTCPingHourly(agentID, since, until int64) ([]TCPingRow, error) {
-	rows, err := s.db.Query(
+func (s *Store) GetTCPingHourly(ctx context.Context, agentID, since, until int64) ([]TCPingRow, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT 0, agent_id, name, '', COALESCE(latency_avg, 0),
 			CASE WHEN success_count > 0 THEN 1 ELSE 0 END,
 			sample_count, success_count, hour_start, COALESCE(latency_peak, 0)
 		 FROM tcpping_hourly WHERE agent_id = ? AND hour_start >= ? AND (? = 0 OR hour_start < ?)
-		 ORDER BY hour_start, name`,
-		agentID, since, until, until,
+		 ORDER BY hour_start, name LIMIT ?`,
+		agentID, since, until, until, maxTCPingHistoryRows+1,
 	)
 	if err != nil {
 		return nil, err
@@ -872,6 +882,9 @@ func (s *Store) GetTCPingHourly(agentID, since, until int64) ([]TCPingRow, error
 
 	var results []TCPingRow
 	for rows.Next() {
+		if len(results) >= maxTCPingHistoryRows {
+			return nil, errHistoryTooLarge
+		}
 		var t TCPingRow
 		var success int
 		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success,
@@ -884,14 +897,14 @@ func (s *Store) GetTCPingHourly(agentID, since, until int64) ([]TCPingRow, error
 	return results, rows.Err()
 }
 
-func (s *Store) GetTCPingResultsWindowSampled(agentID int64, since, until, bucketSeconds int64) ([]TCPingRow, error) {
+func (s *Store) GetTCPingResultsWindowSampled(ctx context.Context, agentID int64, since, until, bucketSeconds int64) ([]TCPingRow, error) {
 	if bucketSeconds > 0 {
-		return s.getTCPingResultsAggregated(agentID, since, until, bucketSeconds)
+		return s.getTCPingResultsAggregated(ctx, agentID, since, until, bucketSeconds)
 	}
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, agent_id, name, target, latency_ms, success, 1, success, created_at
-		 FROM tcpping_results WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?) ORDER BY created_at`,
-		agentID, since, until, until,
+		 FROM tcpping_results WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?) ORDER BY created_at LIMIT ?`,
+		agentID, since, until, until, maxTCPingHistoryRows+1,
 	)
 	if err != nil {
 		return nil, err
@@ -900,6 +913,9 @@ func (s *Store) GetTCPingResultsWindowSampled(agentID int64, since, until, bucke
 
 	var results []TCPingRow
 	for rows.Next() {
+		if len(results) >= maxTCPingHistoryRows {
+			return nil, errHistoryTooLarge
+		}
 		var t TCPingRow
 		var success int
 		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success, &t.SampleCount, &t.SuccessCount, &t.CreatedAt); err != nil {
@@ -911,15 +927,15 @@ func (s *Store) GetTCPingResultsWindowSampled(agentID int64, since, until, bucke
 	return results, rows.Err()
 }
 
-func (s *Store) getTCPingResultsAggregated(agentID int64, since, until, bucketSeconds int64) ([]TCPingRow, error) {
-	rows, err := s.db.Query(
+func (s *Store) getTCPingResultsAggregated(ctx context.Context, agentID int64, since, until, bucketSeconds int64) ([]TCPingRow, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT MAX(id), agent_id, name, target,
 			COALESCE(AVG(CASE WHEN success = 1 THEN latency_ms END), 0),
 			CASE WHEN SUM(success) > 0 THEN 1 ELSE 0 END,
 			COUNT(*), SUM(success), MAX(created_at), COALESCE(MAX(CASE WHEN success = 1 THEN latency_ms END), 0)
 		 FROM tcpping_results WHERE agent_id = ? AND created_at >= ? AND (? = 0 OR created_at < ?)
-		 GROUP BY agent_id, name, target, created_at / ? ORDER BY created_at, name`,
-		agentID, since, until, until, bucketSeconds,
+		 GROUP BY agent_id, name, target, created_at / ? ORDER BY created_at, name LIMIT ?`,
+		agentID, since, until, until, bucketSeconds, maxTCPingHistoryRows+1,
 	)
 	if err != nil {
 		return nil, err
@@ -928,6 +944,9 @@ func (s *Store) getTCPingResultsAggregated(agentID int64, since, until, bucketSe
 
 	var results []TCPingRow
 	for rows.Next() {
+		if len(results) >= maxTCPingHistoryRows {
+			return nil, errHistoryTooLarge
+		}
 		var t TCPingRow
 		var success int
 		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.Target, &t.LatencyMs, &success, &t.SampleCount, &t.SuccessCount, &t.CreatedAt, &t.LatencyPeak); err != nil {

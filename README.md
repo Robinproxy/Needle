@@ -929,12 +929,16 @@ Use a timestamp such as `2026-10-18T03:17:38Z` only if it matches your actual fa
 | View / data | Resolution / retention |
 | --- | --- |
 | `1d` | Raw samples for the last 24 hours |
-| `7d` | 15-minute overview with daily drill-down |
+| `7d` | About 720 time buckets with daily drill-down |
 | Date view | Recent calendar day, raw while available |
 | `30d` | Hourly trends |
 | Raw history | Seven days, retaining complete boundary hours (up to one extra hour) |
 | Hourly history | 90 days |
 | Monthly traffic records | Old cycle starts beyond 62 days are cleaned, except protected migration records |
+
+Both history URL forms use the same sampling rules. Normal `1d` / recent daily detail stays raw; dense results automatically aggregate, preserving peaks and probe success / loss counts. Each query is limited to 4096 metric rows or 32768 probe rows across all lines; results still over the limit return `422` instead of being truncated. Historical windows require both `since` and `until`, span at most eight days, and stay within the 90-day archive; relative `range` is capped at 30 days.
+
+The Server admits four concurrent history requests (`503` + `Retry-After` when busy). Queries stop after ten seconds (`504`) or when the browser cancels the request.
 
 Rollups / cleanup commit together; late samples and repeated maintenance do not duplicate counts. Gaps stay gaps. Node deletion removes history, rollups, traffic, and migration evidence. See [retention details](docs/p0-p1-validation.md).
 
