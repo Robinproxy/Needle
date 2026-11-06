@@ -172,6 +172,23 @@ func (s *Store) updateExchangeRates(ctx context.Context, client *http.Client, no
 	return err
 }
 
+// A cached read says nothing about remote synchronization. Only an actual
+// fetch can clear an exchange_rates failure; cooldown ticks leave it untouched.
+func (s *Store) updateExchangeRatesIfDue(ctx context.Context, client *http.Client, now time.Time) {
+	if ctx.Err() != nil {
+		return
+	}
+	status, err := s.exchangeStatus(now)
+	s.logs.Check("exchange_rates_cache", "WARN", err)
+	if err != nil || !exchangeUpdateDue(status, now) {
+		return
+	}
+	err = s.updateExchangeRates(ctx, client, now)
+	if ctx.Err() == nil {
+		s.logs.Check("exchange_rates", "WARN", err)
+	}
+}
+
 // Only the serving process starts this worker, never CLI commands or tests.
 // Persisted attempt times prevent restart loops; failures retry at most hourly.
 // Return a stop function that cancels HTTP before the database is closed.
@@ -189,15 +206,7 @@ func (s *Store) StartExchangeRates() func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for {
-			now := time.Now()
-			status, err := s.exchangeStatus(now)
-			if err == nil && exchangeUpdateDue(status, now) {
-				err = s.updateExchangeRates(ctx, client, now)
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			s.logs.Check("exchange_rates", "WARN", err)
+			s.updateExchangeRatesIfDue(ctx, client, time.Now())
 			select {
 			case <-ctx.Done():
 				return

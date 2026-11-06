@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname,'../internal/server/static/app.js'),'utf8');
 const elements = new Map([['cost-summary',{innerHTML:'',hidden:true}]]);
-const ctx = {console,localStorage:{getItem:()=>null},
+const ctx = {console,AbortController,localStorage:{getItem:()=>null},
   document:{hidden:false,getElementById:id=>elements.get(id),querySelectorAll:()=>[]},
   setTimeout,clearTimeout,setInterval,clearInterval};
 vm.createContext(ctx);
@@ -79,4 +79,54 @@ assert(!elements.get('cost-summary').hidden && html().includes('CN¥164.00'));
 ctx.stopEvents();
 const prior=html();streams[0].events.costs({data:JSON.stringify({...display,currency:'USD'})});
 assert.equal(html(),prior,'closed streams must not replace the latest display settings');
-console.log('Cost summary checks passed: exact cross-rates, six payment periods, free/lifetime/offline nodes, missing prices/rates, stale caches, filters, and SSE updates.');
+
+const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
+const response=data=>({ok:true,json:async()=>data});
+const savedDisplay=()=>JSON.parse(vm.runInContext('JSON.stringify(costDisplay)',ctx));
+
+(async()=>{
+  ctx.connectEvents();
+  const stream=streams.at(-1);
+  ctx.fixtures=fixtures;vm.runInContext('agents = fixtures',ctx);
+  elements.set('version-label',{textContent:'',title:''});
+  for(const scenario of [
+    {delay:'headers',live:{...display,hidden:true}},
+    {delay:'body',live:{...display,currency:'USD'}},
+    {delay:'body',live:{...display,date:'2026-11-06',stale:true,rates:{...display.rates,USD:'3',CNY:'9'}}},
+  ]){
+    ctx.applyCostDisplay(display);
+    const pending=deferred();
+    ctx.fetch=()=>scenario.delay==='headers'?pending.promise:Promise.resolve({ok:true,json:()=>pending.promise});
+    const request=ctx.refreshServerInfo();
+    await Promise.resolve();await Promise.resolve();
+    stream.events.costs({data:JSON.stringify(scenario.live)});
+    const liveHTML=html(),liveHidden=elements.get('cost-summary').hidden;
+    const oldInfo={cost_display:display,version:'v9.9.9-test'};
+    pending.resolve(scenario.delay==='headers'?response(oldInfo):oldInfo);
+    await request;
+    assert.deepEqual(savedDisplay(),scenario.live,'a delayed HTTP response must not replace newer live visibility, currency or rates');
+    assert.equal(html(),liveHTML,'old HTTP metadata must not redraw the live total');
+    assert.equal(elements.get('cost-summary').hidden,liveHidden,'old HTTP metadata must not reveal a hidden total');
+    assert.equal(elements.get('version-label').textContent,'v9.9.9','cost ordering must not suppress unrelated Server metadata');
+  }
+
+  // Invalid live metadata must not invalidate a pending good HTTP response.
+  const pending=deferred();
+  ctx.fetch=()=>pending.promise;
+  const request=ctx.refreshServerInfo();
+  stream.events.costs({data:JSON.stringify({...display,hidden:'invalid'})});
+  const goodHTTP={...display,currency:'GBP',hidden:false};
+  pending.resolve(response({cost_display:goodHTTP}));
+  await request;
+  assert.deepEqual(savedDisplay(),goodHTTP);
+
+  // Polling remains authoritative once there is no newer valid live update.
+  ctx.stopEvents();
+  const fallback={...display,currency:'CAD',hidden:false};
+  ctx.fetch=async()=>response({cost_display:fallback});
+  await ctx.refreshServerInfo();
+  assert.deepEqual(savedDisplay(),fallback,'prior SSE use must not permanently disable HTTP fallback');
+  stream.events.costs({data:JSON.stringify({...display,hidden:true})});
+  assert.deepEqual(savedDisplay(),fallback,'closed SSE streams must not affect fallback costs');
+  console.log('Cost summary checks passed: exact totals, cached rates, visibility, SSE/HTTP ordering, invalid updates and polling fallback.');
+})().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>ctx.stopEvents());

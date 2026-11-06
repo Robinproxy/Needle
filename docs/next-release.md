@@ -1,16 +1,16 @@
-# v0.7.15 — Docker publication ordering
+# v0.7.16 — Cost display ordering and exchange-rate logs
 
-- Separate tested image publication from latest promotion. Main builds publish
-  a unique ci-RUN_ID-RUN_ATTEMPT candidate; tag builds publish only their version.
-- Promote main images by immutable digest under one shared, noncanceling
-  concurrency group that retains pending promotions.
-- Recheck remote main immediately before promotion and skip superseded commits,
-  preventing late builds and reruns using the new workflow from rolling back latest.
-- Push only the intended image tag; remove the blanket --all-tags push.
-- Add disposable-Git/fake-registry regressions, workflow wiring checks, and
-  deployment documentation.
+- Prevent an older in-flight HTTP metadata response from overwriting newer live
+  cost visibility, display currency, exchange rates, or stale-rate indicators.
+- Keep HTTP fallback updates working after SSE disconnects; invalid or closed-
+  stream updates do not invalidate good pending metadata.
+- Track cache reads separately from ECB synchronization. Retry cooldown ticks
+  no longer report remote recovery; only a successful synchronization clears
+  an exchange_rates failure.
+- Preserve cached rates across failed or canceled attempts, retain existing
+  fetch/retry intervals, and avoid recovery logs during shutdown.
+- Add asynchronous frontend ordering tests and deterministic synchronization,
+  cooldown, cache-failure, and cancellation regressions; update README.
 
-This release changes CI publication only; no Server or Agent upgrade is needed
-for the ordering fix itself. Before the first rollout, stop queued/running Docker
-jobs using the old workflow. Archived workflow definitions are not retroactively
-updated; rebuild using the current main workflow instead of rerunning old ones.
+Upgrade the Server and refresh the dashboard to apply these fixes. The Agent,
+configuration fields, database schema, and billing calculations are unchanged.

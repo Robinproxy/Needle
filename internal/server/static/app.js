@@ -8,6 +8,7 @@ let cardFormat = localStorage.getItem('cardFormat') || 'card';
 let dueSortEnabled = localStorage.getItem('renewalSort') === 'due';
 let infoRefreshInFlight = false;
 let costDisplay = null;
+let costDisplayRevision = 0;
 let detailRequest = null;
 let currentHistoryRange = '24h';
 let currentHistoryDay = null;
@@ -216,7 +217,8 @@ function monthlyCostTotal(nodes, display) {
   return {amount,unpriced,unconverted};
 }
 
-function applyCostDisplay(value) {
+function applyCostDisplay(value, expectedRevision = costDisplayRevision) {
+  if (expectedRevision !== costDisplayRevision) return;
   if (!value || !/^[A-Z]{3}$/.test(value.currency) || value.source !== 'ECB'
     || (value.hidden != null && typeof value.hidden !== 'boolean')
     || typeof value.stale !== 'boolean' || typeof value.date !== 'string'
@@ -224,6 +226,7 @@ function applyCostDisplay(value) {
     || !value.rates || typeof value.rates !== 'object' || Array.isArray(value.rates)
     || Object.keys(value.rates).length > 64) return;
   costDisplay = value;
+  costDisplayRevision++;
   renderCostSummary();
 }
 
@@ -300,10 +303,12 @@ function refreshErrorText(error) {
 async function refreshServerInfo() {
   if (infoRefreshInFlight) return;
   infoRefreshInFlight = true;
+  const costRevision = costDisplayRevision;
   try {
     const info = await fetchJSON('/api/info');
     if (!info || typeof info !== 'object' || Array.isArray(info)) throw new Error('/api/info: expected an object');
-    applyCostDisplay(info.cost_display);
+    // A valid live update received during this request supersedes its metadata.
+    applyCostDisplay(info.cost_display, costRevision);
     const version = document.getElementById('version-label');
     if (version) {
       const value = String(info.version || '');

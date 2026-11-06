@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"needle/internal/logging"
 )
 
 type fxTransport func(*http.Request) (*http.Response, error)
@@ -230,5 +232,107 @@ func TestCostDisplayVisibilityMigrationFromV0710(t *testing.T) {
 	status, _ = s.exchangeStatus(time.Now())
 	if !status.Hidden || status.Currency != "EUR" {
 		t.Fatal("migration reset saved visibility", status)
+	}
+}
+
+func exchangeRecoveryCount(lines []string, issue string) int {
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, "event=recovered") && strings.Contains(line, fmt.Sprintf("issue=%q", issue)) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestExchangeCooldownDoesNotLogRecoveryOrLoseCachedRates(t *testing.T) {
+	_, s := newTestHandler(t)
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	if err := s.updateExchangeRates(context.Background(), fxClient(t, 200, ecbFixture("2026-11-05")), now.Add(-25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.exchangeStatus(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	s.logs = logging.NewTracker("server.maintenance", func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
+	calls := 0
+	upstream := fxClient(t, 503, "unavailable").Transport
+	client := &http.Client{Transport: fxTransport(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return upstream.RoundTrip(req)
+	})}
+	s.updateExchangeRatesIfDue(context.Background(), client, now)
+	for minute := 1; minute < 60; minute++ {
+		s.updateExchangeRatesIfDue(context.Background(), client, now.Add(time.Duration(minute)*time.Minute))
+	}
+	status, err := s.exchangeStatus(now.Add(59 * time.Minute))
+	if err != nil || calls != 1 || len(lines) != 1 || exchangeRecoveryCount(lines, "exchange_rates") != 0 ||
+		status.LastError == "" || status.LastSuccess != before.LastSuccess || !reflect.DeepEqual(status.Rates, before.Rates) {
+		t.Fatalf("cooldown changed sync state: calls=%d logs=%v status=%+v err=%v", calls, lines, status, err)
+	}
+	s.updateExchangeRatesIfDue(context.Background(), client, now.Add(time.Hour))
+	if calls != 2 || exchangeRecoveryCount(lines, "exchange_rates") != 0 {
+		t.Fatal("a failed retry reported recovery", calls, lines)
+	}
+	upstream = fxClient(t, 200, ecbFixture("2026-11-06")).Transport
+	s.updateExchangeRatesIfDue(context.Background(), client, now.Add(2*time.Hour))
+	status, err = s.exchangeStatus(now.Add(2 * time.Hour))
+	if err != nil || calls != 3 || status.LastError != "" || status.LastSuccess != now.Add(2*time.Hour).Unix() ||
+		exchangeRecoveryCount(lines, "exchange_rates") != 1 || !strings.Contains(lines[len(lines)-1], "count=2") {
+		t.Fatalf("real success did not recover failed attempts: calls=%d logs=%v status=%+v err=%v", calls, lines, status, err)
+	}
+	logCount := len(lines)
+	s.updateExchangeRatesIfDue(context.Background(), client, now.Add(2*time.Hour+time.Minute))
+	if calls != 3 || len(lines) != logCount {
+		t.Fatal("successful cooldown emitted more fetches or recovery logs", calls, lines)
+	}
+}
+
+func TestExchangeCacheRecoveryDoesNotRecoverRemoteSync(t *testing.T) {
+	_, s := newTestHandler(t)
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	var lines []string
+	s.logs = logging.NewTracker("server.maintenance", func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
+	client := fxClient(t, 503, "unavailable")
+	s.updateExchangeRatesIfDue(context.Background(), client, now)
+	if _, err := s.db.Exec("ALTER TABLE cost_display RENAME TO unavailable_cost_display"); err != nil {
+		t.Fatal(err)
+	}
+	s.updateExchangeRatesIfDue(context.Background(), client, now.Add(time.Minute))
+	if _, err := s.db.Exec("ALTER TABLE unavailable_cost_display RENAME TO cost_display"); err != nil {
+		t.Fatal(err)
+	}
+	s.updateExchangeRatesIfDue(context.Background(), client, now.Add(2*time.Minute))
+	if exchangeRecoveryCount(lines, "exchange_rates") != 0 || exchangeRecoveryCount(lines, "exchange_rates_cache") != 1 {
+		t.Fatal("cache recovery cleared the remote failure", lines)
+	}
+	s.updateExchangeRatesIfDue(context.Background(), fxClient(t, 200, ecbFixture("2026-11-06")), now.Add(time.Hour))
+	if exchangeRecoveryCount(lines, "exchange_rates") != 1 {
+		t.Fatal("real remote success did not log recovery", lines)
+	}
+}
+
+func TestExchangeCanceledAttemptDoesNotLogRecovery(t *testing.T) {
+	_, s := newTestHandler(t)
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	var lines []string
+	s.logs = logging.NewTracker("server.maintenance", func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) })
+	s.updateExchangeRatesIfDue(context.Background(), fxClient(t, 503, "unavailable"), now)
+	before := len(lines)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	client := &http.Client{Transport: fxTransport(func(req *http.Request) (*http.Response, error) {
+		calls++
+		cancel()
+		return nil, ctx.Err()
+	})}
+	s.updateExchangeRatesIfDue(ctx, client, now.Add(time.Hour))
+	s.updateExchangeRatesIfDue(ctx, client, now.Add(2*time.Hour))
+	status, err := s.exchangeStatus(now.Add(2 * time.Hour))
+	if err != nil || calls != 1 || len(lines) != before || status.LastError == "" || status.LastSuccess != 0 {
+		t.Fatalf("cancellation changed remote success state: calls=%d logs=%v status=%+v err=%v", calls, lines, status, err)
 	}
 }
