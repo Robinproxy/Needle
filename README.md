@@ -87,7 +87,7 @@ docker compose exec needle-server needle-server -db /data/needle.db list-agents
 docker compose exec needle-server needle-server -db /data/needle.db list-tokens
 
 # Move a node to position 1, using its hostname or stable ID
-docker compose exec needle-server needle-server -db /data/needle.db move-agent Router 1
+docker compose exec needle-server needle-server -db /data/needle.db move-agent HOSTNAME_OR_ID 1
 
 # Revoke a token; retain the node, history, billing, and traffic
 docker compose exec needle-server needle-server -db /data/needle.db revoke-token YOUR_TOKEN
@@ -98,13 +98,13 @@ docker compose exec needle-server needle-server -db /data/needle.db delete-agent
 
 `move-agent`: hostname or stable ID + position. `revoke-token` keeps data; `delete-agent` deletes the node, bound token, history, and traffic.
 
-**Full Token query** — `list-tokens` is masked. Requires host `sqlite3` (`sudo apt-get install sqlite3` on Debian / Ubuntu). Replace `Malibu`; escape SQL quotes as `O''Brien`.
+**Full Token query** — `list-tokens` is masked. Requires host `sqlite3` (`sudo apt-get install sqlite3` on Debian / Ubuntu). Replace `HOSTNAME` with the node's hostname; double any single quotes inside it.
 
 ```sh
 cd ~/needle
 sudo -u "#$(sudo stat -c '%u' data/needle.db)" \
   sqlite3 -readonly data/needle.db \
-  "SELECT hostname, token FROM agent_tokens WHERE hostname = 'Malibu';"
+  "SELECT hostname, token FROM agent_tokens WHERE hostname = 'HOSTNAME';"
 ```
 
 **Without host sqlite3 / when deployed under `/root`:**
@@ -113,7 +113,7 @@ sudo -u "#$(sudo stat -c '%u' data/needle.db)" \
 cd ~/needle
 docker run --rm -i --user 1000:1000 \
   --mount "type=bind,src=$(pwd)/data,dst=/data" \
-  python:3.12-alpine python - Malibu <<'PYTHON'
+  python:3.12-alpine python - HOSTNAME <<'PYTHON'
 import sqlite3, sys
 with sqlite3.connect("file:/data/needle.db?mode=ro", uri=True) as db:
     rows = db.execute("SELECT hostname, token FROM agent_tokens WHERE hostname = ?", (sys.argv[1],)).fetchall()
@@ -188,19 +188,19 @@ Upgrade keeps `.env`, Tokens, and data. Recovery files: `/opt/needle/recovery/mi
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token YOUR_TOKEN
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-agents
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db list-tokens
-sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db move-agent Router 1
+sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db move-agent HOSTNAME_OR_ID 1
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db revoke-token YOUR_TOKEN
 sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db delete-agent HOSTNAME_OR_ID
 ```
 
 `move-agent`: hostname or stable ID + position. `revoke-token` keeps data; `delete-agent` deletes the node and associated data.
 
-**Full Token query** — install host `sqlite3`; replace `Malibu` and double any SQL quotes.
+**Full Token query** — install host `sqlite3`; replace `HOSTNAME` with the node's hostname and double any single quotes inside it.
 
 ```sh
 sudo -u "#$(sudo stat -c '%u' /opt/needle/data/needle.db)" \
   sqlite3 -readonly /opt/needle/data/needle.db \
-  "SELECT hostname, token FROM agent_tokens WHERE hostname = 'Malibu';"
+  "SELECT hostname, token FROM agent_tokens WHERE hostname = 'HOSTNAME';"
 ```
 
 ### Backup, restore, and removal
@@ -655,7 +655,7 @@ sudo nano /opt/needle-agent/agent.yaml
 ```
 
 ```yaml
-hostname: "my-vps"
+hostname: "example-node"
 server: "https://needle.example.com"
 token: "replace-with-unique-agent-token"
 server_managed: true
@@ -728,7 +728,7 @@ nano /etc/needle/agent.yaml
 ```
 
 ```yaml
-hostname: "home-router"
+hostname: "example-node"
 server: "https://needle.example.com"
 token: "replace-with-unique-agent-token"
 server_managed: true
@@ -789,7 +789,7 @@ Remove retired YAML keys: `region`, `billing_currency`, `billing_amount`, `billi
 <details>
 <summary><strong>Node cards and live probe results</strong></summary>
 
-`4C`: logical CPU cores. `Load`: one-minute system load. `Seen … ago`: report overdue. ♾️: permanent expiry / unlimited traffic. Node Detail shows CPU model, OS, architecture, and virtualization; TCP Ping statistics use the selected history window.
+CPU core count and system information reflect the monitored host. `Load`: one-minute system load. `Seen … ago`: report overdue. ♾️: permanent expiry / unlimited traffic. TCP Ping statistics use the selected history window.
 
 </details>
 
