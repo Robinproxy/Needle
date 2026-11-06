@@ -3,6 +3,13 @@
 Use the reviewed source commit for every binary, installer, image, and archive.
 Do not use historical validation snapshots as evidence for the current build.
 
+Use the Go version in `go.mod` for release builds and keep the Docker builder's
+Go version in sync. Its `GOTOOLCHAIN=local` setting rejects an outdated builder
+instead of silently downloading a different compiler. Release and Docker CI run
+the pinned `govulncheck` command below before building or publishing; a reachable
+known vulnerability or a failed scan blocks publication. Rebuild and redeploy
+existing binaries and images to apply Go standard-library security updates.
+
 ## Validation
 
 1. Review `git status --short` and `git diff --check`; exclude unrelated local files.
@@ -20,6 +27,7 @@ Do not use historical validation snapshots as evidence for the current build.
 ```sh
 git status --short
 git diff --check
+GOTOOLCHAIN=local go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 bash scripts/check.sh
 gh workflow run release.yml --ref YOUR_REVIEWED_BRANCH
 gh run list --workflow release.yml --limit 5

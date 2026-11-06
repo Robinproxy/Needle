@@ -324,6 +324,37 @@ func TestStaticETagRevalidation(t *testing.T) {
 	}
 }
 
+func TestStaticRangeRequestSafety(t *testing.T) {
+	h, _ := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	full := httptest.NewRecorder()
+	mux.ServeHTTP(full, httptest.NewRequest(http.MethodGet, "/app.js", nil))
+	if full.Code != http.StatusOK || full.Body.Len() < 1000 {
+		t.Fatalf("static asset unavailable: status=%d bytes=%d", full.Code, full.Body.Len())
+	}
+
+	for _, tc := range []struct {
+		name, header, body string
+		status             int
+	}{
+		{"single range", "bytes=0-15", full.Body.String()[:16], http.StatusPartialContent},
+		// GO-2026-6609: many tiny ranges must not create an expensive multipart response.
+		{"excessive ranges", "bytes=" + strings.TrimSuffix(strings.Repeat("0-0,", 1000), ","), full.Body.String(), http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+			req.Header.Set("Range", tc.header)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != tc.status || w.Body.String() != tc.body {
+				t.Fatalf("Range response: status=%d bytes=%d, want status=%d bytes=%d", w.Code, w.Body.Len(), tc.status, len(tc.body))
+			}
+		})
+	}
+}
+
 func TestHandleReportIsAtomic(t *testing.T) {
 	h, store := newTestHandler(t)
 	if err := store.AllowToken("test-token"); err != nil {
