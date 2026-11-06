@@ -19,13 +19,13 @@ import (
 	"time"
 
 	"needle/internal/logging"
+	"needle/internal/probe"
 )
 
 var regionCodeRe = regexp.MustCompile(`(?i)^[a-z]{2}$`)
 
 const (
 	maxRegionLen       = 32
-	maxTCPingNameLen   = 64
 	maxTCPingTargetLen = 256
 	maxTCPingPerReport = 32
 )
@@ -55,10 +55,6 @@ func sanitizeRegion(r string) string {
 		return strings.ToUpper(r)
 	}
 	return stripControlsCap(r, maxRegionLen)
-}
-
-func sanitizeTCPingName(s string) string {
-	return stripControlsCap(strings.TrimSpace(s), maxTCPingNameLen)
 }
 
 func sanitizeTCPingTarget(s string) string {
@@ -363,7 +359,7 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, t := range req.TCPing {
-		name := sanitizeTCPingName(t.Name)
+		name := probe.NormalizeName(t.Name)
 		write.TCPings = append(write.TCPings, TCPingRow{
 			Name:      name,
 			Target:    sanitizeTCPingTarget(t.Target),

@@ -730,7 +730,7 @@ tcpping:
 | `interfaces` | Exact NIC whitelist, e.g. `["eth0"]`; omitted / empty counts automatically selected physical interfaces, excluding loopback and common virtual / VPN devices |
 | `tls_skip_verify` | Default `false`; `true` skips HTTPS certificate verification |
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it. Does not permit HTTPS-to-HTTP redirects |
-| `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
+| `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; names of 1–64 UTF-8 bytes, unique after trimming surrounding Unicode whitespace, without control characters; `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
 In `/admin`, configure region, billing currency/amount/period, renewal date, and allowance. Amount: whole period, 0 = Free, empty = Not set. Allowance: 0 = ♾️. Traffic resets monthly on its pinned day, independent of payment period / renewal; editing these settings does not clear usage.
 
@@ -803,7 +803,7 @@ tcpping: []
 | `interfaces` | Exact NIC whitelist; select the real WAN (`pppoe-wan`, `eth1`, etc.). Omitted / empty uses automatic filtering and can double-count router traffic |
 | `tls_skip_verify` | Default `false`; `true` skips HTTPS certificate verification |
 | `allow_plain_http` | Default `false`; must be `true` for remote HTTP. Loopback HTTP works without it. Does not permit HTTPS-to-HTTP redirects |
-| `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; unique names of 1–64 characters, `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
+| `tcpping` | Named TCP targets; `[]` / omitted disables probes. Maximum 32; names of 1–64 UTF-8 bytes, unique after trimming surrounding Unicode whitespace, without control characters; `host:port`, port 1–65535; IPv6 literal format `[2001:db8::1]:443` |
 
 In `/admin`, configure region, billing currency/amount/period, renewal date, and allowance. Amount: whole period, 0 = Free, empty = Not set. Allowance: 0 = ♾️. Traffic resets monthly on its pinned day, independent of payment period / renewal; editing these settings does not clear usage.
 

@@ -58,3 +58,18 @@ func TestValidateReport(t *testing.T) {
 		})
 	}
 }
+
+func TestProbeValidationPreservesWireDigest(t *testing.T) {
+	req := decodeReportForTest(t, `{"hostname":"node","tcpping":[{"name":" CTv4 ","target":"example.com:80"},{"name":"C\tTv6","target":"example.com:80"}]}`)
+	before, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateReport(&req, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := json.Marshal(req)
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("Server name validation changed persistent receipt digest: %s / %s / %v", before, after, err)
+	}
+}

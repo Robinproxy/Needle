@@ -82,6 +82,15 @@ choose_upgrade_config {shlex.quote(str(original))}
                     self.assertNotEqual(result.returncode,0)
                     self.assertEqual(original,kwargs.get('config',OLD))
 
+    def test_invalid_probe_names_do_not_change_existing_configuration(self):
+        for script in ['needle-agent.sh','needle-agent-openwrt.sh']:
+            for name in [' CTv4 ', '   ', 'CT\tv4']:
+                with self.subTest(script=script,name=name):
+                    result,staged,original=self.run_choice(script,mode='reconfigure',answers=f'4\n5\n1\n{name}\nexample.com:443\n')
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertIsNone(staged)
+                    self.assertEqual(original,OLD)
+
     def test_yaml_key_styles_inline_lists_and_multiline_token(self):
         for config in [
             '"token": "a:#b"\n"hostname": host\n"tcpping": []\ninterval: 30\n',

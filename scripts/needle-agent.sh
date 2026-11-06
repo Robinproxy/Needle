@@ -464,7 +464,16 @@ tcping_yaml_quote() {
 tcping_add_target() {
     TCPING_NAME=$1
     TCPING_TARGET=$2
-    [ -n "$TCPING_NAME" ] && [ "${#TCPING_NAME}" -le 64 ] || { echo 'Invalid TCP Ping name (1–64 characters).' >&2; return 1; }
+    case "$TCPING_NAME" in *'
+'*) echo 'TCP Ping names cannot contain control characters.' >&2; return 1 ;; esac
+    if printf '%s' "$TCPING_NAME" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+        echo 'TCP Ping names cannot contain control characters.' >&2; return 1
+    fi
+    # Normalize ASCII padding here. The staged Agent validates UTF-8 names and
+    # Unicode whitespace collisions before any installed files are replaced.
+    TCPING_NAME=$(printf '%s' "$TCPING_NAME" | LC_ALL=C sed 's/^ *//; s/ *$//')
+    TCPING_NAME_BYTES=$(printf '%s' "$TCPING_NAME" | wc -c)
+    [ -n "$TCPING_NAME" ] && [ "$TCPING_NAME_BYTES" -le 64 ] || { echo 'Invalid TCP Ping name (1–64 UTF-8 bytes).' >&2; return 1; }
     if grep -Fxq -e "$TCPING_NAME" "$TMP_DIR/tcpping-names"; then
         echo "Duplicate TCP Ping name: $TCPING_NAME" >&2; return 1
     fi

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"needle/internal/probe"
 )
 
 func (c Config) validateProbesAndInterval() error {
@@ -30,10 +32,19 @@ func (c Config) validateProbesAndInterval() error {
 	}
 	names := make(map[string]bool, len(c.TCPing))
 	for _, p := range c.TCPing {
-		if strings.TrimSpace(p.Name) == "" || len(p.Name) > 64 || strings.ContainsAny(p.Name, "\r\n\x00") || names[p.Name] {
-			return fmt.Errorf("TCP Ping names must be unique and contain 1–64 characters")
+		name := probe.NormalizeName(p.Name)
+		if name == "" || len(p.Name) > 64 || !utf8.ValidString(p.Name) {
+			return fmt.Errorf("TCP Ping names must contain 1–64 UTF-8 bytes and cannot be blank")
 		}
-		names[p.Name] = true
+		for _, ch := range p.Name {
+			if unicode.IsControl(ch) {
+				return fmt.Errorf("TCP Ping names cannot contain control characters")
+			}
+		}
+		if names[name] {
+			return fmt.Errorf("TCP Ping names must be unique after normalization: %q", name)
+		}
+		names[name] = true
 		host, port, err := net.SplitHostPort(p.Target)
 		if err != nil || host == "" || len(p.Target) > 256 {
 			return fmt.Errorf("invalid TCP Ping target %q", p.Target)

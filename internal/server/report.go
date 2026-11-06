@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"needle/internal/billing"
+	"needle/internal/probe"
 )
 
 type reportRequest struct {
@@ -169,10 +170,10 @@ func validateReport(req *reportRequest, now time.Time) error {
 	}
 	names := make(map[string]bool, len(req.TCPing))
 	for _, result := range req.TCPing {
-		if sanitizeTCPingName(result.Name) == "" || sanitizeTCPingTarget(result.Target) == "" {
+		name := probe.NormalizeName(result.Name)
+		if name == "" || sanitizeTCPingTarget(result.Target) == "" {
 			return fmt.Errorf("invalid TCPing name or target")
 		}
-		name := sanitizeTCPingName(result.Name)
 		if names[name] {
 			return fmt.Errorf("duplicate TCPing name")
 		}

@@ -57,6 +57,22 @@ cat "$TMP_DIR/tcpping.yaml"
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('tcpping: []',result.stdout)
 
+    def test_custom_names_trim_ascii_padding(self):
+        result=self.run_mode('4\n\n1\n  My VPS  \nexample.com:443\n')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn("name: 'My VPS'",result.stdout)
+
+    def test_normalized_duplicate_blank_control_and_long_names_rejected(self):
+        for name in [' CTv4', 'CTv4 ', '  CTv4  ', '   ', 'C\tTv4', 'CT\x1bv4', 'CT\x7fv4', 'a'*65, '线'*22]:
+            with self.subTest(name=name):
+                result=self.run_mode(f'4\n5\n1\n{name}\nexample.com:443\n')
+                self.assertNotEqual(result.returncode,0,result.stdout)
+
+    def test_utf8_byte_boundary(self):
+        result=self.run_mode('4\n\n1\n'+'线'*21+'\nexample.com:443\n')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn("name: '"+'线'*21+"'",result.stdout)
+
     def test_reject_invalid_and_duplicate_targets(self):
         cases=['9\n','4\n1 1\n','4\n7\n','4\n\n33\n','4\n1\n1\nCMv4\nexample.com:443\n','4\n\n1\nVPS\n::1:443\n','4\n\n1\nVPS\nexample.com:0\n','4\n\n1\nVPS\nexample.com:65536\n']
         for answer in cases:
