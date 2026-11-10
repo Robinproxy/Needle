@@ -250,20 +250,51 @@ PYLOCK
   flock -n 8 || { echo 'ERROR: another administrator is using this database; retry after that operation completes.' >&2; return 1; }
 }
 
+validate_server_account() {
+  local entry name password uid gid gecos home shell group_entry group_name group_gid members
+  local passwd_entries group_entries other_name other_uid other_gid other_members ignored rest users_seen=0 groups_seen=0
+  entry=$(getent passwd "$SERVER_USER") || return 1
+  IFS=: read -r name password uid gid gecos home shell <<< "$entry"
+  group_entry=$(getent group "$SERVER_USER") || return 1
+  IFS=: read -r group_name password group_gid members <<< "$group_entry"
+  case "$shell" in */nologin|/bin/false) ;; *) return 1 ;; esac
+  [ "$name" = "$SERVER_USER" ] && [ "$group_name" = "$SERVER_USER" ] &&
+    [ "$uid" -gt 0 ] && [ "$gid" -gt 0 ] && [ "$gid" = "$group_gid" ] &&
+    [ "$home" = /nonexistent ] && [ "$(id -G "$SERVER_USER")" = "$gid" ] || return 1
+  [ -z "$members" ] || [ "$members" = "$SERVER_USER" ] || return 1
+  # Verify primary memberships and numeric aliases too; getent group alone
+  # cannot establish that the database owner and its group are exclusive.
+  passwd_entries=$(getent passwd) || return 1
+  group_entries=$(getent group) || return 1
+  while IFS=: read -r other_name ignored other_uid other_gid rest; do
+    [[ "$other_uid" =~ ^[0-9]+$ && "$other_gid" =~ ^[0-9]+$ ]] || return 1
+    if [ "$other_name" = "$SERVER_USER" ]; then
+      [ "$other_uid" = "$uid" ] && [ "$other_gid" = "$gid" ] || return 1
+      users_seen=$((users_seen + 1))
+    elif [ "$other_uid" -eq "$uid" ] || [ "$other_gid" -eq "$gid" ]; then
+      return 1
+    fi
+  done <<< "$passwd_entries"
+  while IFS=: read -r other_name ignored other_gid other_members; do
+    [[ "$other_gid" =~ ^[0-9]+$ ]] || return 1
+    if [ "$other_name" = "$SERVER_USER" ]; then
+      [ "$other_gid" = "$gid" ] && { [ -z "$other_members" ] || [ "$other_members" = "$SERVER_USER" ]; } || return 1
+      groups_seen=$((groups_seen + 1))
+    elif [ "$other_gid" -eq "$gid" ]; then
+      return 1
+    fi
+  done <<< "$group_entries"
+  [ "$users_seen" -eq 1 ] && [ "$groups_seen" -eq 1 ]
+}
+
 ensure_server_account() {
-  local entry uid gid home shell members
   if ! getent passwd "$SERVER_USER" >/dev/null; then
     ! getent group "$SERVER_USER" >/dev/null || { echo 'ERROR: orphan service group; refusing reuse.' >&2; return 1; }
     groupadd --system "$SERVER_USER"
     useradd --system --gid "$SERVER_USER" --home-dir /nonexistent --no-create-home --shell "$(command -v nologin)" "$SERVER_USER" || { groupdel "$SERVER_USER"; return 1; }
     ACCOUNT_CREATED=true
   fi
-  entry=$(getent passwd "$SERVER_USER")
-  IFS=: read -r _ _ uid gid _ home shell <<< "$entry"
-  members=$(getent group "$SERVER_USER" | cut -d: -f4)
-  case "$shell" in */nologin|/bin/false) ;; *) echo 'ERROR: service account allows login.' >&2; return 1 ;; esac
-  [ "$uid" -gt 0 ] && [ "$home" = /nonexistent ] && [ "$(id -G "$SERVER_USER")" = "$gid" ] &&
-    [ "$(getent group "$SERVER_USER" | cut -d: -f3)" = "$gid" ] && [ -z "$members" ] || {
+  validate_server_account || {
     echo 'ERROR: existing service account is not isolated; no changes made to it.' >&2; return 1;
   }
 }

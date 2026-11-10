@@ -236,16 +236,40 @@ require_linux_runtime() {
 }
 
 validate_agent_account() {
-  local entry name password uid gid gecos home shell group_entry group_gid members
+  local entry name password uid gid gecos home shell group_entry group_name group_gid members
+  local passwd_entries group_entries other_name other_uid other_gid other_members ignored rest users_seen=0 groups_seen=0
   entry=$(getent passwd "$AGENT_USER") || return 1
   IFS=: read -r name password uid gid gecos home shell <<< "$entry"
   group_entry=$(getent group "$AGENT_GROUP") || return 1
-  IFS=: read -r name password group_gid members <<< "$group_entry"
+  IFS=: read -r group_name password group_gid members <<< "$group_entry"
   case "$shell" in */nologin|/bin/false) ;; *) return 1 ;; esac
-  [ "$uid" -gt 0 ] && [ "$gid" -gt 0 ] && [ "$gid" = "$group_gid" ] &&
+  [ "$name" = "$AGENT_USER" ] && [ "$group_name" = "$AGENT_GROUP" ] &&
+    [ "$uid" -gt 0 ] && [ "$gid" -gt 0 ] && [ "$gid" = "$group_gid" ] &&
     [ "$home" = /nonexistent ] && [ "$(id -G "$AGENT_USER")" = "$gid" ] || return 1
-  # Other users must not inherit access to this Agent's token.
-  [ -z "$members" ] || [ "$members" = "$AGENT_USER" ]
+  [ -z "$members" ] || [ "$members" = "$AGENT_USER" ] || return 1
+  # Group member lists omit primary membership. Check both account databases
+  # for shared UIDs/GIDs, including aliases of the service group.
+  passwd_entries=$(getent passwd) || return 1
+  group_entries=$(getent group) || return 1
+  while IFS=: read -r other_name ignored other_uid other_gid rest; do
+    [[ "$other_uid" =~ ^[0-9]+$ && "$other_gid" =~ ^[0-9]+$ ]] || return 1
+    if [ "$other_name" = "$AGENT_USER" ]; then
+      [ "$other_uid" = "$uid" ] && [ "$other_gid" = "$gid" ] || return 1
+      users_seen=$((users_seen + 1))
+    elif [ "$other_uid" -eq "$uid" ] || [ "$other_gid" -eq "$gid" ]; then
+      return 1
+    fi
+  done <<< "$passwd_entries"
+  while IFS=: read -r other_name ignored other_gid other_members; do
+    [[ "$other_gid" =~ ^[0-9]+$ ]] || return 1
+    if [ "$other_name" = "$AGENT_GROUP" ]; then
+      [ "$other_gid" = "$gid" ] && { [ -z "$other_members" ] || [ "$other_members" = "$AGENT_USER" ]; } || return 1
+      groups_seen=$((groups_seen + 1))
+    elif [ "$other_gid" -eq "$gid" ]; then
+      return 1
+    fi
+  done <<< "$group_entries"
+  [ "$users_seen" -eq 1 ] && [ "$groups_seen" -eq 1 ]
 }
 
 ensure_agent_account() {

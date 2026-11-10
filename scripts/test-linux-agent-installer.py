@@ -44,8 +44,9 @@ class LinuxInstallerTests(unittest.TestCase):
         self.enabled.touch()
         self.log = self.root / 'commands'
 
-    def run_shell(self, commands='deploy_agent', before='', answers=''):
+    def run_shell(self, commands='deploy_agent', before='', answers='', real_account=False):
         q = lambda x: shlex.quote(str(x))
+        account_stub = '' if real_account else 'ensure_agent_account() { echo account >> "$TEST_ROOT/commands"; }'
         setup = f'''
 . {q(self.library)}
 INSTALL_DIR={q(self.directory)}
@@ -56,7 +57,7 @@ TMP_DIR={q(self.download)}
 TEST_ROOT={q(self.root)}
 require_root() {{ :; }}
 require_linux_runtime() {{ :; }}
-ensure_agent_account() {{ echo account >> "$TEST_ROOT/commands"; }}
+{account_stub}
 getent() {{ [ "$1" != passwd ] || echo 'needle-agent:x:123:123::/nonexistent:/usr/sbin/nologin'; }}
 chown() {{ echo "chown $*" >> "$TEST_ROOT/commands"; }}
 stat() {{ python3 -c 'import os,sys; s=os.stat(sys.argv[1]); print(str(s.st_uid)+":"+str(s.st_gid)+":"+oct(s.st_mode & 4095)[2:])' "$3"; }}
@@ -233,6 +234,71 @@ id() {{ echo {shlex.quote(groups)}; }}
 '''
             result = self.run_shell('validate_agent_account', before=before)
             self.assertNotEqual(result.returncode, 0)
+
+    def account_database(self, uid=123, gid=123, members='', extra_user='', extra_group='',
+                         passwd_status=0, group_status=0, empty_passwd=False, empty_group=False,
+                         omit_user=False, omit_group=False, existing=True):
+        entry = f'needle-agent:x:{uid}:{gid}::/nonexistent:/usr/sbin/nologin'
+        group = f'needle-agent:x:{gid}:{members}'
+        users = '' if empty_passwd else '\n'.join(filter(None, ['root:x:0:0::/root:/bin/sh', '' if omit_user else entry, extra_user]))
+        groups = '' if empty_group else '\n'.join(filter(None, ['root:x:0:', '' if omit_group else group, extra_group]))
+        q = shlex.quote
+        return f'''
+ACCOUNT_USER_PRESENT={str(existing).lower()}
+ACCOUNT_GROUP_PRESENT={str(existing).lower()}
+getent() {{
+  case "$1:$#" in
+    passwd:1) printf '%s\\n' {q(users)}; return {passwd_status} ;;
+    group:1) printf '%s\\n' {q(groups)}; return {group_status} ;;
+    passwd:2) [ "$2" = needle-agent ] && [ "$ACCOUNT_USER_PRESENT" = true ] || return 2; printf '%s\\n' {q(entry)} ;;
+    group:2) [ "$2" = needle-agent ] && [ "$ACCOUNT_GROUP_PRESENT" = true ] || return 2; printf '%s\\n' {q(group)} ;;
+    *) return 2 ;;
+  esac
+}}
+id() {{ [ "$1" = -G ] && [ "$2" = needle-agent ] || return 1; printf '%s\\n' {q(str(gid))}; }}
+useradd() {{ [ "$ACCOUNT_USER_PRESENT" = false ] || return 1; ACCOUNT_USER_PRESENT=true; echo useradd >> "$TEST_ROOT/commands"; }}
+groupadd() {{ [ "$ACCOUNT_GROUP_PRESENT" = false ] || return 1; ACCOUNT_GROUP_PRESENT=true; echo groupadd >> "$TEST_ROOT/commands"; }}
+userdel() {{ echo unexpected-userdel >> "$TEST_ROOT/commands"; return 1; }}
+groupdel() {{ echo unexpected-groupdel >> "$TEST_ROOT/commands"; return 1; }}
+nologin() {{ :; }}
+'''
+
+    def test_fresh_service_account_passes_isolation_validation(self):
+        result = self.run_shell('ensure_agent_account', before=self.account_database(existing=False), real_account=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.log.read_text().splitlines(), ['groupadd', 'useradd'])
+
+    def test_service_uid_and_gid_must_be_exclusive(self):
+        cases = [
+            ('isolated account', {}, True),
+            ('explicit self membership', {'members': 'needle-agent'}, True),
+            ('unrelated identities', {'extra_user': 'other:x:456:456::/home/other:/bin/sh', 'extra_group': 'other:x:456:other'}, True),
+            ('root UID', {'uid': 0}, False),
+            ('root primary GID', {'gid': 0}, False),
+            ('shared UID', {'extra_user': 'other:x:123:456::/home/other:/bin/sh'}, False),
+            ('shared primary GID', {'extra_user': 'other:x:456:123::/home/other:/bin/sh'}, False),
+            ('explicit other member', {'members': 'other'}, False),
+            ('shared numeric group', {'extra_group': 'other:x:123:other'}, False),
+            ('duplicate user entry', {'extra_user': 'needle-agent:x:123:123::/nonexistent:/usr/sbin/nologin'}, False),
+            ('duplicate group entry', {'extra_group': 'needle-agent:x:123:'}, False),
+            ('failed passwd enumeration', {'passwd_status': 2}, False),
+            ('failed group enumeration', {'group_status': 2}, False),
+            ('empty passwd enumeration', {'empty_passwd': True}, False),
+            ('empty group enumeration', {'empty_group': True}, False),
+            ('user missing from enumeration', {'omit_user': True}, False),
+            ('group missing from enumeration', {'omit_group': True}, False),
+        ]
+        for name, database, allowed in cases:
+            with self.subTest(name=name):
+                result = self.run_shell('ensure_agent_account', before=self.account_database(**database), real_account=True)
+                self.assertEqual(result.returncode == 0, allowed, result.stdout + result.stderr)
+
+    def test_shared_identity_rejects_upgrade_before_changing_existing_agent(self):
+        before = self.account_database(extra_user='other:x:456:123::/home/other:/bin/sh')
+        result = self.run_shell(before=before, real_account=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_originals()
+        self.assertNotIn('stop', self.log.read_text() if self.log.exists() else '')
 
 
 if __name__ == '__main__':

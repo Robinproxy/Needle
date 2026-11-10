@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Portable, isolated preflight and WAL-backup regressions (no service changes)."""
 import pathlib
+import shlex
 import sqlite3
 import subprocess
 import tempfile
@@ -18,6 +19,89 @@ class ServerInstallerTests(unittest.TestCase):
             s=out.read_text()
             for line in ['User=needle-server','Group=needle-server','UMask=0077','PrivateDevices=true','CapabilityBoundingSet=','ProtectSystem=strict','ReadWritePaths="/opt/needle/data"']:
                 self.assertIn(line,s)
+
+    def account_database(self, **database):
+        uid = database.get('uid', 123)
+        gid = database.get('gid', 123)
+        entry = f'needle-server:x:{uid}:{gid}::/nonexistent:/usr/sbin/nologin'
+        group = f'needle-server:x:{gid}:{database.get("members", "")}'
+        users = '' if database.get('empty_passwd') else '\n'.join(filter(None, ['root:x:0:0::/root:/bin/sh', '' if database.get('omit_user') else entry, database.get('extra_user', '')]))
+        groups = '' if database.get('empty_group') else '\n'.join(filter(None, ['root:x:0:', '' if database.get('omit_group') else group, database.get('extra_group', '')]))
+        q = shlex.quote
+        return f'''
+ACCOUNT_USER_PRESENT={str(database.get('existing', True)).lower()}
+ACCOUNT_GROUP_PRESENT={str(database.get('existing', True)).lower()}
+getent() {{
+  case "$1:$#" in
+    passwd:1) printf '%s\\n' {q(users)}; return {database.get('passwd_status', 0)} ;;
+    group:1) printf '%s\\n' {q(groups)}; return {database.get('group_status', 0)} ;;
+    passwd:2) [ "$2" = needle-server ] && [ "$ACCOUNT_USER_PRESENT" = true ] || return 2; printf '%s\\n' {q(entry)} ;;
+    group:2) [ "$2" = needle-server ] && [ "$ACCOUNT_GROUP_PRESENT" = true ] || return 2; printf '%s\\n' {q(group)} ;;
+    *) return 2 ;;
+  esac
+}}
+id() {{ [ "$1" = -G ] && [ "$2" = needle-server ] || return 1; printf '%s\\n' {q(str(gid))}; }}
+useradd() {{ [ "$ACCOUNT_USER_PRESENT" = false ] || return 1; ACCOUNT_USER_PRESENT=true; echo useradd; }}
+groupadd() {{ [ "$ACCOUNT_GROUP_PRESENT" = false ] || return 1; ACCOUNT_GROUP_PRESENT=true; echo groupadd; }}
+userdel() {{ echo unexpected-userdel >&2; return 1; }}
+groupdel() {{ echo unexpected-groupdel >&2; return 1; }}
+nologin() {{ :; }}
+'''
+
+    def test_fresh_service_account_passes_isolation_validation(self):
+        result = self.shell(self.account_database(existing=False) + '\nensure_server_account\n[ "$ACCOUNT_CREATED" = true ]\n')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ['groupadd', 'useradd'])
+
+    def test_service_uid_and_gid_must_be_exclusive(self):
+        cases = [
+            ('isolated account', {}, True),
+            ('explicit self membership', {'members': 'needle-server'}, True),
+            ('unrelated identities', {'extra_user': 'other:x:456:456::/home/other:/bin/sh', 'extra_group': 'other:x:456:other'}, True),
+            ('root UID', {'uid': 0}, False),
+            ('root primary GID', {'gid': 0}, False),
+            ('shared UID', {'extra_user': 'other:x:123:456::/home/other:/bin/sh'}, False),
+            ('shared primary GID', {'extra_user': 'other:x:456:123::/home/other:/bin/sh'}, False),
+            ('explicit other member', {'members': 'other'}, False),
+            ('shared numeric group', {'extra_group': 'other:x:123:other'}, False),
+            ('duplicate user entry', {'extra_user': 'needle-server:x:123:123::/nonexistent:/usr/sbin/nologin'}, False),
+            ('duplicate group entry', {'extra_group': 'needle-server:x:123:'}, False),
+            ('failed passwd enumeration', {'passwd_status': 2}, False),
+            ('failed group enumeration', {'group_status': 2}, False),
+            ('empty passwd enumeration', {'empty_passwd': True}, False),
+            ('empty group enumeration', {'empty_group': True}, False),
+            ('user missing from enumeration', {'omit_user': True}, False),
+            ('group missing from enumeration', {'omit_group': True}, False),
+        ]
+        for name, database, allowed in cases:
+            with self.subTest(name=name):
+                result = self.shell(self.account_database(**database) + '\nensure_server_account\n')
+                self.assertEqual(result.returncode == 0, allowed, result.stdout + result.stderr)
+
+    def test_shared_identity_rejects_upgrade_before_changing_existing_server(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            originals = {'needle.db': b'unchanged database fixture', '.env': b'NEEDLE_LISTEN=127.0.0.1:8008\n',
+                         'needle-server': b'unchanged binary', 'unit': b'unchanged service'}
+            for name, data in originals.items():
+                (root / name).write_bytes(data)
+            q = shlex.quote
+            code = self.account_database(extra_user='other:x:123:456::/home/other:/bin/sh') + f'''
+INSTALL_DIR={q(str(root))}; DB_PATH="$INSTALL_DIR/needle.db"; ENV_FILE="$INSTALL_DIR/.env"
+SERVER_BIN="$INSTALL_DIR/needle-server"; SERVICE_FILE="$INSTALL_DIR/unit"
+validate_server_paths() {{ :; }}
+validate_listener_permissions() {{ :; }}
+lock_database_administration() {{ :; }}
+systemctl() {{ echo unexpected-systemctl >> "$INSTALL_DIR/changes"; return 1; }}
+install() {{ echo unexpected-install >> "$INSTALL_DIR/changes"; return 1; }}
+chown() {{ echo unexpected-chown >> "$INSTALL_DIR/changes"; return 1; }}
+deploy_server
+'''
+            result = self.shell(code)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / 'changes').exists())
+            for name, data in originals.items():
+                self.assertEqual((root / name).read_bytes(), data)
     def test_consistent_backup_includes_uncheckpointed_wal(self):
         with tempfile.TemporaryDirectory() as temp:
             db=pathlib.Path(temp)/'live.db'; backup=pathlib.Path(temp)/'backup';backup.mkdir()
