@@ -236,32 +236,39 @@ func TestReportAdmissionCountsInvalidBodiesAndReleasesSlots(t *testing.T) {
 
 func TestReportAdmissionRejectsSlowHTTPBodyImmediately(t *testing.T) {
 	h, _ := newTestHandler(t)
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(h.handleReport))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/report", h.handleReport)
+	mux.HandleFunc("/api/realtime", h.handleRealtime)
+	srv := httptest.NewUnstartedServer(mux)
 	srv.Config.ReadTimeout = 5 * time.Second
 	srv.Start()
 	defer srv.Close()
-	for _, authorization := range []string{"", "Bearer unknown"} {
-		conn, err := net.DialTimeout("tcp", srv.Listener.Addr().String(), 2*time.Second)
-		if err != nil {
-			t.Fatal(err)
-		}
-		func() {
-			defer conn.Close()
-			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
-				t.Fatal(err)
+	for _, path := range []string{"/api/report", "/api/realtime"} {
+		t.Run(path, func(t *testing.T) {
+			for _, authorization := range []string{"", "Bearer unknown"} {
+				conn, err := net.DialTimeout("tcp", srv.Listener.Addr().String(), 2*time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				func() {
+					defer conn.Close()
+					if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+						t.Fatal(err)
+					}
+					// Deliberately send no body, below net/http's automatic drain threshold.
+					if _, err := fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1024\r\nAuthorization: %s\r\n\r\n", path, authorization); err != nil {
+						t.Fatal(err)
+					}
+					resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+					if err != nil {
+						t.Fatalf("rejection waited for an unauthenticated body: %v", err)
+					}
+					defer resp.Body.Close()
+					if resp.StatusCode != 401 || !resp.Close {
+						t.Fatalf("status=%d close=%t", resp.StatusCode, resp.Close)
+					}
+				}()
 			}
-			// Deliberately send no body, below net/http's automatic drain threshold.
-			if _, err := fmt.Fprintf(conn, "POST /api/report HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1024\r\nAuthorization: %s\r\n\r\n", authorization); err != nil {
-				t.Fatal(err)
-			}
-			resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
-			if err != nil {
-				t.Fatalf("rejection waited for an unauthenticated body: %v", err)
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != 401 || !resp.Close {
-				t.Fatalf("status=%d close=%t", resp.StatusCode, resp.Close)
-			}
-		}()
+		})
 	}
 }

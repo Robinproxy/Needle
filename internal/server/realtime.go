@@ -239,21 +239,47 @@ func (h *Handler) publishNode(id int64, kind string) {
 
 func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-	select {
-	case h.realtimeSlots <- struct{}{}:
-		defer func() { <-h.realtimeSlots }()
-	default:
-		http.Error(w, "realtime concurrency limit reached", 503)
+		rejectUnreadReport(w, r, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	now := h.now()
 	if !h.realtimeGlobal.Allow(now) {
-		http.Error(w, "realtime rate limit exceeded", 429)
+		w.Header().Set("Retry-After", "1")
+		rejectUnreadReport(w, r, "realtime rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
+	token, ok := bearerToken(r)
+	if !ok {
+		rejectUnreadReport(w, r, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Bound credential lookups as well as authenticated body reads. Invalid
+	// credentials must release the slot without waiting for any request body.
+	select {
+	case h.realtimeSlots <- struct{}{}:
+		defer func() { <-h.realtimeSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		rejectUnreadReport(w, r, "realtime concurrency limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	row, err := h.store.LookupToken(token)
+	if err != nil && !errors.Is(err, ErrTokenNotFound) {
+		h.logs.Check("realtime_credential_lookup", "ERROR", err)
+		rejectUnreadReport(w, r, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.logs.Check("realtime_credential_lookup", "ERROR", nil)
+	if err != nil || row.Hostname == "" {
+		rejectUnreadReport(w, r, "registered token required", http.StatusUnauthorized)
+		return
+	}
+	if !h.realtimeLimiter.Allow(row.ID, now) {
+		w.Header().Set("Retry-After", "1")
+		rejectUnreadReport(w, r, "realtime rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -277,24 +303,8 @@ func (h *Handler) handleRealtime(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid realtime sample", 400)
 		return
 	}
-	token, ok := bearerToken(r)
-	if !ok {
-		http.Error(w, "unauthorized", 401)
-		return
-	}
-	row, err := h.store.LookupToken(token)
-	if err != nil && !errors.Is(err, ErrTokenNotFound) {
-		h.logs.Check("realtime_credential_lookup", "ERROR", err, "hostname", req.Hostname)
-		http.Error(w, "internal error", 500)
-		return
-	}
-	h.logs.Check("realtime_credential_lookup", "ERROR", nil)
-	if err != nil || row.Hostname == "" || row.Hostname != req.Hostname {
+	if row.Hostname != req.Hostname {
 		http.Error(w, "registered token and matching hostname required", 401)
-		return
-	}
-	if !h.realtimeLimiter.Allow(row.ID, now) {
-		http.Error(w, "realtime rate limit exceeded", 429)
 		return
 	}
 	id, found, err := h.store.AgentIDByHostname(req.Hostname)

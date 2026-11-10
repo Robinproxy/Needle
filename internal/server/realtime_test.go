@@ -108,6 +108,8 @@ func TestRealtimeBindingRevocationAndValidation(t *testing.T) {
 		if w := sendRealtime(t, h, tc.token, tc.body); w.Code != tc.status {
 			t.Fatalf("%s: %d %s", tc.body[:min(80, len(tc.body))], w.Code, w.Body.String())
 		}
+		// Exercise validation independently of the admission rate limit.
+		*now = now.Add(time.Second)
 	}
 	*now = now.Add(time.Second)
 	body := fmt.Sprintf(`{"hostname":"live","created_at":%d,"cpu":{"percent":5}}`, now.Unix())
@@ -214,11 +216,22 @@ func TestRealtimeConcurrencyCannotConsumeHistoricalSlots(t *testing.T) {
 			<-h.realtimeSlots
 		}
 	}()
-	if w := sendRealtime(t, h, "live-secret", fmt.Sprintf(`{"hostname":"live","created_at":%d}`, now.Unix())); w.Code != 503 {
-		t.Fatal(w.Code)
+	body := &reportAdmissionBody{Reader: strings.NewReader(fmt.Sprintf(`{"hostname":"live","created_at":%d}`, now.Unix()))}
+	req := httptest.NewRequest(http.MethodPost, "/api/realtime", body)
+	req.Header.Set("Authorization", "Bearer live-secret")
+	w := httptest.NewRecorder()
+	h.handleRealtime(w, req)
+	if w.Code != 503 || body.reads != 0 || w.Header().Get("Retry-After") != "1" || w.Header().Get("Connection") != "close" {
+		t.Fatalf("overload: status=%d reads=%d headers=%v", w.Code, body.reads, w.Header())
 	}
 	if w := sendReport(t, h, "Bearer live-secret", `{"hostname":"live"}`); w.Code != 200 {
 		t.Fatal("history blocked by realtime slots", w.Code)
+	}
+	for len(h.realtimeSlots) > 0 {
+		<-h.realtimeSlots
+	}
+	if w := sendRealtime(t, h, "live-secret", fmt.Sprintf(`{"hostname":"live","created_at":%d}`, now.Unix())); w.Code != 200 {
+		t.Fatalf("realtime did not recover: %d %s", w.Code, w.Body.String())
 	}
 }
 
