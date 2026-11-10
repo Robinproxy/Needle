@@ -69,14 +69,23 @@ jobs:
           RELEASE_REF_TYPE: ${{ github.ref_type }}
           RELEASE_REF_NAME: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           if [ "$RELEASE_REF_TYPE" = "tag" ]; then
             TARGET_TAG="$RELEASE_REF_NAME"
           else
             TARGET_TAG="ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           fi
           docker tag needle-candidate "$NEEDLE_IMAGE:$TARGET_TAG"
-          docker push "$NEEDLE_IMAGE:$TARGET_TAG"
-          IMAGE_REF=$(docker image inspect --format '{{index .RepoDigests 0}}' "$NEEDLE_IMAGE:$TARGET_TAG")
+          PUSH_OUTPUT=$(docker push "$NEEDLE_IMAGE:$TARGET_TAG")
+          printf '%s\n' "$PUSH_OUTPUT"
+          # Bind promotion to this push, independent of local RepoDigests order
+          # or repository aliases retained by the Docker image store.
+          IMAGE_DIGEST=$(printf '%s\n' "$PUSH_OUTPUT" | awk -v tag="$TARGET_TAG:" '$1 == tag && $2 == "digest:" && $4 == "size:" { print $3 }')
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Cannot determine a unique digest from this push; no image reference exported.' >&2
+            exit 1
+          fi
+          IMAGE_REF="$NEEDLE_IMAGE@$IMAGE_DIGEST"
           printf 'image_ref=%s\n' "$IMAGE_REF" >> "$GITHUB_OUTPUT"
 
   latest:

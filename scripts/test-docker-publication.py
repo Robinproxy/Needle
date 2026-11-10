@@ -49,9 +49,15 @@ with open(os.environ['TEST_DOCKER_LOG'],'a') as log: log.write(json.dumps(args)+
 if args[:2]==['tag','needle-candidate'] and len(args)==3:
     pass
 elif args[:1]==['push'] and len(args)==2:
+    if os.environ.get('TEST_PUSH_FAIL')=='1':
+        raise SystemExit('simulated registry push failure')
     registry[args[1]]=os.environ['TEST_DIGEST']
+    tag=args[1].rsplit(':',1)[1]
+    digest=os.environ['TEST_DIGEST'].split('@',1)[1]
+    print(os.environ.get('TEST_PUSH_OUTPUT', tag+': digest: '+digest+' size: 1234'))
 elif args[:3]==['image','inspect','--format'] and len(args)==5:
-    print(registry[args[4]])
+    # Local aliases and previously pushed manifests can appear first.
+    print(os.environ.get('TEST_INSPECT_DIGEST', 'needle-candidate@sha256:'+'b'*64))
 elif args[:5]==['buildx','imagetools','create','--prefer-index=false','--tag'] and len(args)==7:
     registry[args[5]]=args[6]
 else:
@@ -80,6 +86,20 @@ state.write_text(json.dumps(registry))
 
     def calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def publish(self, ref_type='branch', attempt='1', **overrides):
+        workflow = (ROOT / '.github/workflows/docker.yml').read_text()
+        block = re.search(r'        id: publish\n.*?        run: \|\n((?:          [^\n]*\n|\n)+)', workflow, re.S)
+        self.assertIsNotNone(block, 'missing image-publication step')
+        commands = textwrap.dedent(block.group(1))
+        output = self.root / 'output'
+        output.write_text('')
+        env = dict(self.env, RELEASE_REF_TYPE=ref_type, RELEASE_REF_NAME='v0.7.15' if ref_type=='tag' else 'main',
+                   GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT=attempt, GITHUB_OUTPUT=str(output))
+        env.update(overrides)
+        result = subprocess.run(['bash', '-euo', 'pipefail', '-c', commands], cwd=self.checkout,
+                                env=env, text=True, capture_output=True)
+        return result, output.read_text()
 
     def test_current_main_promotes_only_the_tested_digest(self):
         result = self.promote(self.sha_a, DIGEST_A)
@@ -125,23 +145,41 @@ state.write_text(json.dumps(registry))
                 self.assertEqual(self.calls(), [])
 
     def test_workflow_pushes_only_its_candidate_or_version(self):
-        workflow = (ROOT / '.github/workflows/docker.yml').read_text()
-        block = re.search(r'        id: publish\n.*?        run: \|\n((?:          [^\n]*\n|\n)+)', workflow, re.S)
-        self.assertIsNotNone(block, 'missing image-publication step')
-        commands = textwrap.dedent(block.group(1))
         for ref_type, attempt, tag in [('tag', '1', 'v0.7.15'), ('branch', '1', 'ci-123-1'), ('branch', '2', 'ci-123-2')]:
             with self.subTest(ref_type=ref_type, attempt=attempt):
-                output = self.root / 'output'
-                output.write_text('')
-                result = subprocess.run(['bash', '-euo', 'pipefail', '-c', commands], cwd=self.checkout,
-                    env=dict(self.env, RELEASE_REF_TYPE=ref_type, RELEASE_REF_NAME='v0.7.15' if ref_type=='tag' else 'main',
-                             GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT=attempt, GITHUB_OUTPUT=str(output)),
-                    text=True, capture_output=True)
+                result, output = self.publish(ref_type, attempt)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.registry()[IMAGE + ':' + tag], DIGEST_A)
-                self.assertEqual(output.read_text(), 'image_ref=' + DIGEST_A + '\n')
+                self.assertEqual(output, 'image_ref=' + DIGEST_A + '\n')
                 self.assertEqual(self.registry()[IMAGE + ':latest'], 'previous')
                 self.assertEqual(self.registry()[IMAGE + ':v0.7.14'], 'version-image')
+
+    def test_workflow_ignores_stale_local_digests_and_promotes_its_push(self):
+        result, output = self.publish(TEST_INSPECT_DIGEST=DIGEST_B)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, 'image_ref=' + DIGEST_A + '\n')
+        promoted = self.promote(self.sha_a, output.strip().removeprefix('image_ref='))
+        self.assertEqual(promoted.returncode, 0, promoted.stderr)
+        self.assertEqual(self.registry()[IMAGE + ':latest'], DIGEST_A)
+        self.assertFalse(any(json.loads(call)[:2] == ['image', 'inspect'] for call in self.calls()))
+
+    def test_workflow_rejects_missing_malformed_or_ambiguous_push_digest(self):
+        tag = 'ci-123-1'
+        digest = DIGEST_A.split('@', 1)[1]
+        for push_output in ['', f'{tag}: digest: sha256:short size: 1234',
+                            f'other-tag: digest: {digest} size: 1234',
+                            f'{tag}: digest: {digest} size: 1234\n{tag}: digest: {digest} size: 1234']:
+            with self.subTest(push_output=push_output):
+                result, output = self.publish(TEST_PUSH_OUTPUT=push_output)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(output, '')
+                self.assertEqual(self.registry()[IMAGE + ':latest'], 'previous')
+
+    def test_workflow_does_not_export_a_digest_when_push_fails(self):
+        result, output = self.publish(TEST_PUSH_FAIL='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(output, '')
+        self.assertEqual(self.registry()[IMAGE + ':latest'], 'previous')
 
 
 if __name__ == '__main__':
