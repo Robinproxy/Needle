@@ -51,6 +51,18 @@ class InstallerTests(unittest.TestCase):
         self.sha = self.root / 'sha256sum'
         self.sha.write_text('#!/usr/bin/env python3\nimport hashlib,sys\nprint(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest(),sys.argv[1])\n')
         self.sha.chmod(0o755)
+        # Model a root-owned router tree on non-root hosts, using real modes.
+        # The installer uses BusyBox-compatible numeric ls, not optional stat.
+        numeric_ls = self.root / 'ls'
+        numeric_ls.write_text('''#!/usr/bin/env python3
+import os, stat, sys
+assert len(sys.argv) == 3 and sys.argv[1] == '-ldn', sys.argv
+info = os.lstat(sys.argv[2])
+uid = 0 if info.st_uid == os.getuid() else info.st_uid
+print(stat.filemode(info.st_mode), info.st_nlink, uid, info.st_gid,
+      info.st_size, 'Jan 1 00:00', sys.argv[2])
+''')
+        numeric_ls.chmod(0o755)
 
     def run_shell(self, commands, mock_service=True, input_text=None, mock_wait=True):
         q = lambda value: shlex.quote(str(value))
@@ -247,6 +259,7 @@ case "$1" in running|enabled) exit 1 ;; esac
 
     def test_failed_first_install_removes_partial_installation(self):
         self.config.unlink()
+        self.config_dir.rmdir()
         self.binary.unlink()
         self.service.unlink()
         result = self.run_shell("""
@@ -267,6 +280,7 @@ main install --version v9.9.9
 """)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.config.exists())
+        self.assertFalse(self.config_dir.exists())
         self.assertFalse(self.binary.exists())
         self.assertFalse(self.service.exists())
         self.assertFalse(self.backup.exists())
@@ -454,6 +468,128 @@ main upgrade --version v9.9.9
         self.assertFalse(Path(str(self.binary) + '.new').exists())
         self.assertFalse(self.lock.exists())
 
+    def test_unsafe_directory_permissions_abort_before_any_router_changes(self):
+        requested = self.root / 'download-requested'
+        before = {path: (path.read_bytes(), path.stat().st_mode & 0o777)
+                  for path in [self.binary, self.config, self.service]}
+        actions = ['install', 'upgrade --keep-config', 'uninstall --yes',
+                   'uninstall --yes --purge --unregister', 'status']
+        for mode in [0o770, 0o707, 0o777, 0o1777]:
+            self.config_dir.chmod(mode)
+            for action in actions:
+                with self.subTest(mode=oct(mode), action=action):
+                    result = self.run_shell(f'''
+download() {{ touch {shlex.quote(str(requested))}; return 1; }}
+main {action}
+''')
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn('owned by root and not writable by group or others', result.stderr)
+                    for path, (content, permissions) in before.items():
+                        self.assertEqual(path.read_bytes(), content, str(path))
+                        self.assertEqual(path.stat().st_mode & 0o777, permissions)
+                    self.assertEqual(self.config_dir.stat().st_mode & 0o7777, mode)
+                    self.assertFalse(requested.exists())
+                    self.assertFalse(self.log.exists())
+                    self.assertFalse(self.lock.exists())
+
+    def test_untrusted_directory_owner_or_unreadable_metadata_is_rejected(self):
+        before = {path: path.read_bytes() for path in [self.binary, self.config, self.service]}
+        for metadata in [
+            "ls() { command ls \"$@\" | awk '{$3 = 65534; print}'; }",
+            'ls() { return 1; }',
+            "ls() { printf '%s\\n' 'unreadable metadata'; }",
+        ]:
+            for action in ['install', 'upgrade --keep-config', 'uninstall --yes --purge', 'status']:
+                with self.subTest(metadata=metadata, action=action):
+                    result = self.run_shell(metadata + '\nmain ' + action)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn('configuration directory', result.stderr)
+                    for path, content in before.items():
+                        self.assertEqual(path.read_bytes(), content, str(path))
+                    self.assertFalse(self.log.exists())
+                    self.assertFalse(self.lock.exists())
+
+    def test_new_configuration_directory_is_private(self):
+        self.config.unlink()
+        self.config_dir.rmdir()
+        result = self.run_shell('''
+require_interactive() { :; }
+configure() { printf "token: 'new-token'\\n" > "$TMP_DIR/agent.yaml"; }
+main install --version v9.9.9
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.config_dir.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.config_dir / 'version').stat().st_mode & 0o777, 0o600)
+        self.assertIn("token: 'new-token'", self.config.read_text())
+
+    def test_version_link_created_after_preflight_does_not_overwrite_target(self):
+        victim = self.root / 'router-file-linked-during-start'
+        victim.write_text('PRESERVE THIS ROUTER FILE\n')
+        result = self.run_shell(f'''
+write_service() {{ ln -s {shlex.quote(str(victim))} "$CONFIG_DIR/version"; }}
+main upgrade --keep-config --version v9.9.9
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(victim.read_text(), 'PRESERVE THIS ROUTER FILE\n')
+        version = self.config_dir / 'version'
+        self.assertFalse(version.is_symlink())
+        self.assertEqual(version.read_text(), 'v9.9.9\n')
+        self.assertFalse((self.config_dir / 'version.new').exists())
+
+    def test_version_hardlink_is_replaced_without_truncating_target(self):
+        victim = self.root / 'router-file-hardlinked-to-version'
+        victim.write_text('KEEP THIS FILE CONTENT\n')
+        version = self.config_dir / 'version'
+        os.link(victim, version)
+        result = self.run_shell('main upgrade --keep-config --version v9.9.9')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(victim.read_text(), 'KEEP THIS FILE CONTENT\n')
+        self.assertEqual(version.read_text(), 'v9.9.9\n')
+        self.assertNotEqual(victim.stat().st_ino, version.stat().st_ino)
+
+    def test_version_staging_link_created_after_preflight_is_not_followed(self):
+        victim = self.root / 'router-file-linked-to-version-stage'
+        victim.write_text('KEEP THIS ROUTER FILE\n')
+        before = {path: path.read_bytes() for path in [self.binary, self.config, self.service]}
+        result = self.run_shell(f'''
+cp() {{
+    command cp "$@" || return 1
+    for CP_ARG do CP_DEST=$CP_ARG; done
+    if [ "$CP_DEST" = "$BINARY.new" ]; then
+        ln -s {shlex.quote(str(victim))} "$CONFIG_DIR/version.new"
+    fi
+}}
+main upgrade --keep-config --version v9.9.9
+''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(victim.read_text(), 'KEEP THIS ROUTER FILE\n')
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content, str(path))
+        self.assertFalse((self.config_dir / 'version.new').is_symlink())
+        self.assertEqual(self.log.read_text().splitlines(), ['running', 'enabled'])
+        self.assertFalse(self.lock.exists())
+
+    def test_failed_version_commit_restores_installation_and_cleans_staging(self):
+        version = self.config_dir / 'version'
+        version.write_text('v1.0.0\n')
+        self.backup.write_text('/etc/unrelated/\n')
+        before = {path: path.read_bytes() for path in
+                  [self.binary, self.config, self.service, version, self.backup]}
+        result = self.run_shell('''
+mv() {
+    if [ "$2" = "$CONFIG_DIR/version.new" ]; then return 1; fi
+    command mv "$@"
+}
+main upgrade --keep-config --version v9.9.9
+''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('restoring the previous', result.stderr)
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content, str(path))
+        self.assertFalse((self.config_dir / 'version.new').exists())
+        self.assertFalse(self.lock.exists())
+
     def test_uninstall_keeps_config(self):
         result = self.run_shell('main uninstall --yes')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -544,6 +680,7 @@ esac
             'service-stage': Path(str(self.service) + '.new'),
             'config-backup': Path(str(self.config) + '.bak'),
             'config-backup-stage': Path(str(self.config) + '.bak.new'),
+            'version-stage': self.config_dir / 'version.new',
             'backup-list-stage': Path(str(self.backup) + '.needle.tmp'),
             'binary-restore': Path(str(self.binary) + '.needle-restore'),
             'config-restore': Path(str(self.config) + '.needle-restore'),
@@ -591,6 +728,7 @@ esac
             Path(str(self.config) + '.new'),
             Path(str(self.service) + '.new'),
             Path(str(self.config) + '.bak.new'),
+            self.config_dir / 'version.new',
             Path(str(self.backup) + '.needle.tmp'),
             Path(str(self.config) + '.needle-restore'),
         ]
@@ -711,10 +849,11 @@ main upgrade --version v9.9.9
         unrelated = self.config_dir / 'unrelated.txt'
         unrelated.write_text('user-owned configuration\n')
         (self.config_dir / 'version').write_text('v9.9.9\n')
+        (self.config_dir / 'version.new').write_text('incomplete version\n')
         Path(str(self.config) + '.bak').write_text('old token\n')
         result = self.run_shell('main uninstall --yes --purge')
         self.assertEqual(result.returncode, 0, result.stderr)
-        for path in [self.binary, self.service, self.config, Path(str(self.config) + '.bak'), self.config_dir / 'version']:
+        for path in [self.binary, self.service, self.config, Path(str(self.config) + '.bak'), self.config_dir / 'version', self.config_dir / 'version.new']:
             self.assertFalse(path.exists(), str(path))
         self.assertEqual(unrelated.read_text(), 'user-owned configuration\n')
         self.assertEqual(self.backup.read_text(), '/etc/custom/\n/etc/unrelated/\n')
@@ -745,7 +884,7 @@ main upgrade --version v9.9.9
         self.assertFalse(self.log.exists())
 
     def test_procd_and_yaml_quoting(self):
-        result = self.run_shell("write_service\nyaml_quote \"router's token: #1\"", mock_service=False)
+        result = self.run_shell("write_service\ntcping_yaml_quote \"router's token: #1\"", mock_service=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "'router''s token: #1'")
         service = self.service.read_text()

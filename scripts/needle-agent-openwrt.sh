@@ -42,7 +42,7 @@ cleanup() {
         fi
     fi
     if [ "$INSTALL_MUTATED" = true ]; then
-        rm -f "$BINARY.new" "$CONFIG.new" "$CONFIG.bak.new" "$SERVICE.new" "$BACKUP_LIST.needle.tmp"
+        rm -f "$BINARY.new" "$CONFIG.new" "$CONFIG.bak.new" "$CONFIG_DIR/version.new" "$SERVICE.new" "$BACKUP_LIST.needle.tmp"
         INSTALL_MUTATED=false
     fi
     if [ -n "$TMP_DIR" ] && [ "$KEEP_TMP" = false ]; then rm -rf "$TMP_DIR"; fi
@@ -88,12 +88,20 @@ lock_installer() {
 validate_paths() {
     [ ! -L "$CONFIG_DIR" ] || fail "Refusing symlink directory: $CONFIG_DIR"
     [ ! -e "$CONFIG_DIR" ] || [ -d "$CONFIG_DIR" ] || fail "Not a directory: $CONFIG_DIR"
+    if [ -d "$CONFIG_DIR" ]; then
+        # Check the directory before inspecting any child path: a non-root
+        # writer could otherwise swap a checked file for a symlink later.
+        # Numeric ls is available in minimal BusyBox builds without stat.
+        CONFIG_DIR_LISTING=$(LC_ALL=C ls -ldn "$CONFIG_DIR") || fail "Cannot inspect configuration directory: $CONFIG_DIR"
+        CONFIG_DIR_ACCESS=$(printf '%s\n' "$CONFIG_DIR_LISTING" | awk 'NR == 1 { print $3 ":" substr($1, 1, 1) ":" substr($1, 6, 1) ":" substr($1, 9, 1) }')
+        [ "$CONFIG_DIR_ACCESS" = '0:d:-:-' ] || fail "Unsafe configuration directory: $CONFIG_DIR must be owned by root and not writable by group or others. Inspect ownership and permissions before retrying."
+    fi
     for FILE in "$BINARY" "$CONFIG" "$CONFIG.bak" "$SERVICE" "$CONFIG_DIR/version" "$BACKUP_LIST"; do
         [ ! -L "$FILE" ] || fail "Refusing symlink: $FILE"
         [ ! -e "$FILE" ] || [ -f "$FILE" ] || fail "Not a regular file: $FILE"
     done
-    [ "${ACTION:-}" != uninstall ] || return 0
-    for FILE in "$BINARY.new" "$CONFIG.new" "$CONFIG.bak.new" "$SERVICE.new" "$BACKUP_LIST.needle.tmp" \
+    case "${ACTION:-}" in uninstall|status) return 0 ;; esac
+    for FILE in "$BINARY.new" "$CONFIG.new" "$CONFIG.bak.new" "$CONFIG_DIR/version.new" "$SERVICE.new" "$BACKUP_LIST.needle.tmp" \
         "$BINARY.needle-restore" "$CONFIG.needle-restore" "$CONFIG.bak.needle-restore" \
         "$SERVICE.needle-restore" "$CONFIG_DIR/version.needle-restore" "$BACKUP_LIST.needle-restore"; do
         [ ! -e "$FILE" ] && [ ! -L "$FILE" ] || fail "Staging/recovery path already exists; inspect it before retrying: $FILE"
@@ -133,11 +141,6 @@ fetch() {
 prompt() {
     printf '%s' "$1" >&2
     IFS= read -r ANSWER || fail 'Interactive input required; download the script and run it with sh.'
-}
-
-yaml_quote() {
-    # YAML single-quoted scalars escape apostrophes by doubling them.
-    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
 }
 
 preflight_resources() {
@@ -441,10 +444,10 @@ configure() {
     [ -d "$NETWORK_DIR/$IFACE" ] || fail "Interface $IFACE does not exist; connect WAN before installation."
     configure_tcping
     {
-        printf 'hostname: '; yaml_quote "$HOSTNAME"; printf '\nserver: '; yaml_quote "$SERVER_URL"
-        printf '\ntoken: '; yaml_quote "$TOKEN"; printf '\nserver_managed: true'
+        printf 'hostname: '; tcping_yaml_quote "$HOSTNAME"; printf '\nserver: '; tcping_yaml_quote "$SERVER_URL"
+        printf '\ntoken: '; tcping_yaml_quote "$TOKEN"; printf '\nserver_managed: true'
         printf '\ntls_skip_verify: false\nallow_plain_http: %s\ninterfaces: [' "$ALLOW_HTTP"
-        yaml_quote "$IFACE"; printf ']\n'
+        tcping_yaml_quote "$IFACE"; printf ']\n'
         cat "$TMP_DIR/intervals.yaml"
         cat "$TMP_DIR/tcpping.yaml"
     } > "$TMP_DIR/agent.yaml"
@@ -538,7 +541,7 @@ rollback_install() {
             rm -f "$FILE" || return 1
         fi
     done
-    rm -f "$BINARY.new"
+    rm -f "$BINARY.new" "$CONFIG_DIR/version.new"
     if [ "$SERVICE_TOUCHED" = true ] && [ -x "$SERVICE" ]; then
         if [ "$OLD_ENABLED" = true ]; then
             "$SERVICE" enable || return 1
@@ -576,11 +579,12 @@ install_agent() {
     INSTALL_PENDING=true
     INSTALL_MUTATED=true
     mkdir -p "$CONFIG_DIR"
-    # Keep existing directory permissions; it may contain user-owned files.
-    # New directories inherit umask 077, and Agent configs are always 0600.
+    # Existing directories have passed the root-only writer check above.
+    # Keep their permissions; new directories inherit umask 077.
     # Stage on the destination filesystem before stopping the old process.
     cp "$TMP_DIR/needle-agent" "$BINARY.new"
     chmod 755 "$BINARY.new"
+    (set -C; printf '%s\n' "$VERSION" > "$CONFIG_DIR/version.new")
     if [ "${UPGRADE_RECONFIGURE:-false}" = true ]; then
         cp -p "$CONFIG" "$CONFIG.bak.new"
         chmod 600 "$CONFIG.bak.new"
@@ -608,7 +612,7 @@ install_agent() {
         sleep 1
         "$SERVICE" running >/dev/null 2>&1 || fail 'Agent did not stay running; check logread -e needle-agent.'
     fi
-    printf '%s\n' "$VERSION" > "$CONFIG_DIR/version"
+    mv -f "$CONFIG_DIR/version.new" "$CONFIG_DIR/version"
     INSTALL_PENDING=false
     echo "Installed $VERSION. Configuration: $CONFIG"
     echo 'Existing service running/autostart state was preserved; a new installation starts at boot.'
@@ -653,7 +657,7 @@ uninstall_agent() {
     if [ -x "$SERVICE" ]; then stop_agent; "$SERVICE" disable; fi
     remove_boot_links
     rm -f "$SERVICE" "$SERVICE.new" "$SERVICE.needle-restore" "$BINARY" "$BINARY.new" "$BINARY.needle-restore" \
-        "$CONFIG_DIR/version" "$CONFIG_DIR/version.needle-restore"
+        "$CONFIG_DIR/version" "$CONFIG_DIR/version.new" "$CONFIG_DIR/version.needle-restore"
     if [ "$PURGE" = true ]; then
         rm -f "$CONFIG" "$CONFIG.new" "$CONFIG.bak" "$CONFIG.bak.new" "$CONFIG.needle-restore" "$CONFIG.bak.needle-restore"
         if [ -d "$CONFIG_DIR" ] && ! rmdir "$CONFIG_DIR" 2>/dev/null; then
@@ -707,6 +711,7 @@ main() {
         install|upgrade) install_agent ;;
         uninstall) uninstall_agent ;;
         status)
+            validate_paths
             if [ -f "$CONFIG_DIR/version" ]; then printf 'Version: '; cat "$CONFIG_DIR/version"; fi
             echo "Config: $CONFIG"
             [ -x "$SERVICE" ] || fail 'Service is not installed.'

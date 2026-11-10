@@ -520,6 +520,8 @@ Root owns the installation; service user: `needle-agent`. Logs use system journa
 
 Normal uninstall keeps YAML; `--purge` removes it. Router logs clear on reboot.
 
+`/etc/needle/` must be owned by root with no group / other write access (new installs: `700`). YAML and version files use `600`. Unsafe directories are rejected before operations.
+
 </details>
 
 ## Configuration

@@ -1,17 +1,14 @@
-# v0.7.17 — Report admission and installer safety
+# v0.7.18 — OpenWrt installer safety and cleanup
 
-- Authenticate and rate-limit realtime reports before reading their bodies;
-  reject unauthenticated slow uploads promptly.
-- Verify exclusive service UIDs and groups for Linux Server and Agent installs
-  and upgrades, including primary group memberships and numeric aliases.
-- Refuse Agent uninstall when a service group has no matching user or identity
-  lookup fails, before stopping services, deleting files, or revoking Tokens.
-- Quote Linux Agent registration commands and new YAML Tokens so shell and
-  YAML special characters preserve their literal value.
-- Use the digest returned by the current Docker push for image publication;
-  retain serialized, current-main-only promotion of tested images to latest.
-- Simplify README operations and replace specific node examples with placeholders.
+- Reject OpenWrt / ImmortalWrt configuration directories not owned by root or
+  writable by group or others before installation, upgrades, removal or status.
+- Safely stage and atomically replace the installed version file so symbolic
+  links and hardlinks cannot redirect version writes into other router files.
+- Include version staging in preflight checks, rollback and uninstall cleanup;
+  preserve existing configuration, Tokens and service state on failure.
+- Reuse one YAML quoting function in the OpenWrt installer and remove the old
+  Makefile packaging target; release archives use the verified Release workflow.
+- Document OpenWrt directory and file permissions in README.
 
-Upgrade the Server to apply realtime admission protection. Download the current
-Linux installers for install, upgrade, and removal safeguards. Existing Agent
-configuration and Tokens remain unchanged with `upgrade --keep-config`.
+Download the current OpenWrt installer to apply these safeguards. No Agent YAML
+or Token changes are required. Monitoring and traffic accounting are unchanged.
