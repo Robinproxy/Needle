@@ -753,7 +753,7 @@ cmd_install() {
   cat > "$TMP_DIR/agent.yaml" <<YAML
 hostname: "${HOSTNAME}"
 server: ${SERVER_URL}
-token: ${TOKEN}
+token: $(tcping_yaml_quote "$TOKEN")
 server_managed: true
 tls_skip_verify: false
 allow_plain_http: ${ALLOW_PLAIN_HTTP}
@@ -775,14 +775,16 @@ YAML
   echo "========================================="
   echo
   echo ">>> IMPORTANT: allow this agent on the Server (whitelist) <<<"
-  echo "  Agent token: $TOKEN"
+  printf '  Agent token: %s\n' "$TOKEN"
+  local registration_token
+  registration_token=$(printf '%s' "$TOKEN" | sed "s/'/'\"'\"'/g")
   echo
   echo "  Binary Server:"
-  echo "    sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token $TOKEN"
+  printf "    sudo /opt/needle/bin/needle-server -db /opt/needle/data/needle.db allow-token '%s'\n" "$registration_token"
   echo
   echo "  Docker Server (in compose directory):"
   echo "    docker compose exec needle-server \\"
-  echo "      needle-server -db /data/needle.db allow-token $TOKEN"
+  printf "      needle-server -db /data/needle.db allow-token '%s'\n" "$registration_token"
   echo
   echo "  Hostname binds automatically on first successful report."
   echo "  Configure display name, region, billing and traffic allowance in $SERVER_URL/admin."

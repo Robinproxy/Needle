@@ -4,6 +4,7 @@
 The separate systemd integration test exercises real ownership and service UIDs.
 """
 from pathlib import Path
+import os
 import shlex
 import subprocess
 import tempfile
@@ -148,21 +149,56 @@ systemctl() {{
         self.assertTrue(self.enabled.exists())
         self.assertEqual(self.config.read_bytes(), self.original)
 
-    def test_fresh_install_asks_only_connection_and_collection_settings(self):
+    def install_with_token(self, token):
         for path in [self.config, self.binary, self.service, self.active, self.enabled]:
-            path.unlink()
-        result=self.run_shell('cmd_install', before='''
+            path.unlink(missing_ok=True)
+        return self.run_shell('cmd_install', before='''
 require_tty_for_install() { :; }
 read_prompt() { IFS= read -r "$1"; }
 download_release_agent() { VERSION=v9.9.9; }
 http_get() { printf '{"status":"ok"}'; }
-''', answers='machine\nhttps://needle.example.com\nunique-test-token\n\n\n5\n')
+''', answers=f'machine\nhttps://needle.example.com\n{token}\n\n\n5\n')
+
+    def test_fresh_install_asks_only_connection_and_collection_settings(self):
+        result = self.install_with_token('unique-test-token')
         self.assertEqual(result.returncode,0,result.stderr)
         config=self.config.read_text()
-        for line in ['server_managed: true','token: unique-test-token','interval: 30','realtime_interval: 5','tcpping: []']:
+        for line in ['server_managed: true',"token: 'unique-test-token'",'interval: 30','realtime_interval: 5','tcpping: []']:
             self.assertIn(line,config)
         for key in ['region:', 'billing_amount:', 'billing_period:', 'expires_at:', 'monthly_traffic_limit_gb:']:
             self.assertNotIn(key,config)
+
+    def test_registration_commands_preserve_special_tokens_without_shell_execution(self):
+        tokens = ['0123456789abcdef0123456789abcdef',
+                  'token;touch${IFS}injected', 'token$(touch${IFS}injected)',
+                  'token`touch${IFS}injected`', 'token\'"\\$value;#&|<>*?',
+                  "'quoted-token'", '#token', 'token\\c', '-leading-dash', '令牌-value']
+        expected = [
+            ['/opt/needle/bin/needle-server', '-db', '/opt/needle/data/needle.db', 'allow-token'],
+            ['compose', 'exec', 'needle-server', 'needle-server', '-db', '/data/needle.db', 'allow-token'],
+        ]
+        for token in tokens:
+            with self.subTest(token=token):
+                (self.root / 'injected').unlink(missing_ok=True)
+                result = self.install_with_token(token)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                output = result.stdout.replace('\\\n', '')
+                commands = [line.strip() for line in output.splitlines()
+                            if line.strip().startswith(('sudo /opt/needle/bin/needle-server ', 'docker compose exec '))]
+                self.assertEqual(len(commands), 2, result.stdout)
+                for index, command in enumerate(commands):
+                    captured = self.root / f'argv-{index}'
+                    environment = dict(os.environ, CAPTURE=str(captured))
+                    stub = r'''sudo() { printf '%s\0' "$@" > "$CAPTURE"; }
+docker() { printf '%s\0' "$@" > "$CAPTURE"; }
+'''
+                    copied = subprocess.run(['/bin/sh', '-c', stub + command], cwd=self.root,
+                                            env=environment, capture_output=True, text=True)
+                    self.assertEqual(copied.returncode, 0, copied.stderr)
+                    self.assertFalse((self.root / 'injected').exists(), 'Token was executed as shell code')
+                    arguments = captured.read_bytes().split(b'\0')[:-1]
+                    self.assertEqual([argument.decode() for argument in arguments], expected[index] + [token])
+                self.assertIn("token: '" + token.replace("'", "''") + "'\n", self.config.read_text())
 
     def test_upgrade_preserves_running_and_autostart_states(self):
         for active in [False, True]:
