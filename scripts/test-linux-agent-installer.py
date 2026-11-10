@@ -300,6 +300,103 @@ nologin() {{ :; }}
         self.assert_originals()
         self.assertNotIn('stop', self.log.read_text() if self.log.exists() else '')
 
+    def test_uninstall_refuses_orphan_group_before_any_changes(self):
+        for members in ['', 'other']:
+            for unregister in ['', '--unregister']:
+                with self.subTest(members=members, unregister=unregister):
+                    before = self.account_database(existing=False, members=members) + '''
+ACCOUNT_GROUP_PRESENT=true
+unregister_from_server() { echo unexpected-unregister >> "$TEST_ROOT/commands"; }
+'''
+                    result = self.run_shell(f'cmd_uninstall --yes {unregister}', before=before)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertTrue(self.config.exists(), 'Refused uninstall must retain the configuration and Token')
+                    self.assert_originals()
+                    self.assertFalse(self.log.exists())
+
+    def test_uninstall_refuses_shared_identity_before_any_changes(self):
+        before = self.account_database(extra_user='other:x:456:123::/home/other:/bin/sh')
+        result = self.run_shell('cmd_uninstall --yes', before=before)
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_originals()
+        self.assertFalse(self.log.exists())
+
+    def test_uninstall_refuses_failed_identity_lookup_before_any_changes(self):
+        for database in ['passwd', 'group']:
+            with self.subTest(database=database):
+                before = f'''
+getent() {{ [ "$1" != {shlex.quote(database)} ] && return 2; return 1; }}
+unregister_from_server() {{ echo unexpected-unregister >> "$TEST_ROOT/commands"; }}
+userdel() {{ echo unexpected-userdel >> "$TEST_ROOT/commands"; return 1; }}
+groupdel() {{ echo unexpected-groupdel >> "$TEST_ROOT/commands"; return 1; }}
+'''
+                result = self.run_shell('cmd_uninstall --yes --unregister', before=before)
+                self.assertNotEqual(result.returncode, 0)
+                self.assert_originals()
+                self.assertFalse(self.log.exists())
+
+    def test_uninstall_removes_validated_account_and_handles_private_group_autodeletion(self):
+        for auto_group_delete in [False, True]:
+            with self.subTest(auto_group_delete=auto_group_delete):
+                self.log.unlink(missing_ok=True)
+                self.bindir.mkdir(parents=True, exist_ok=True)
+                self.config.write_bytes(self.original)
+                self.config.chmod(0o600)
+                self.binary.write_text('#!/bin/sh\nexit 0\n')
+                self.binary.chmod(0o755)
+                self.service.write_text('[Service]\nUser=needle-agent\n')
+                self.active.touch()
+                self.enabled.touch()
+                Path(str(self.config) + '.bak').write_bytes(self.original)
+                recovery = self.directory / 'recovery'
+                recovery.mkdir()
+                (recovery / 'old-config').write_bytes(self.original)
+                before = self.account_database() + f'''
+userdel() {{
+  echo userdel >> "$TEST_ROOT/commands"
+  ACCOUNT_USER_PRESENT=false
+  {'ACCOUNT_GROUP_PRESENT=false' if auto_group_delete else ':'}
+}}
+groupdel() {{ echo groupdel >> "$TEST_ROOT/commands"; ACCOUNT_GROUP_PRESENT=false; }}
+'''
+                result = self.run_shell('cmd_uninstall --yes\ncmd_uninstall --yes', before=before)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(self.directory.exists())
+                self.assertFalse(self.service.exists())
+                self.assertFalse(self.active.exists())
+                self.assertFalse(self.enabled.exists())
+                commands = self.log.read_text().splitlines()
+                self.assertEqual(commands.count('userdel'), 1)
+                self.assertEqual(commands.count('groupdel'), 0 if auto_group_delete else 1)
+                self.assertNotIn('unexpected-unregister', commands)
+
+    def test_unregister_failure_retains_validated_installation(self):
+        before = self.account_database() + '''
+unregister_from_server() { echo unregister >> "$TEST_ROOT/commands"; return 1; }
+'''
+        result = self.run_shell('cmd_uninstall --yes --unregister', before=before)
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_originals()
+        self.assertEqual(self.log.read_text().splitlines(), ['unregister'])
+
+    def test_legacy_root_uninstall_does_not_delete_identity_created_after_preflight(self):
+        before = self.account_database(existing=False) + '''
+systemctl() {
+  echo "$*" >> "$TEST_ROOT/commands"
+  case "$1" in
+    stop) rm -f "$TEST_ROOT/active"; ACCOUNT_USER_PRESENT=true; ACCOUNT_GROUP_PRESENT=true ;;
+    disable) rm -f "$TEST_ROOT/enabled" ;;
+  esac
+}
+'''
+        result = self.run_shell('cmd_uninstall --yes', before=before)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.directory.exists())
+        self.assertFalse(self.service.exists())
+        commands = self.log.read_text()
+        self.assertNotIn('userdel', commands)
+        self.assertNotIn('groupdel', commands)
+
 
 if __name__ == '__main__':
     unittest.main()

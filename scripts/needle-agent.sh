@@ -861,8 +861,21 @@ cmd_uninstall() {
   fi
 
   require_linux_runtime
-  if getent passwd "$AGENT_USER" >/dev/null; then
+  local remove_account=false passwd_status=0 group_status=0
+  getent passwd "$AGENT_USER" >/dev/null || passwd_status=$?
+  getent group "$AGENT_GROUP" >/dev/null || group_status=$?
+  # getent returns 2 for a missing key. Other lookup failures cannot establish
+  # ownership and must abort before revocation, stopping services or deletion.
+  case "$passwd_status:$group_status" in
+    0:0|0:2|2:0|2:2) ;;
+    *) echo 'ERROR: cannot verify the Agent account/group; local installation retained.' >&2; exit 1 ;;
+  esac
+  if [ "$passwd_status" -eq 0 ]; then
     validate_agent_account || { echo 'ERROR: refusing to remove an unrelated needle-agent account.' >&2; exit 1; }
+    remove_account=true
+  elif [ "$group_status" -eq 0 ]; then
+    echo 'ERROR: needle-agent group has no matching service user; refusing to remove it. Local installation retained.' >&2
+    exit 1
   fi
 
   if [ "$do_unregister" = true ]; then
@@ -877,8 +890,11 @@ cmd_uninstall() {
 
   echo "Removing $INSTALL_DIR ..."
   rm -rf "$INSTALL_DIR"
-  if getent passwd "$AGENT_USER" >/dev/null; then userdel "$AGENT_USER"; fi
-  if getent group "$AGENT_GROUP" >/dev/null; then groupdel "$AGENT_GROUP"; fi
+  if [ "$remove_account" = true ]; then
+    if getent passwd "$AGENT_USER" >/dev/null; then userdel "$AGENT_USER"; fi
+    # userdel may already remove the private primary group.
+    if getent group "$AGENT_GROUP" >/dev/null; then groupdel "$AGENT_GROUP"; fi
+  fi
 
   echo
   echo "========================================="
