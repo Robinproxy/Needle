@@ -338,17 +338,15 @@ nologin() {{ :; }}
 
     def test_uninstall_refuses_orphan_group_before_any_changes(self):
         for members in ['', 'other']:
-            for unregister in ['', '--unregister']:
-                with self.subTest(members=members, unregister=unregister):
-                    before = self.account_database(existing=False, members=members) + '''
+            with self.subTest(members=members):
+                before = self.account_database(existing=False, members=members) + '''
 ACCOUNT_GROUP_PRESENT=true
-unregister_from_server() { echo unexpected-unregister >> "$TEST_ROOT/commands"; }
 '''
-                    result = self.run_shell(f'cmd_uninstall --yes {unregister}', before=before)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertTrue(self.config.exists(), 'Refused uninstall must retain the configuration and Token')
-                    self.assert_originals()
-                    self.assertFalse(self.log.exists())
+                result = self.run_shell('cmd_uninstall --yes', before=before)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(self.config.exists(), 'Refused uninstall must retain the configuration and Token')
+                self.assert_originals()
+                self.assertFalse(self.log.exists())
 
     def test_uninstall_refuses_shared_identity_before_any_changes(self):
         before = self.account_database(extra_user='other:x:456:123::/home/other:/bin/sh')
@@ -362,11 +360,10 @@ unregister_from_server() { echo unexpected-unregister >> "$TEST_ROOT/commands"; 
             with self.subTest(database=database):
                 before = f'''
 getent() {{ [ "$1" != {shlex.quote(database)} ] && return 2; return 1; }}
-unregister_from_server() {{ echo unexpected-unregister >> "$TEST_ROOT/commands"; }}
 userdel() {{ echo unexpected-userdel >> "$TEST_ROOT/commands"; return 1; }}
 groupdel() {{ echo unexpected-groupdel >> "$TEST_ROOT/commands"; return 1; }}
 '''
-                result = self.run_shell('cmd_uninstall --yes --unregister', before=before)
+                result = self.run_shell('cmd_uninstall --yes', before=before)
                 self.assertNotEqual(result.returncode, 0)
                 self.assert_originals()
                 self.assertFalse(self.log.exists())
@@ -404,16 +401,33 @@ groupdel() {{ echo groupdel >> "$TEST_ROOT/commands"; ACCOUNT_GROUP_PRESENT=fals
                 commands = self.log.read_text().splitlines()
                 self.assertEqual(commands.count('userdel'), 1)
                 self.assertEqual(commands.count('groupdel'), 0 if auto_group_delete else 1)
-                self.assertNotIn('unexpected-unregister', commands)
 
-    def test_unregister_failure_retains_validated_installation(self):
-        before = self.account_database() + '''
-unregister_from_server() { echo unregister >> "$TEST_ROOT/commands"; return 1; }
+    def test_removed_unregister_option_is_rejected_before_any_changes(self):
+        dispatch = SCRIPT.read_text().split('# --- main ---', 1)[1]
+        before = '''
+require_linux_runtime() { echo unexpected-runtime >> "$TEST_ROOT/commands"; return 1; }
 '''
-        result = self.run_shell('cmd_uninstall --yes --unregister', before=before)
-        self.assertNotEqual(result.returncode, 0)
-        self.assert_originals()
-        self.assertEqual(self.log.read_text().splitlines(), ['unregister'])
+        for command in ['install', 'upgrade', 'uninstall', 'status']:
+            with self.subTest(command=command):
+                result = self.run_shell(f'set -- {command} --unregister\n{dispatch}', before=before)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Unknown', result.stdout + result.stderr)
+                self.assertIn('--unregister', result.stdout + result.stderr)
+                self.assert_originals()
+                self.assertFalse(self.log.exists())
+
+    def test_uninstall_does_not_execute_agent_or_contact_server(self):
+        self.binary.write_text(f'#!/bin/sh\necho unexpected-agent-execution >> {shlex.quote(str(self.log))}\nexit 1\n')
+        before = self.account_database() + '''
+http_get() { echo unexpected-network >> "$TEST_ROOT/commands"; return 1; }
+userdel() { ACCOUNT_USER_PRESENT=false; }
+groupdel() { ACCOUNT_GROUP_PRESENT=false; }
+'''
+        result = self.run_shell('cmd_uninstall --yes', before=before)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.directory.exists())
+        self.assertFalse(self.service.exists())
+        self.assertNotIn('unexpected-', self.log.read_text())
 
     def test_legacy_root_uninstall_does_not_delete_identity_created_after_preflight(self):
         before = self.account_database(existing=False) + '''

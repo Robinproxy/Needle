@@ -1,14 +1,15 @@
-# v0.7.18 — OpenWrt installer safety and cleanup
+# v0.7.19 — Keep credential management on the Server
 
-- Reject OpenWrt / ImmortalWrt configuration directories not owned by root or
-  writable by group or others before installation, upgrades, removal or status.
-- Safely stage and atomically replace the installed version file so symbolic
-  links and hardlinks cannot redirect version writes into other router files.
-- Include version staging in preflight checks, rollback and uninstall cleanup;
-  preserve existing configuration, Tokens and service state on failure.
-- Reuse one YAML quoting function in the OpenWrt installer and remove the old
-  Makefile packaging target; release archives use the verified Release workflow.
-- Document OpenWrt directory and file permissions in README.
+- Remove Agent self-revocation and the public `/api/unregister` endpoint.
+  Manage credentials with the Server administrator's `revoke-token` command;
+  `delete-agent` remains the separate operation for deleting node data.
+- Remove remote revocation from Linux and OpenWrt / ImmortalWrt installers.
+  Uninstall only cleans local services, files and service identities, and no
+  longer depends on Server connectivity.
+- Retain `/api/report-capabilities` for historical report deduplication and
+  retry negotiation; remove only its self-revocation capability field.
+- Update uninstall commands and credential management guidance in README.
 
-Download the current OpenWrt installer to apply these safeguards. No Agent YAML
-or Token changes are required. Monitoring and traffic accounting are unchanged.
+Upgrade the Server to disable the endpoint for existing Agents as well. Download
+the current installer for local-only removal. Agent upgrades can keep their YAML
+and Token; collection, reporting and traffic accounting are unchanged.

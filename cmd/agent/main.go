@@ -79,7 +79,6 @@ var Version = "dev"
 var BuildCommit = "unknown"
 
 func main() {
-	unregister := flag.Bool("unregister", false, "unregister this agent from server and exit")
 	checkConfig := flag.Bool("check-config", false, "validate configuration without collecting metrics or contacting the server")
 	showVersion := flag.Bool("version", false, "show binary version and source commit")
 	installerProtocol := flag.Bool("installer-protocol", false, "show supported installer protocol")
@@ -91,9 +90,6 @@ func main() {
 	if *installerProtocol {
 		fmt.Println("needle-install-v2 persistent-report-v1 realtime-v1 server-profiles-v1")
 		return
-	}
-	if *unregister && *checkConfig {
-		logging.Fatal("agent", "arguments_invalid", fmt.Errorf("choose either -unregister or -check-config"))
 	}
 
 	cfgPath := "agent.yaml"
@@ -138,15 +134,6 @@ func main() {
 		hostname, _ = os.Hostname()
 	}
 
-	if *unregister {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := reporter.Unregister(ctx, hostname); err != nil {
-			logging.Fatal("agent", "unregister_failed", err)
-		}
-		logging.Print("INFO", "agent", "unregistered")
-		return
-	}
 	if err := cfg.validateProbesAndInterval(); err != nil {
 		logging.Fatal("agent", "config_invalid", err)
 	}

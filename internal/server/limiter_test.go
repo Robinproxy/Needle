@@ -36,8 +36,4 @@ func TestTokenLimiter(t *testing.T) {
 	if !limiter.Allow(1, now.Add(time.Second)) {
 		t.Fatal("token limiter did not reset after one second")
 	}
-	limiter.Delete(1)
-	if !limiter.Allow(1, now) {
-		t.Fatal("deleted limiter entry was not reset")
-	}
 }

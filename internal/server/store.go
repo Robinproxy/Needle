@@ -429,36 +429,28 @@ func (s *Store) BindToken(token, hostname string) error {
 // RevokeToken revokes only this credential; deleting monitoring data is an
 // explicit, separate local administrator operation (DeleteAgent).
 func (s *Store) RevokeToken(token string) error {
-	_, err := s.revokeToken(token, "")
-	return err
-}
-
-func (s *Store) revokeToken(token, requiredHost string) (int64, error) {
+	token = strings.TrimSpace(token)
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer tx.Rollback()
-	var id int64
-	var hostname sql.NullString
-	err = tx.QueryRow(`SELECT id,hostname FROM agent_tokens WHERE token=?`, strings.TrimSpace(token)).Scan(&id, &hostname)
-	if err == sql.ErrNoRows {
-		return 0, ErrTokenNotFound
-	}
+	result, err := tx.Exec(`DELETE FROM agent_tokens WHERE token=?`, token)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if requiredHost != "" && (!hostname.Valid || hostname.String != requiredHost) {
-		return 0, ErrTokenNotFound
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
 	}
-	if _, err = tx.Exec(`DELETE FROM agent_tokens WHERE token=?`, token); err != nil {
-		return 0, err
+	if affected == 0 {
+		return ErrTokenNotFound
 	}
 	if err = bumpAdminRevision(tx); err != nil {
-		return 0, err
+		return err
 	}
 	if err = tx.Commit(); err != nil {
-		return 0, err
+		return err
 	}
 	s.live.mu.Lock()
 	for agentID, entry := range s.live.nodes {
@@ -467,7 +459,7 @@ func (s *Store) revokeToken(token, requiredHost string) (int64, error) {
 		}
 	}
 	s.live.mu.Unlock()
-	return id, nil
+	return nil
 }
 
 func (s *Store) ListTokens() ([]TokenRow, error) {

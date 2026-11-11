@@ -473,7 +473,7 @@ main upgrade --version v9.9.9
         before = {path: (path.read_bytes(), path.stat().st_mode & 0o777)
                   for path in [self.binary, self.config, self.service]}
         actions = ['install', 'upgrade --keep-config', 'uninstall --yes',
-                   'uninstall --yes --purge --unregister', 'status']
+                   'uninstall --yes --purge', 'status']
         for mode in [0o770, 0o707, 0o777, 0o1777]:
             self.config_dir.chmod(mode)
             for action in actions:
@@ -598,37 +598,29 @@ main upgrade --keep-config --version v9.9.9
         self.assertFalse(self.service.exists())
         self.assertEqual([line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')], ['stop','disable'])
 
-    def test_failed_unregister_restores_service(self):
-        self.binary.write_text('#!/bin/sh\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1 server-profiles-v1\"; exit 0; fi\nexit 1\n')
-        result = self.run_shell('main uninstall --yes --unregister')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertTrue(self.binary.exists())
-        self.assertTrue(self.config.exists())
-        self.assertEqual([line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')], ['stop','start'])
-
-    def test_failed_unregister_does_not_start_previously_stopped_service(self):
-        self.binary.write_text('#!/bin/sh\nif [ \"$1\" = -installer-protocol ]; then echo \"needle-install-v2 persistent-report-v1 realtime-v1 server-profiles-v1\"; exit 0; fi\nexit 1\n')
-        self.service.write_text(f'''#!/bin/sh
-echo "$1" >> {shlex.quote(str(self.log))}
-case "$1" in running|enabled) exit 1 ;; esac
-''')
-        result = self.run_shell('main uninstall --yes --unregister')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertTrue(self.binary.exists())
-        self.assertTrue(self.config.exists())
-        self.assertNotIn('start', self.log.read_text().splitlines())
-        self.assertFalse(self.lock.exists())
-
-    def test_interrupted_unregister_restores_original_running_state(self):
-        self.binary.write_text('#!/bin/sh\nif [ "$1" = -installer-protocol ]; then echo "needle-install-v2 persistent-report-v1 realtime-v1 server-profiles-v1"; exit 0; fi\nkill -TERM "$PPID"\nsleep 0.1\nexit 1\n')
+    def test_removed_unregister_option_is_rejected_before_any_changes(self):
         before = {path: path.read_bytes() for path in [self.binary, self.config, self.service]}
-        result = self.run_shell('main uninstall --yes --unregister')
-        self.assertNotEqual(result.returncode, 0)
-        for path, content in before.items():
-            self.assertEqual(path.read_bytes(), content, str(path))
-        actions = [line for line in self.log.read_text().splitlines() if line not in ('running', 'enabled')]
-        self.assertEqual(actions, ['stop', 'start'])
-        self.assertFalse(self.lock.exists())
+        for action in ['install', 'upgrade', 'uninstall --yes --purge', 'status']:
+            with self.subTest(action=action):
+                result = self.run_shell('main ' + action + ' --unregister')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Unknown option: --unregister', result.stderr)
+                for path, content in before.items():
+                    self.assertEqual(path.read_bytes(), content, str(path))
+                self.assertFalse(self.log.exists())
+                self.assertFalse(self.lock.exists())
+
+    def test_uninstall_does_not_execute_agent_or_contact_server(self):
+        self.binary.write_text(f'#!/bin/sh\necho unexpected-agent-execution >> {shlex.quote(str(self.log))}\nexit 1\n')
+        result = self.run_shell('''
+fetch() { echo unexpected-network >> "$SERVICE.log"; return 1; }
+main uninstall --yes --purge
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.config.exists())
+        self.assertFalse(self.binary.exists())
+        self.assertFalse(self.service.exists())
+        self.assertNotIn('unexpected-', self.log.read_text())
 
 
     def test_uninstall_waits_for_process_exit_before_disabling_and_removing(self):

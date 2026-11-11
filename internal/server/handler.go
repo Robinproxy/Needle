@@ -118,7 +118,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/report-capabilities", h.handleReportCapabilities)
 	mux.HandleFunc("/api/realtime", h.handleRealtime)
 	mux.HandleFunc("/api/events", h.handleEvents)
-	mux.HandleFunc("/api/unregister", h.handleUnregister)
 	mux.HandleFunc("/api/health", h.handleHealth)
 	mux.HandleFunc("/api/info", h.handleInfo)
 	mux.HandleFunc("/api/agents", h.handleAgents)
@@ -197,48 +196,6 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		info["cost_display"] = status.costDisplay
 	}
 	json.NewEncoder(w).Encode(info)
-}
-
-func (h *Handler) handleUnregister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-
-	var req struct {
-		Hostname string `json:"hostname"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	token, ok := bearerToken(r)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if req.Hostname == "" {
-		http.Error(w, "hostname required", http.StatusBadRequest)
-		return
-	}
-
-	h.fullMu.Lock()
-	id, err := h.store.revokeToken(token, req.Hostname)
-	h.fullMu.Unlock()
-	if err != nil {
-		if errors.Is(err, ErrTokenNotFound) {
-			http.Error(w, "unauthorized", 401)
-		} else {
-			http.Error(w, "internal error", 500)
-		}
-		return
-	}
-	h.tokenLimiter.Delete(id)
-	h.realtimeLimiter.Delete(id)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // Do not let net/http drain a slow, unread HTTP/1 body after rejecting it.
@@ -621,5 +578,5 @@ func (h *Handler) handleReportCapabilities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"protocol": reportProtocol, "max_report_age_seconds": int(reportAcceptAge.Seconds()), "unregister_retains_history": true})
+	json.NewEncoder(w).Encode(map[string]any{"protocol": reportProtocol, "max_report_age_seconds": int(reportAcceptAge.Seconds())})
 }

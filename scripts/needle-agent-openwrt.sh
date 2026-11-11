@@ -19,22 +19,14 @@ TMP_DIR=
 VERSION=
 YES=false
 PURGE=false
-UNREGISTER=false
 INSTALL_PENDING=false
 INSTALL_MUTATED=false
 SERVICE_TOUCHED=false
-UNREGISTER_PENDING=false
 KEEP_TMP=false
 UPGRADE_CONFIG_MODE=ask
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() {
-    if [ "$UNREGISTER_PENDING" = true ]; then
-        UNREGISTER_PENDING=false
-        if [ "$UNREGISTER_WAS_RUNNING" = true ] && [ -x "$SERVICE" ]; then
-            "$SERVICE" start || echo 'ERROR: could not restart the retained Agent.' >&2
-        fi
-    fi
     if [ "$INSTALL_PENDING" = true ]; then
         if ! rollback_install; then
             KEEP_TMP=true
@@ -64,7 +56,6 @@ Usage: sh needle-agent-openwrt.sh [install|upgrade|status|uninstall] [options]
   --reconfigure    Upgrade and reselect probes and intervals; preserve token
   --version vX.Y.Z  Install a specific release (default: latest stable)
   --configure-intervals  Upgrade and change only realtime/history intervals
-  --unregister     With uninstall: revoke this Agent credential; keep Server data
   --purge          With uninstall: also delete local configuration
   -y, --yes        Skip uninstall confirmation
 Installation requires an interactive terminal. Interactive upgrades offer a config choice;
@@ -642,18 +633,6 @@ uninstall_agent() {
     # Only dedicated Needle paths are touched; never follow a symlink into
     # another router component or recursively remove a shared directory.
     validate_paths
-    if [ "$UNREGISTER" = true ]; then
-        [ -x "$BINARY" ] && [ -f "$CONFIG" ] || fail 'Binary and configuration are needed to unregister.'
-        "$BINARY" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 ' || fail 'Upgrade Server and Agent before --unregister; older Agents may delete Server history. Plain local uninstall remains available.'
-        UNREGISTER_WAS_RUNNING=false
-        if [ -x "$SERVICE" ] && "$SERVICE" running >/dev/null 2>&1; then UNREGISTER_WAS_RUNNING=true; fi
-        UNREGISTER_PENDING=true
-        if [ -x "$SERVICE" ]; then stop_agent; fi
-        if ! "$BINARY" -unregister "$CONFIG"; then
-            fail 'Unregister failed; local installation retained and previous running state will be restored.'
-        fi
-        UNREGISTER_PENDING=false
-    fi
     if [ -x "$SERVICE" ]; then stop_agent; "$SERVICE" disable; fi
     remove_boot_links
     rm -f "$SERVICE" "$SERVICE.new" "$SERVICE.needle-restore" "$BINARY" "$BINARY.new" "$BINARY.needle-restore" \
@@ -670,14 +649,13 @@ uninstall_agent() {
             mv -f "$BACKUP_LIST.needle.tmp" "$BACKUP_LIST"
         fi
     fi
-    echo 'Agent removed. Server history is retained; --unregister only revokes this credential.'
+    echo 'Agent removed locally. Server credentials and node data are retained.'
 }
 
 main() {
     VERSION=
     YES=false
     PURGE=false
-    UNREGISTER=false
     UPGRADE_RECONFIGURE=false
     SERVICE_TOUCHED=false
     KEEP_TMP=false
@@ -694,13 +672,12 @@ main() {
             --version) [ "$#" -ge 2 ] || fail '--version needs a value.'; VERSION=$2; shift ;;
             -y|--yes) YES=true ;;
             --purge) PURGE=true ;;
-            --unregister) UNREGISTER=true ;;
             *) fail "Unknown option: $1" ;;
         esac
         shift
     done
-    if [ "$ACTION" != uninstall ] && { [ "$PURGE" = true ] || [ "$UNREGISTER" = true ] || [ "$YES" = true ]; }; then
-        fail '--purge, --unregister and --yes are only valid with uninstall.'
+    if [ "$ACTION" != uninstall ] && { [ "$PURGE" = true ] || [ "$YES" = true ]; }; then
+        fail '--purge and --yes are only valid with uninstall.'
     fi
     if [ "$UPGRADE_CONFIG_MODE" != ask ] && [ "$ACTION" != upgrade ]; then
         fail '--keep-config, --reconfigure and --configure-intervals are only valid with upgrade.'

@@ -39,6 +39,8 @@ with tempfile.TemporaryDirectory(prefix='needle-artifact-') as temp:
         assert subprocess.check_output(command+['-installer-protocol'],text=True).startswith('needle-install-v2 ')
     config=folder/'verify.yaml';config.write_text('hostname: artifact-check\nserver: http://127.0.0.1:8008\ntoken: artifact-test-only\nrealtime_interval: 5\ninterval: 30\nhistory_queue_capacity: 64\nhistory_retry_max_age_seconds: 1800\nserver_managed: true\ntcpping: []\n')
     subprocess.run(shlex.split(a.agent_runner)+[str(folder/'needle-agent'),'-check-config',str(config)],check=True)
+    removed=subprocess.run(shlex.split(a.agent_runner)+[str(folder/'needle-agent'),'-unregister',str(config)],capture_output=True,text=True,timeout=10)
+    assert removed.returncode==2 and 'flag provided but not defined: -unregister' in removed.stderr,'Agent still accepts remote credential management'
     if (folder/'needle-server').exists():
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         proc=subprocess.Popen(shlex.split(a.server_runner)+[str(folder/'needle-server'),'-l',f'127.0.0.1:{port}','-db',str(folder/'check.db')],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
@@ -50,6 +52,12 @@ with tempfile.TemporaryDirectory(prefix='needle-artifact-') as temp:
                     assert sha(script)==manifest['app_js_sha256'],'embedded frontend differs from manifest/source';break
                 except (OSError,urllib.error.URLError):time.sleep(.1)
             else:raise RuntimeError('packaged Server startup timeout')
+            try:
+                with urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{port}/api/unregister',data=b'{}',method='POST'),timeout=2):pass
+            except urllib.error.HTTPError as error:
+                error.close()
+                assert error.code==404,'packaged Server exposes remote credential management'
+            else:raise AssertionError('packaged Server still accepts unregister')
         finally:
             proc.terminate()
             try:proc.wait(timeout=10)

@@ -15,7 +15,7 @@ import (
 )
 
 const redirectTestToken = "redirect-test-token"
-const redirectTestReply = `{"protocol":"persistent-report-v1","report_id":"redirect-report","unregister_retains_history":true}`
+const redirectTestReply = `{"protocol":"persistent-report-v1","report_id":"redirect-report"}`
 
 type redirectOperation struct {
 	name, path string
@@ -32,7 +32,6 @@ func redirectOperations(t *testing.T) []redirectOperation {
 		}
 		return s.Send(context.Background(), &ReportData{Hostname: "node", CreatedAt: time.Now().Unix(), ReportID: "redirect-report"})
 	}
-	unregister := func(r *Reporter) error { return r.Unregister(context.Background(), "node") }
 	return []redirectOperation{
 		{"realtime", "/api/realtime", func(r *Reporter) error {
 			return r.SendRealtime(context.Background(), &RealtimeData{Hostname: "node"})
@@ -42,8 +41,6 @@ func redirectOperations(t *testing.T) []redirectOperation {
 		}},
 		{"history capabilities", "/api/report-capabilities", history},
 		{"history report", "/api/report", history},
-		{"unregister capabilities", "/api/report-capabilities", unregister},
-		{"unregister", "/api/unregister", unregister},
 	}
 }
 

@@ -296,22 +296,20 @@ sudo systemctl start needle-agent
 
 ### Uninstall
 
-**Delete all local Agent files and Token without confirmation:**
+**Remove the Agent and its local configuration without confirmation:**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh uninstall --yes && rm -f /tmp/needle-agent.sh
 ```
 
-Local uninstall keeps Server data. Choose `--unregister` to revoke the Server credential:
-
 ```sh
-# Local uninstall; retain the Server credential and node history
+# Prompt before local removal
 sudo bash /tmp/needle-agent.sh uninstall
-# Revoke this credential on the Server, then uninstall locally; retain node history
-sudo bash /tmp/needle-agent.sh uninstall --unregister
 ```
 
-Use Server `delete-agent` to remove the node and history. The empty installer lock remains until reboot; journal retention is managed by systemd.
+Uninstall is local only and does not require a reachable Server. It retains the Server credential and node data. On the Server, use `revoke-token YOUR_TOKEN` to revoke the credential while keeping data, or `delete-agent HOSTNAME_OR_ID` to delete the node and history.
+
+The empty installer lock remains until reboot; journal retention is managed by systemd.
 
 </details>
 
@@ -363,7 +361,7 @@ Reconfiguration keeps Token / identity and backs up YAML to `agent.yaml.bak`. In
 
 ### Uninstall and firmware upgrades
 
-**Delete all local Agent files and Token without confirmation:**
+**Remove the Agent and its local configuration without confirmation:**
 
 ```sh
 wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh uninstall --purge --yes && rm -f /tmp/needle-agent-openwrt.sh
@@ -376,11 +374,9 @@ Other uninstall modes — choose one:
 sh /tmp/needle-agent-openwrt.sh uninstall
 # Also delete local configuration and Needle's firmware-backup entry
 sh /tmp/needle-agent-openwrt.sh uninstall --purge
-# Revoke the Server credential and remove all local Needle files; keep Server history
-sh /tmp/needle-agent-openwrt.sh uninstall --unregister --purge
 ```
 
-`--unregister` revokes the credential and keeps Server history; failure retains the local installation. System logs follow router retention.
+Uninstall is local only and does not require a reachable Server. It retains the Server credential and node data. On the Server, use `revoke-token YOUR_TOKEN` to revoke the credential while keeping data, or `delete-agent HOSTNAME_OR_ID` to delete the node and history. System logs follow router retention.
 
 Keeping firmware settings preserves `/etc/needle/`; reinstall the binary and service afterward. For lower load: `interval: 30` or longer, `realtime_interval: 0`, and `tcpping: []`.
 

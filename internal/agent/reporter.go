@@ -122,30 +122,3 @@ func (r *Reporter) send(ctx context.Context, path string, data any) error {
 	}
 	return readReportResponse(resp)
 }
-
-func (r *Reporter) Unregister(ctx context.Context, hostname string) error {
-	// An older Server's unregister endpoint deleted monitoring history. Require
-	// explicit safe semantics before a new Agent calls it; old Agents remain
-	// compatible with the new Server endpoint.
-	reqCaps, err := http.NewRequestWithContext(ctx, http.MethodGet, r.serverURL+"/api/report-capabilities", nil)
-	if err != nil {
-		return err
-	}
-	reqCaps.Header.Set("Authorization", "Bearer "+r.token)
-	capsResp, err := r.client.Do(reqCaps)
-	if err != nil {
-		return err
-	}
-	var capability struct {
-		RetainsHistory bool `json:"unregister_retains_history"`
-	}
-	decoded := json.NewDecoder(io.LimitReader(capsResp.Body, maxResponseBytes)).Decode(&capability)
-	capsResp.Body.Close()
-	if capsResp.StatusCode != http.StatusOK || decoded != nil || !capability.RetainsHistory {
-		return fmt.Errorf("Server has not confirmed history-preserving unregister; upgrade Server first, or uninstall locally without unregister")
-	}
-	payload := struct {
-		Hostname string `json:"hostname"`
-	}{Hostname: hostname}
-	return r.send(ctx, "/api/unregister", payload)
-}

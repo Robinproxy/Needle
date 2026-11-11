@@ -160,3 +160,23 @@ func TestRevokeUnboundToken(t *testing.T) {
 		t.Fatalf("LookupToken error = %v, want ErrTokenNotFound", err)
 	}
 }
+
+func TestRevokeTokenIsSpecificAndMissingCredentialFails(t *testing.T) {
+	store := newTransactionTestStore(t)
+	seed := seedAgentForDelete(t, store)
+	if err := store.AllowToken("other-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeToken(" \t" + seed.token + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{seed.token, "unknown-token", ""} {
+		if err := store.RevokeToken(token); !errors.Is(err, ErrTokenNotFound) {
+			t.Fatalf("missing credential: %v", err)
+		}
+	}
+	if _, err := store.LookupToken("other-token"); err != nil {
+		t.Fatal("revocation affected another credential", err)
+	}
+	assertAgentDataCounts(t, store, seed.id, 1, 1, 1, 1)
+}

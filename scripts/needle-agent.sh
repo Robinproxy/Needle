@@ -22,8 +22,6 @@ Commands:
   install              Interactive install (download + config + systemd)
   upgrade              Upgrade; choose keep config or reconfigure settings
   uninstall            Remove local agent only (default)
-  uninstall --unregister
-                       Call Server /api/unregister, then remove local agent
   status               Show install/service status
   help                 Show this help
 
@@ -36,14 +34,12 @@ Options:
   --reconfigure        With upgrade: reselect probes and intervals; preserve token
   --configure-intervals
                        With upgrade: change only realtime/history intervals
-  --unregister         With uninstall: revoke this Agent credential; keep Server data
 
 Examples:
   sudo bash needle-agent.sh
   sudo bash needle-agent.sh install
   sudo bash needle-agent.sh upgrade
   sudo bash needle-agent.sh uninstall
-  sudo bash needle-agent.sh uninstall --unregister
 EOF
 }
 
@@ -462,22 +458,6 @@ deploy_agent() (
   fi
 )
 
-unregister_from_server() {
-  if [ ! -x "$BIN_DIR/needle-agent" ] || [ ! -r "$AGENT_YAML" ]; then
-    echo 'ERROR: binary and configuration required to revoke this Agent credential. Local installation retained.' >&2
-    return 1
-  fi
-  if ! "$BIN_DIR/needle-agent" -installer-protocol 2>/dev/null | grep -q '^needle-install-v2 '; then
-    echo 'ERROR: upgrade Server and Agent before using --unregister; an older Agent may call the destructive legacy endpoint. Plain local uninstall remains available.' >&2
-    return 1
-  fi
-  if ! "$BIN_DIR/needle-agent" -unregister "$AGENT_YAML"; then
-    echo 'ERROR: unregister failed or safe Server semantics were not confirmed. Local installation retained; use plain uninstall only if credential revocation is not required.' >&2
-    return 1
-  fi
-  echo 'Agent credential revoked; Server monitoring data retained.'
-}
-
 tcping_prompt() { read_prompt TCPING_ANSWER "$1"; }
 
 # TCP Ping selection is deliberately explicit; no connectivity auto-detection.
@@ -679,6 +659,7 @@ choose_upgrade_config() {
 # End of TCP Ping selection.
 
 cmd_install() {
+  [ "$#" -eq 0 ] || { echo "Unknown install option: $1" >&2; exit 1; }
   require_root
   if [ -f "$AGENT_YAML" ]; then
     echo 'Existing configuration found; using the upgrade flow to preserve token and identity.'
@@ -799,8 +780,6 @@ cmd_upgrade() {
     echo "Run: sudo bash needle-agent.sh install"
     exit 1
   fi
-  require_linux_runtime
-
   UPGRADE_CONFIG_MODE=ask
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -813,6 +792,7 @@ cmd_upgrade() {
     esac
     shift
   done
+  require_linux_runtime
   download_release_agent
   choose_upgrade_config "$AGENT_YAML"
   if [ "$UPGRADE_RECONFIGURE" != true ]; then
@@ -838,10 +818,9 @@ cmd_upgrade() {
 cmd_uninstall() {
   require_root
 
-  local do_unregister=false yes=false
+  local yes=false
   while [ $# -gt 0 ]; do
     case "$1" in
-      --unregister) do_unregister=true; shift ;;
       -y|--yes) yes=true; shift ;;
       -h|--help) usage; exit 0 ;;
       *) echo "Unknown option: $1"; usage; exit 1 ;;
@@ -850,11 +829,7 @@ cmd_uninstall() {
 
   if [ "$yes" != true ]; then
     echo "This will stop needle-agent and remove $INSTALL_DIR"
-    if [ "$do_unregister" = true ]; then
-      echo "and also call Server /api/unregister (if config allows)."
-    else
-      echo "(local only; Server data is always kept; --unregister revokes this credential)"
-    fi
+    echo "Server credentials and node data are retained."
     read_prompt ans "Continue? [y/N] "
     case "$ans" in
       y|Y|yes|YES) ;;
@@ -867,7 +842,7 @@ cmd_uninstall() {
   getent passwd "$AGENT_USER" >/dev/null || passwd_status=$?
   getent group "$AGENT_GROUP" >/dev/null || group_status=$?
   # getent returns 2 for a missing key. Other lookup failures cannot establish
-  # ownership and must abort before revocation, stopping services or deletion.
+  # ownership and must abort before stopping services or deleting local files.
   case "$passwd_status:$group_status" in
     0:0|0:2|2:0|2:2) ;;
     *) echo 'ERROR: cannot verify the Agent account/group; local installation retained.' >&2; exit 1 ;;
@@ -878,10 +853,6 @@ cmd_uninstall() {
   elif [ "$group_status" -eq 0 ]; then
     echo 'ERROR: needle-agent group has no matching service user; refusing to remove it. Local installation retained.' >&2
     exit 1
-  fi
-
-  if [ "$do_unregister" = true ]; then
-    unregister_from_server
   fi
 
   echo "Stopping service..."
@@ -901,16 +872,14 @@ cmd_uninstall() {
   echo
   echo "========================================="
   echo " Needle Agent uninstalled (local)."
-  if [ "$do_unregister" = true ]; then
-    echo " Unregister was attempted against Server."
-  else
-    echo " Server node data was NOT removed."
-    echo " On Server: needle-server -db <path> delete-agent <hostname>"
-  fi
+  echo " Server credentials and node data are retained."
+  echo " On Server: needle-server -db <path> revoke-token <token>"
+  echo " Or delete the node and history: needle-server -db <path> delete-agent <hostname>"
   echo "========================================="
 }
 
 cmd_status() {
+  [ "$#" -eq 0 ] || { echo "Unknown status option: $1" >&2; exit 1; }
   echo "Install dir: $INSTALL_DIR"
   if [ -f "$AGENT_YAML" ]; then
     echo "Config:      $AGENT_YAML (present)"
@@ -957,9 +926,9 @@ case "${1:-}" in
 esac
 
 case "$CMD" in
-  install)   cmd_install; exit 0 ;;
+  install)   cmd_install "$@"; exit 0 ;;
   upgrade)   cmd_upgrade "$@"; exit 0 ;;
   uninstall) cmd_uninstall "$@"; exit 0 ;;
-  status)    cmd_status; exit 0 ;;
+  status)    cmd_status "$@"; exit 0 ;;
   help|-h|--help) usage; exit 0 ;;
 esac

@@ -78,9 +78,3 @@ func (l *tokenLimiter) Allow(tokenID int64, now time.Time) bool {
 	l.entries[tokenID] = e
 	return true
 }
-
-func (l *tokenLimiter) Delete(tokenID int64) {
-	l.mu.Lock()
-	delete(l.entries, tokenID)
-	l.mu.Unlock()
-}
