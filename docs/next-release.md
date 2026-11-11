@@ -9,6 +9,8 @@
 - Retain `/api/report-capabilities` for historical report deduplication and
   retry negotiation; remove only its self-revocation capability field.
 - Update uninstall commands and credential management guidance in README.
+- Build Server, Agent and Docker releases with Go 1.27.4, including its
+  [standard-library security fixes](https://go.dev/doc/devel/release#go1.27.4).
 
 Upgrade the Server to disable the endpoint for existing Agents as well. Download
 the current installer for local-only removal. Agent upgrades can keep their YAML
