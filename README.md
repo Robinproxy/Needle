@@ -238,7 +238,7 @@ sudo bash /tmp/needle-server.sh uninstall --purge
 
 Linux amd64 / arm64; root, Bash, systemd, `useradd` / `groupadd` / `userdel` / `groupdel` / `getent`, `runuser`, and `flock`.
 
-### Install
+### One-command install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh install
@@ -246,13 +246,23 @@ curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/need
 
 Enter hostname, final Server URL, Token (empty = generate), intervals, and probes. Run the printed registration command on the Server. Billing / renewal / allowance: `/admin`.
 
-### Upgrade — keep configuration and restart
+### One-command upgrade — keep configuration
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh upgrade --keep-config && sudo systemctl restart needle-agent
 ```
 
 Keeps YAML, Token, and boot settings. The final restart also starts a previously stopped service.
+
+### One-command uninstall
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh uninstall --yes && rm -f /tmp/needle-agent.sh
+```
+
+Removes the service, binary, configuration and service user. Server Token / data remain; manage them with Server `revoke-token` / `delete-agent`.
+
+With confirmation: `sudo bash /tmp/needle-agent.sh uninstall`.
 
 ### Status, logs, and upgrade modes
 
@@ -274,6 +284,7 @@ sudo systemctl stop needle-agent
 sudo systemctl start needle-agent
 sudo systemctl enable needle-agent
 sudo systemctl disable needle-agent
+
 ```
 
 | Upgrade mode | Behavior |
@@ -283,7 +294,7 @@ sudo systemctl disable needle-agent
 | `--reconfigure` | Reselect TCP Ping and intervals; preserve Token and identity |
 | `--configure-intervals` | Change only realtime and full-report intervals |
 
-Choose one mode; reconfiguration keeps Token and identity and backs up YAML to `agent.yaml.bak`. Failed deployment rolls back or prints its recovery path.
+Choose one mode. Reconfiguration backs up YAML to `agent.yaml.bak`; failed deployment rolls back or prints its recovery path.
 
 ### Foreground troubleshooting
 
@@ -294,23 +305,6 @@ sudo runuser -u needle-agent -- /opt/needle-agent/bin/needle-agent /opt/needle-a
 sudo systemctl start needle-agent
 ```
 
-### Uninstall
-
-**Remove the Agent and its local configuration without confirmation:**
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent.sh -o /tmp/needle-agent.sh && sudo bash /tmp/needle-agent.sh uninstall --yes && rm -f /tmp/needle-agent.sh
-```
-
-```sh
-# Prompt before local removal
-sudo bash /tmp/needle-agent.sh uninstall
-```
-
-Uninstall is local only and does not require a reachable Server. It retains the Server credential and node data. On the Server, use `revoke-token YOUR_TOKEN` to revoke the credential while keeping data, or `delete-agent HOSTNAME_OR_ID` to delete the node and history.
-
-The empty installer lock remains until reboot; journal retention is managed by systemd.
-
 </details>
 
 <details>
@@ -318,7 +312,7 @@ The empty installer lock remains until reboot; journal retention is managed by s
 
 Run as root. Requires procd, BusyBox `sh`, HTTPS wget / curl, CA certificates, and `sha256sum`. Supports x86_64 / amd64 and aarch64 / arm64.
 
-### Install
+### One-command install
 
 ```sh
 wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh install
@@ -328,13 +322,21 @@ Enter hostname, final Server URL, Token (empty = generate), intervals, WAN inter
 
 Agent runs as root under procd. Defaults: nice `10`, `GOMAXPROCS=1`, soft Go memory target `32 MiB`, open-file limit `128`.
 
-### Upgrade — keep configuration and restart
+### One-command upgrade — keep configuration
 
 ```sh
 wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh upgrade --keep-config && /etc/init.d/needle-agent restart
 ```
 
 Keeps YAML, Token, and boot settings. The final restart also starts a previously stopped service.
+
+### One-command uninstall
+
+```sh
+wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh uninstall --purge --yes && rm -f /tmp/needle-agent-openwrt.sh
+```
+
+Removes the service, binary, configuration and Needle's firmware-backup entry. Server Token / data remain; manage them with Server `revoke-token` / `delete-agent`.
 
 ### Status, logs, and upgrade modes
 
@@ -359,15 +361,7 @@ sh /tmp/needle-agent-openwrt.sh upgrade --configure-intervals
 
 Reconfiguration keeps Token / identity and backs up YAML to `agent.yaml.bak`. Installer minimums: `64 MiB` available RAM, `32 MiB` free `/tmp`, `4 MiB` installation reserve.
 
-### Uninstall and firmware upgrades
-
-**Remove the Agent and its local configuration without confirmation:**
-
-```sh
-wget -O /tmp/needle-agent-openwrt.sh https://raw.githubusercontent.com/Robinproxy/Needle/main/scripts/needle-agent-openwrt.sh && sh /tmp/needle-agent-openwrt.sh uninstall --purge --yes && rm -f /tmp/needle-agent-openwrt.sh
-```
-
-Other uninstall modes — choose one:
+### Uninstall options and firmware upgrades
 
 ```sh
 # Remove binary/service/version; keep local configuration and Server data
@@ -375,8 +369,6 @@ sh /tmp/needle-agent-openwrt.sh uninstall
 # Also delete local configuration and Needle's firmware-backup entry
 sh /tmp/needle-agent-openwrt.sh uninstall --purge
 ```
-
-Uninstall is local only and does not require a reachable Server. It retains the Server credential and node data. On the Server, use `revoke-token YOUR_TOKEN` to revoke the credential while keeping data, or `delete-agent HOSTNAME_OR_ID` to delete the node and history. System logs follow router retention.
 
 Keeping firmware settings preserves `/etc/needle/`; reinstall the binary and service afterward. For lower load: `interval: 30` or longer, `realtime_interval: 0`, and `tcpping: []`.
 
