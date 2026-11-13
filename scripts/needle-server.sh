@@ -299,9 +299,27 @@ ensure_server_account() {
   }
 }
 
-# Refuse symlinks, shared data directories, writable executable parents and
-# unsupported sandbox paths. Only the DB and known SQLite sidecars are chowned.
+# An existing executable may be probed as root; its whole path must be trusted.
+validate_existing_server_binary() {
+  python3 - "$SERVER_BIN" <<'PYBINARY'
+import pathlib, stat, sys
+binary = pathlib.Path(sys.argv[1])
+if not binary.is_absolute():
+    raise SystemExit('ERROR: absolute Server binary path required')
+for path in (*reversed(binary.parents), binary):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        continue  # Retained uninstall/reinstall may have no binary or bin/.
+    expected = stat.S_ISREG if path == binary else stat.S_ISDIR
+    if not expected(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise SystemExit('ERROR: Server binary and parents must be root-owned, not group/world writable, and not symlinks: '+str(path))
+PYBINARY
+}
+
+# Refuse symlinks, shared data directories and unsupported sandbox paths.
 validate_server_paths() {
+  validate_existing_server_binary || return 1
   python3 - "$INSTALL_DIR" "$BIN_DIR" "$SERVER_BIN" "$ENV_FILE" "$SERVICE_FILE" "$DB_PATH" <<'PY'
 import os, pathlib, stat, sys
 install, bindir, binary, env, unit, db = map(pathlib.Path, sys.argv[1:])
@@ -327,6 +345,9 @@ PY
 }
 
 prepare_existing_settings() {
+  # Never execute an old installation to discover its protocol before checking
+  # the executable itself as well as every parent that could replace it.
+  validate_existing_server_binary || return 1
   local source_unit="$SERVICE_FILE"
   if [ ! -s "$source_unit" ] && [ -s "$INSTALL_DIR/.server-unit.saved" ]; then source_unit="$INSTALL_DIR/.server-unit.saved"; fi
   [ -s "$ENV_FILE" ] && [ -s "$source_unit" ] || { echo 'ERROR: existing environment/unit missing; repair explicitly before upgrading.' >&2; return 1; }
@@ -440,6 +461,7 @@ UNIT
 }
 
 backup_database() {
+  database_permissions check || return 1
   [ -f "$DB_PATH" ] || return 0
   # SQLite backup API copies a consistent view including committed WAL pages.
   # Source is opened without running application migrations.
@@ -452,6 +474,95 @@ if dst.execute('PRAGMA quick_check').fetchone()[0]!='ok': raise SystemExit('ERRO
 dst.close(); src.close()
 PY
   chmod 600 "$RECOVERY/database.sqlite"
+}
+
+# Keep the stopped Server's data directory root-only until migration is ready.
+# All ownership changes use descriptors, including failure recovery. SQLite can
+# then open the checked paths (and WAL) without a service UID replacing them.
+database_permissions() {
+  python3 - "$1" "$DATA_DIR" "$DB_PATH" "$RECOVERY/permissions.json" "$SERVER_USER" <<'PYPERMS'
+import json, os, pathlib, pwd, stat, sys
+action, folder, db, record, user = sys.argv[1:]
+state_path = pathlib.Path(record)
+name = pathlib.Path(db).name
+if pathlib.Path(db).parent != pathlib.Path(folder):
+    raise SystemExit('ERROR: database must be inside the dedicated data directory')
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+if action == 'prepare':
+    try:
+        os.mkdir(folder, 0o700)
+    except FileExistsError:
+        pass
+try:
+    directory = os.open(folder, flags)
+except OSError as error:
+    raise SystemExit('ERROR: cannot safely open database directory: '+str(error))
+files = {}
+def identity(info):
+    return [info.st_dev, info.st_ino]
+def permissions(info):
+    return [info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)]
+try:
+    info = os.fstat(directory)
+    if action == 'prepare':
+        state = {'directory': identity(info), 'permissions': permissions(info), 'files': {}}
+        state_path.write_text(json.dumps(state))
+        os.fchown(directory, 0, 0)
+        os.fchmod(directory, 0o700)
+    else:
+        state = json.loads(state_path.read_text())
+        if identity(info) != state['directory'] or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700:
+            raise SystemExit('ERROR: database directory changed or is no longer root-only; service must remain stopped')
+    allowed = {name, name+'-wal', name+'-shm', name+'-journal'}
+    for entry in os.listdir(directory):
+        if entry not in allowed:
+            raise SystemExit('ERROR: unrelated file in database directory: '+entry)
+        fd = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        files[entry] = fd
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SystemExit('ERROR: database and SQLite sidecars must be regular files without hard links: '+entry)
+        previous = state['files'].get(entry)
+        if previous and identity(info) != previous['identity']:
+            raise SystemExit('ERROR: database file was replaced; service must remain stopped: '+entry)
+        if action == 'prepare':
+            state['files'][entry] = {'identity': identity(info), 'permissions': permissions(info)}
+    if action != 'prepare' and ((name in state['files']) != (name in files)):
+        raise SystemExit('ERROR: database appeared or disappeared; service must remain stopped')
+    if action == 'prepare':
+        state_path.write_text(json.dumps(state))
+    elif action == 'activate':
+        account = pwd.getpwnam(user)
+        for fd in files.values():
+            os.fchown(fd, account.pw_uid, account.pw_gid)
+            os.fchmod(fd, 0o600)
+        os.fchown(directory, account.pw_uid, account.pw_gid)
+        os.fchmod(directory, 0o700)
+    elif action == 'restore':
+        for entry, fd in files.items():
+            previous = state['files'].get(entry)
+            if previous:
+                uid, gid, mode = previous['permissions']
+            elif entry != name and name in state['files']:
+                # A read-only WAL backup may create a previously absent SHM.
+                uid, gid, _ = state['files'][name]['permissions']
+                mode = 0o600
+            else:
+                raise SystemExit('ERROR: cannot safely restore unexpected database file: '+entry)
+            os.fchown(fd, uid, gid)
+            os.fchmod(fd, mode)
+        uid, gid, mode = state['permissions']
+        os.fchown(directory, uid, gid)
+        os.fchmod(directory, mode)
+    elif action != 'check':
+        raise SystemExit('ERROR: unknown database permission operation')
+except OSError as error:
+    raise SystemExit('ERROR: cannot safely access database/SQLite sidecars: '+str(error))
+finally:
+    for fd in files.values():
+        os.close(fd)
+    os.close(directory)
+PYPERMS
 }
 
 validate_server_sandbox() {
@@ -487,7 +598,7 @@ verify_server_active() {
 
 deploy_server() (
   set -e
-  validate_server_paths
+  validate_server_paths || exit 1
   validate_listener_permissions
   lock_database_administration
   ACCOUNT_CREATED=false
@@ -509,14 +620,6 @@ deploy_server() (
   [ ! -f "$SERVICE_FILE" ] || cp -p "$SERVICE_FILE" "$RECOVERY/unit"
   [ ! -f "$ENV_FILE" ] || cp -p "$ENV_FILE" "$RECOVERY/environment"
   [ ! -f "$INSTALL_DIR/.server-unit.saved" ] || cp -p "$INSTALL_DIR/.server-unit.saved" "$RECOVERY/saved-unit"
-  # Capture exact ownership/mode, never recursively alter a custom directory.
-  python3 - "$DATA_DIR" "$DB_PATH" "$RECOVERY/permissions.json" <<'PY'
-import json, os, pathlib, sys
-folder, db, output=sys.argv[1:]
-paths=[folder,db,db+'-wal',db+'-shm',db+'-journal']
-state={p:[os.stat(p).st_uid,os.stat(p).st_gid,os.stat(p).st_mode&0o777] for p in paths if os.path.exists(p)}
-pathlib.Path(output).write_text(json.dumps(state))
-PY
   recover() {
     local result=$?
     trap - EXIT
@@ -527,13 +630,16 @@ PY
         if [ -f "$RECOVERY/binary" ]; then install -o root -g root -m 755 "$RECOVERY/binary" "$SERVER_BIN"; elif [ "$changed" = true ]; then rm -f "$SERVER_BIN"; fi
         if [ -f "$RECOVERY/unit" ]; then cp -p "$RECOVERY/unit" "$SERVICE_FILE"; elif [ "$changed" = true ]; then rm -f "$SERVICE_FILE"; fi
         if [ -f "$RECOVERY/saved-unit" ]; then cp -p "$RECOVERY/saved-unit" "$INSTALL_DIR/.server-unit.saved"; else rm -f "$INSTALL_DIR/.server-unit.saved"; fi
-        python3 - "$RECOVERY/permissions.json" <<'PY'
-import json, os, sys
-for p,(uid,gid,mode) in json.load(open(sys.argv[1])).items():
-    if os.path.exists(p): os.chown(p,uid,gid); os.chmod(p,mode)
-PY
+        local database_restored=false
+        if [ -f "$RECOVERY/permissions.json" ]; then
+          if database_permissions restore; then database_restored=true; fi
+        elif [ "$changed" = false ]; then database_restored=true; fi
         systemctl daemon-reload || true
-        if [ "$was_active" = true ]; then systemctl start "$SERVICE_NAME" || true; fi
+        if [ "$database_restored" = true ]; then
+          if [ "$was_active" = true ]; then systemctl start "$SERVICE_NAME" || true; fi
+        else
+          echo 'Database paths or permissions could not be safely restored. Service remains stopped; review the data directory before restarting.' >&2
+        fi
       else
         # New schema may have committed and new reports may have arrived.
         # Never restore an old DB or start an old binary against an unreviewed schema.
@@ -545,12 +651,11 @@ PY
   trap recover EXIT
   if [ "$was_active" = true ]; then systemctl stop "$SERVICE_NAME"; fi
   changed=true
-  backup_database
+  # The service could change its data entries after the initial preflight.
+  validate_server_paths || exit 1
+  database_permissions prepare || exit 1
+  backup_database || exit 1
   install -d -o root -g root -m 755 "$BIN_DIR"
-  install -d -o "$SERVER_USER" -g "$SERVER_USER" -m 700 "$DATA_DIR"
-  for path in "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm" "$DB_PATH-journal"; do
-    if [ -e "$path" ]; then chown "$SERVER_USER:$SERVER_USER" "$path"; chmod 600 "$path"; fi
-  done
   if [ "$FRESH_INSTALL" = true ]; then
     printf 'NEEDLE_LISTEN=%s\n' "$LISTEN" > "$ENV_FILE"
   fi
@@ -563,6 +668,7 @@ PY
   install -o root -g root -m 600 "$TMP_DIR/server.service" "$INSTALL_DIR/.server-unit.saved"
   systemctl daemon-reload
   validate_server_sandbox
+  database_permissions activate || exit 1
   # Opening via CLI performs migrations under the same identity as the daemon.
   migration_started=true
   runuser -u "$SERVER_USER" -- "$SERVER_BIN" -db "$DB_PATH" list-agents >/dev/null

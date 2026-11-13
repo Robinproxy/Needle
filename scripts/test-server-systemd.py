@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Disposable CI only. Never point this at an existing production installation."""
-import json, os, pathlib, shutil, subprocess, sys, tempfile, time, urllib.request
+import json, os, pathlib, shutil, sqlite3, subprocess, sys, tempfile, time, urllib.request
 import pty, select
 if os.environ.get('NEEDLE_DISPOSABLE_SYSTEMD_TEST') != '1' or os.geteuid() != 0:
     raise SystemExit('Run as root only in a disposable systemd CI runner with NEEDLE_DISPOSABLE_SYSTEMD_TEST=1')
@@ -71,6 +71,79 @@ download_release_server() {{ return 0; }}
 cmd_upgrade
 '''
         run('bash','-c',code)
+        # A protocol probe must never execute an untrusted existing binary as
+        # root, even though it is about to be replaced by a verified release.
+        server_bin = base/'bin/needle-server'
+        held_binary = base/'bin/held-server'
+        marker = base/'untrusted-executed'
+        uid = int(subprocess.check_output(['id', '-u', name]))
+        gid = int(subprocess.check_output(['id', '-g', name]))
+        for kind in ('writable', 'service-owned', 'symlink'):
+            server_bin.rename(held_binary)
+            probe = base/'untrusted-probe'
+            try:
+                probe.write_text(f'#!/bin/sh\ntouch {marker}\necho "needle-install-v2 test"\n')
+                probe.chmod(0o755)
+                if kind == 'symlink': server_bin.symlink_to(probe)
+                else:
+                    shutil.copy2(probe, server_bin)
+                    if kind == 'writable': server_bin.chmod(0o777)
+                    else: os.chown(server_bin, uid, gid)
+                rejected = subprocess.run(['bash', '-c', code], capture_output=True, text=True)
+                assert rejected.returncode != 0, rejected.stdout + rejected.stderr
+                assert not marker.exists(), 'Untrusted old executable ran as root'
+                assert subprocess.run(['systemctl', 'is-active', '--quiet', name]).returncode == 0
+            finally:
+                server_bin.unlink(missing_ok=True)
+                held_binary.rename(server_bin)
+                probe.unlink(missing_ok=True)
+
+        # Simulate the service UID replacing the DB after preflight, at the
+        # stop boundary. The foreign SQLite file must never be backed up,
+        # migrated, chowned or chmodded by the root installer.
+        foreign = base/'foreign.sqlite'
+        connection = sqlite3.connect(foreign)
+        connection.execute('CREATE TABLE private(value TEXT)')
+        connection.execute("INSERT INTO private VALUES('outside data directory')")
+        connection.commit(); connection.close()
+        foreign.chmod(0o644)
+        foreign_original = foreign.read_bytes(), foreign.stat()
+        prefix = code.rsplit('cmd_upgrade\n', 1)[0]
+        attack = prefix + f'''
+systemctl() {{
+  command systemctl "$@" || return $?
+  if [ "$1" = stop ] && [ ! -f "$INSTALL_DIR/held-db" ]; then
+    mv "$DB_PATH" "$INSTALL_DIR/held-db"
+    runuser -u "$SERVER_USER" -- ln -s '{foreign}' "$DB_PATH"
+  fi
+}}
+cmd_upgrade
+'''
+        try:
+            rejected = subprocess.run(['bash', '-c', attack], capture_output=True, text=True)
+            assert rejected.returncode != 0, rejected.stdout + rejected.stderr
+            assert db.is_symlink()
+            assert foreign.read_bytes() == foreign_original[0]
+            after = foreign.stat(); before = foreign_original[1]
+            assert (after.st_uid, after.st_gid, after.st_mode) == (before.st_uid, before.st_gid, before.st_mode)
+            assert subprocess.run(['systemctl', 'is-active', '--quiet', name]).returncode != 0
+        finally:
+            if (base/'held-db').exists():
+                db.unlink(missing_ok=True)
+                (base/'held-db').rename(db)
+            foreign.unlink(missing_ok=True)
+        run('systemctl', 'start', name)
+        wait_healthy()
+
+        # Fail after backup and unit installation, before DB migration. Safe
+        # rollback must restore the original non-root ownership and restart.
+        rejected = subprocess.run(['bash', '-c', prefix + 'validate_server_sandbox() { return 1; }\ncmd_upgrade\n'],
+                                  capture_output=True, text=True)
+        assert rejected.returncode != 0, rejected.stdout + rejected.stderr
+        wait_healthy()
+        assert db.parent.stat().st_uid == uid
+        for path in db.parent.iterdir():
+            assert path.stat().st_uid == uid and path.stat().st_mode & 0o077 == 0, path
     uid=int(subprocess.check_output(['id','-u',name]))
     assert uid!=0 and db.stat().st_uid==uid
     assert (base/'bin/needle-server').stat().st_uid==0
@@ -153,7 +226,7 @@ read_prompt() {{ printf -v "$1" '%s' '127.0.0.1:18928'; }}
         wait_healthy()
         run('bash','-c',prefix+'cmd_uninstall --purge --yes')
         assert not base.exists()
-    print('PASS: root migration, non-root startup/restart, consistent backup, CLI followed by writes, DB/WAL/SHM permissions, retained uninstall/reinstall, explicit node deletion and purge')
+    print('PASS: root migration, non-root startup/restart, consistent backup, untrusted binary rejection, DB swap rejection, safe rollback, CLI followed by writes, DB/WAL/SHM permissions, retained uninstall/reinstall, explicit node deletion and purge')
 except Exception:
     subprocess.run(['journalctl','-u',name,'-n','80','--no-pager'],check=False)
     raise
