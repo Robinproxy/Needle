@@ -46,7 +46,12 @@ def http(path,payload=None,token=None):
 def wait_healthy():
     for _ in range(50):
         try:
-            if http('/api/health')['status']=='ok':return
+            if http('/api/health')['status']=='ok':
+                # Each successful scenario deliberately starts/stops this
+                # disposable unit. Do not carry its start budget into the
+                # next scenario or relax the production unit's protection.
+                run('systemctl', 'reset-failed', name)
+                return
         except OSError:pass
         time.sleep(.2)
     raise AssertionError('Server did not become healthy')
