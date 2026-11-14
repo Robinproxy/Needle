@@ -151,18 +151,31 @@ function harness() {
   const ranges=[];
   d.document.querySelectorAll=selector=>{
     assert.equal(selector,'#detail-1 .detail-range-group .theme-btn');
-    return ['24h','168h','720h'].map(range=>({dataset:{range},classList:{toggle:(_name,on)=>{if(on)ranges.push(range);}}}));
+    return ['1h','24h','168h','720h'].map(range=>({dataset:{range},classList:{toggle:(_name,on)=>{if(on)ranges.push(range);}}}));
   };
   d.switchDetailRange(1,'720h');
   await new Promise(resolve=>setTimeout(resolve,0));
   assert.equal(ranges.at(-1),'720h');
   assert(requested.at(-1).includes('/metrics?range=720h'));
   assert(requested.every(url=>!url.includes('/tcpping')));
+  d.switchDetailRange(1,'1h');
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(ranges.at(-1),'1h');
+  assert.equal(requested.at(-1),'/api/agents/1/metrics?range=1h');
+  assert.equal(vm.runInContext('currentHistoryDay',d),null);
   d.fixture=[node];vm.runInContext('agents=fixture;',d);
   const beforeEnabled=requested.length;
   await d.loadDetailData(1,'24h');
   assert.equal(requested.length,beforeEnabled+2,'re-enabling must restore probe requests');
   assert(requested.at(-1).includes('/tcpping'));
+  d.switchDetailRange(1,'24h');
+  await new Promise(resolve=>setTimeout(resolve,0));
+  const beforeHour=requested.length;
+  d.switchDetailRange(1,'1h');
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.deepEqual(requested.slice(beforeHour),[
+    '/api/agents/1/metrics?range=1h','/api/agents/1/tcpping?range=1h',
+  ]);
 
   // Even a transport that delivers after cancellation cannot draw over a newer view.
   const pending=[];
@@ -243,6 +256,15 @@ function harness() {
     assert(!expansionElements.get('card-grid').innerHTML.includes('class="inline-detail"'));
   }
   assert.equal(expansion.loads.length,8,'each opening must still load detail history');
+  for(const id of [1,2]){
+    vm.runInContext("currentHistoryRange='1h';",expansion);
+    expansion.renderDetailContent(id);
+    const html=expansionElements.get('detail-'+id).innerHTML;
+    assert(html.includes('class="theme-btn active" data-range="1h"'));
+    assert(html.indexOf('data-range="1h"')<html.indexOf('data-range="24h"'));
+    assert(!html.includes('id="detail-day-btn" class="theme-btn active"'));
+    assert.equal(expansion.loads.at(-1).range,'1h');
+  }
 
   // Replacing the card DOM requires restoring keyboard focus, but focus itself
   // must not move the viewport when Enter, Space, or Escape opens/closes detail.

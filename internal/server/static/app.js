@@ -792,6 +792,7 @@ function renderDetailContent(id) {
         + '<div class="tcpping-header-left">'
           + '<h3>TCP Ping</h3>'
           + '<div class="theme-btn-group detail-range-group" role="group" aria-label="History range">'
+            + '<button type="button" class="theme-btn' + (range === '1h' ? ' active' : '') + '" data-range="1h" onclick="switchDetailRange(' + id + ',\'1h\')" title="Last hour">1h</button>'
             + '<button type="button" id="detail-day-btn" class="theme-btn' + (range === '24h' || currentHistoryDay ? ' active' : '') + '" data-range="24h" onclick="switchDetailRange(' + id + ',\'24h\')" title="' + (currentHistoryDay ? escapeAttr(currentHistoryDay.fullLabel + ' · raw data') : 'Last 24 hours') + '">' + dayLabel + '</button>'
             + '<button type="button" class="theme-btn' + (range === '168h' ? ' active' : '') + '" data-range="168h" onclick="switchDetailRange(' + id + ',\'168h\')">7d</button>'
             + '<button type="button" class="theme-btn' + (range === '720h' ? ' active' : '') + '" data-range="720h" onclick="switchDetailRange(' + id + ',\'720h\')">30d</button>'
@@ -1088,7 +1089,7 @@ function switchDetailRange(id, range) {
 
 function formatRangeAxisLabel(ts) {
   const d = new Date(ts);
-  if (currentHistoryRange === '24h' || currentHistoryRange === 'day') {
+  if (currentHistoryRange === '1h' || currentHistoryRange === '24h' || currentHistoryRange === 'day') {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
   return (d.getMonth() + 1) + '/' + d.getDate();
@@ -1102,7 +1103,7 @@ function activeTcppingResults(id, results) {
 }
 
 function tcppingCanDespike() {
-  return currentHistoryRange === '24h' || currentHistoryRange === 'day';
+  return currentHistoryRange === '1h' || currentHistoryRange === '24h' || currentHistoryRange === 'day';
 }
 
 function updateTcppingDespikeButton(id) {
@@ -1114,7 +1115,7 @@ function updateTcppingDespikeButton(id) {
   button.classList.toggle('active', active);
   button.setAttribute('aria-pressed', String(active));
   button.title = available ? 'Reduce isolated latency spikes; hover for original values'
-    : 'Available in 1d and daily detail; 7d / 30d use aggregated data';
+    : 'Available in 1h, 1d and daily detail; 7d / 30d use aggregated data';
 }
 
 // A conservative, high-only Hampel filter for raw probe samples. Require two
@@ -1219,7 +1220,7 @@ function renderTCPingChart(id, results) {
   if (!chartEl) return;
   if (!tcppingChart) chartEl.innerHTML = '';
 
-  const is1d = currentHistoryRange === '24h' || currentHistoryRange === 'day';
+  const isRawRange = tcppingCanDespike();
   const chartWin = chartWindowForResults(results);
   const chart = tcppingChart || echarts.init(chartEl);
   const overview = overviewDays(currentHistoryRange);
@@ -1257,16 +1258,16 @@ function renderTCPingChart(id, results) {
       textStyle: { fontSize: 11 },
     },
     legend: { show: false, selected },
-    grid: { left: 8, right: 32, top: 8, bottom: is1d ? 20 : 8 },
+    grid: { left: 8, right: 32, top: 8, bottom: isRawRange ? 20 : 8 },
     xAxis: {
       type: 'time',
       min: chartWin[0], max: chartWin[1],
       // Overview views draw one coordinated tick+date row in renderDayNav.
-      minInterval: is1d ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
-      splitNumber: is1d ? 5 : 7,
-      axisTick: { show: is1d },
+      minInterval: currentHistoryRange === '1h' ? 10 * 60 * 1000 : isRawRange ? 4 * 3600 * 1000 : 24 * 3600 * 1000,
+      splitNumber: currentHistoryRange === '1h' ? 6 : isRawRange ? 5 : 7,
+      axisTick: { show: isRawRange },
       axisLabel: {
-        show: is1d,
+        show: isRawRange,
         fontSize: 10,
         hideOverlap: true,
         formatter: v => formatRangeAxisLabel(v),
@@ -1334,7 +1335,7 @@ function tcppingStatsHTML(id, results, names) {
 function chartWindowMs() {
   if (currentHistoryDay) return [currentHistoryDay.start * 1000, currentHistoryDay.end * 1000];
   const now = Date.now();
-  const hours = currentHistoryRange === '720h' ? 720 : currentHistoryRange === '168h' ? 168 : 24;
+  const hours = parseInt(currentHistoryRange, 10) || 24;
   return [now - hours * 3600000, now];
 }
 

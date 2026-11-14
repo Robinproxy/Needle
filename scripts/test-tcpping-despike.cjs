@@ -99,6 +99,20 @@ try {
   context.renderTCPingChart(1,history);
   assert(!button.disabled && classes.has('active'));
   assert.equal(ctSeries().data[4][1],180);
+  // The one-hour view uses raw samples and a minute-scale axis, rather than
+  // inheriting the daily extent or hiding its labels like an overview.
+  context.Date = class extends Date {static now() {return originals[0][0] + 3600000;}};
+  vm.runInContext("currentHistoryDay=null;currentHistoryRange='1h';",context);
+  context.updateTcppingDespikeButton(1);
+  context.renderTCPingChart(1,history);
+  assert(!button.disabled && classes.has('active'));
+  assert.equal(ctSeries().data[4][1],180);
+  const axis = chart.getOption().xAxis[0];
+  assert.equal(axis.max-axis.min,3600000);
+  assert.equal(axis.minInterval,600000);
+  assert.equal(axis.axisLabel.show,true);
+  assert.equal(axis.axisLabel.formatter(originals[0][0]),
+    String(new Date(originals[0][0]).getHours()).padStart(2,'0')+':'+String(new Date(originals[0][0]).getMinutes()).padStart(2,'0'));
   assert.equal(JSON.stringify(history),before);
   assert(!chart.renderToSVGString().includes('NaN'));
   context.document.getElementById = () => null;
