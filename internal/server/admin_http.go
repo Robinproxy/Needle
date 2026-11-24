@@ -210,6 +210,47 @@ func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		adminJSON(w, 200, map[string]any{"nodes": nodes, "order_version": revision})
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/admin/nodes/") && r.Method == http.MethodDelete {
+		id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/admin/nodes/"), 10, 64)
+		if err != nil || id < 1 {
+			adminError(w, 400, "Invalid node ID")
+			return
+		}
+		var input struct {
+			Hostname     string `json:"hostname"`
+			Version      *int64 `json:"version"`
+			OrderVersion *int64 `json:"order_version"`
+		}
+		if !adminBody(w, r, &input) {
+			return
+		}
+		if input.Hostname == "" || input.Version == nil || input.OrderVersion == nil || *input.Version < 0 || *input.OrderVersion < 0 {
+			adminError(w, 400, "Node identity and versions are required")
+			return
+		}
+		h.fullMu.Lock()
+		err = h.store.deleteAgent(id, &agentDeleteGuard{input.Hostname, *input.Version, *input.OrderVersion})
+		if err == nil {
+			h.invalidateCommitted(id)
+		}
+		h.fullMu.Unlock()
+		if errors.Is(err, ErrProfileConflict) {
+			adminError(w, 409, "Node changed; close this dialog and refresh before deleting")
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			adminError(w, 404, "Node no longer exists; refresh the node list")
+			return
+		}
+		if err != nil {
+			h.logs.Check("admin_delete", "ERROR", err)
+			adminError(w, 500, "Could not delete node")
+			return
+		}
+		logging.Print("INFO", "admin", "node_deleted", "agent_id", id, "hostname", input.Hostname, "actor", session.Username)
+		adminJSON(w, 200, map[string]string{"status": "ok"})
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/nodes/") && r.Method == http.MethodPatch {
 		id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/admin/nodes/"), 10, 64)
 		if err != nil || id < 1 {

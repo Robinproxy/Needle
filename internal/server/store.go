@@ -427,7 +427,7 @@ func (s *Store) BindToken(token, hostname string) error {
 }
 
 // RevokeToken revokes only this credential; deleting monitoring data is an
-// explicit, separate local administrator operation (DeleteAgent).
+// explicit, separate administrator operation (DeleteAgent).
 func (s *Store) RevokeToken(token string) error {
 	token = strings.TrimSpace(token)
 	tx, err := s.db.Begin()
@@ -1177,12 +1177,38 @@ func calcRenewalDue(expiresAtUnix int64, period string, now time.Time) (int, str
 }
 
 func (s *Store) DeleteAgent(id int64) error {
+	return s.deleteAgent(id, nil)
+}
+
+// Browser deletions must match the snapshot the administrator confirmed.
+// The global revision also guards against deleting a reused ID/hostname.
+type agentDeleteGuard struct {
+	hostname              string
+	version, orderVersion int64
+}
+
+func (s *Store) deleteAgent(id int64, guard *agentDeleteGuard) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	if guard != nil {
+		// Acquire the write lock before checking identity and revisions.
+		if _, err := tx.Exec("UPDATE agents SET last_seen=last_seen WHERE id=?", id); err != nil {
+			return err
+		}
+		var hostname string
+		var version, revision int64
+		if err := tx.QueryRow(`SELECT hostname,profile_revision,(SELECT revision FROM admin_revision WHERE id=1) FROM agents WHERE id=?`, id).
+			Scan(&hostname, &version, &revision); err != nil {
+			return err
+		}
+		if hostname != guard.hostname || version != guard.version || revision != guard.orderVersion {
+			return ErrProfileConflict
+		}
+	}
 	if err := deleteAgentTx(tx, id); err != nil {
 		return err
 	}

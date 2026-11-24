@@ -77,7 +77,7 @@ const click = key=>buttons.find(button=>button.dataset.sort===key).events.click(
   assert.deepEqual(order(),[4,6,7,2,3,1,5,8],'switching column starts ascending');
   await ctx.loadNodes();
   assert.deepEqual(order(),[4,6,7,2,3,1,5,8],'reload after a save must retain the active sort');
-  get('node-list').rows[0].querySelector('button').events.click();
+  get('node-list').rows[0].querySelector('.node-edit').events.click();
   assert.equal(get('editor-title').textContent,'node-4','editing a sorted row must select its original node');
   assert.equal(get('field-position').value,4,'sorting must not rewrite the position in the editor');
   assert.equal(get('field-provider_url').value,nodes[3].provider_url,'the editor must load the saved provider URL');

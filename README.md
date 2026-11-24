@@ -379,6 +379,8 @@ Keeping firmware settings preserves `/etc/needle/`; reinstall the binary and ser
 
 Public dashboard: `/`. Management: `/admin` (or **Manage**).
 
+Delete a node with its trash icon in Manage, then confirm **Delete node**. Removes its Token, history and traffic; does not uninstall the Agent. Other nodes keep their order.
+
 ### Initialize administrator — run on the Server
 
 ```sh

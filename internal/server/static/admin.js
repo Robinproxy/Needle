@@ -3,6 +3,8 @@
 let adminCSRF = '';
 let adminNodes = [];
 let editingNode = null;
+let deletingNode = null;
+let deleteInFlight = false;
 let sessionTimer = null;
 let adminSort = {key: '', direction: 1};
 const sortButtons = document.querySelectorAll('.admin-sort');
@@ -24,6 +26,8 @@ function signedOut(text = '') {
   adminCSRF = '';
   adminNodes = [];
   editingNode = null;
+  deletingNode = null;
+  if (el('delete-dialog').open) el('delete-dialog').close();
   clearTimeout(sessionTimer);
   el('node-list').replaceChildren();
   profileForm.reset();
@@ -51,7 +55,7 @@ async function adminFetch(path, options = {}) {
     }
     return data;
   } catch (error) {
-    if (error.name === 'AbortError') throw new Error('The request timed out. Refresh to check the saved settings before trying again.');
+    if (error.name === 'AbortError') throw new Error('The request timed out. Reload this page to check the result before trying again.');
     throw error;
   } finally { clearTimeout(timer); }
 }
@@ -201,7 +205,7 @@ function renderNodes() {
   for (const node of sortedAdminNodes()) {
     const row = document.createElement('article');
     row.className = 'admin-node'; row.setAttribute('role', 'listitem');
-    row.innerHTML = '<div class="node-identity"><h3></h3><div class="node-summary"><span class="node-meta"></span><span class="node-note" hidden></span></div></div><div><span class="cell-label">Billing</span><span class="node-value billing"></span></div><div><span class="cell-label">Next renewal</span><span class="node-value renewal"></span></div><div><span class="cell-label">Monthly traffic</span><span class="node-value allowance"></span></div><div class="node-actions"><a class="node-action provider-link" target="_blank" rel="noopener noreferrer" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 3h6v6M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg></a><button class="node-action node-edit" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg></button></div>';
+    row.innerHTML = '<div class="node-identity"><h3></h3><div class="node-summary"><span class="node-meta"></span><span class="node-note" hidden></span></div></div><div><span class="cell-label">Billing</span><span class="node-value billing"></span></div><div><span class="cell-label">Next renewal</span><span class="node-value renewal"></span></div><div><span class="cell-label">Monthly traffic</span><span class="node-value allowance"></span></div><div class="node-actions"><a class="node-action provider-link" target="_blank" rel="noopener noreferrer" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 3h6v6M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg></a><button class="node-action node-edit" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m14 5 5 5"/></svg></button><button class="node-action node-delete" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></button></div>';
     row.querySelector('h3').textContent = node.display_name || node.hostname;
     row.querySelector('.node-meta').textContent = '#' + node.position + ' · ' + (node.region || 'Region not set') + (node.display_name ? ' · ' + node.hostname : '');
     row.querySelector('.billing').textContent = costText(node);
@@ -218,13 +222,66 @@ function renderNodes() {
       link.href = website;
       link.setAttribute('aria-label', 'Provider website for ' + (node.display_name || node.hostname) + ' (opens in new tab)');
     }
-    row.querySelector('button').setAttribute('aria-label', 'Edit ' + (node.display_name || node.hostname));
-    row.querySelector('button').addEventListener('click', () => openEditor(node));
+    row.querySelector('.node-edit').setAttribute('aria-label', 'Edit ' + (node.display_name || node.hostname));
+    row.querySelector('.node-edit').addEventListener('click', () => openEditor(node));
+    row.querySelector('.node-delete').setAttribute('aria-label', 'Delete ' + (node.display_name || node.hostname));
+    row.querySelector('.node-delete').addEventListener('click', () => openDeleteDialog(node));
     fragment.append(row);
   }
   el('node-list').replaceChildren(fragment);
   el('no-nodes').hidden = adminNodes.length !== 0;
 }
+
+function openDeleteDialog(node) {
+  if (deleteInFlight || !adminCSRF) return;
+  deletingNode = {...node};
+  el('delete-title').textContent = 'Delete ' + (node.display_name || node.hostname) + '?';
+  el('delete-identity').textContent = 'Agent hostname: ' + node.hostname + ' · ID ' + node.id;
+  message('delete-error', '');
+  el('confirm-delete').disabled = false;
+  el('cancel-delete').disabled = false;
+  el('delete-dialog').showModal();
+  el('cancel-delete').focus();
+}
+
+el('cancel-delete').addEventListener('click', () => {
+  if (!deleteInFlight) el('delete-dialog').close();
+});
+el('delete-dialog').addEventListener('cancel', event => {
+  if (deleteInFlight) event.preventDefault();
+});
+el('delete-dialog').addEventListener('close', () => {
+  if (!el('delete-dialog').open) deletingNode = null;
+});
+el('confirm-delete').addEventListener('click', async () => {
+  if (!deletingNode || deleteInFlight || !adminCSRF) return;
+  const node = deletingNode;
+  deleteInFlight = true;
+  el('confirm-delete').disabled = true;
+  el('cancel-delete').disabled = true;
+  message('delete-error', '');
+  let stale = false;
+  try {
+    await adminFetch('nodes/' + node.id, {method:'DELETE', body:JSON.stringify({
+      hostname:node.hostname, version:node.version, order_version:node.order_version,
+    })});
+    el('delete-dialog').close();
+    deletingNode = null;
+    if (editingNode?.id === node.id) { el('editor').close(); editingNode = null; }
+    adminNodes = adminNodes.filter(current => current.id !== node.id);
+    renderNodes();
+    message('save-notice', 'Node deleted.');
+    try { await loadNodes(); }
+    catch (_) { message('page-status', 'Node was deleted. Reload this page to update the list.'); }
+  } catch (error) {
+    stale = error.status === 409 || error.status === 404;
+    if (error.status !== 401) message('delete-error', error.message);
+  } finally {
+    deleteInFlight = false;
+    el('confirm-delete').disabled = stale;
+    el('cancel-delete').disabled = false;
+  }
+});
 
 function syncPeriod() {
   const dated = field('billing_period').value && field('billing_period').value !== 'forever';

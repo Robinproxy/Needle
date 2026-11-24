@@ -86,5 +86,14 @@
       <div class="editor-actions"><button id="reload-profile" class="admin-secondary" type="button" hidden>Reload latest</button><button id="cancel-editor" class="admin-secondary" type="button">Cancel</button><button id="save-profile" class="admin-primary" type="submit">Save settings</button></div>
     </form>
   </dialog>
+  <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-identity delete-description">
+    <div class="delete-content">
+      <h2 id="delete-title">Delete node?</h2>
+      <p id="delete-identity"></p>
+      <p id="delete-description">This permanently deletes the node, its Token, history and traffic records. The Agent itself stays installed.</p>
+      <p id="delete-error" class="form-error" role="alert" hidden></p>
+      <div class="editor-actions"><button id="cancel-delete" class="admin-secondary" type="button" autofocus>Cancel</button><button id="confirm-delete" class="admin-danger" type="button">Delete node</button></div>
+    </div>
+  </dialog>
 </body>
 </html>

@@ -15,11 +15,13 @@
 .admin-page input::placeholder { color: hsl(var(--muted-foreground) / .55); }
 .admin-page input:disabled { background: hsl(var(--muted) / .2); color: hsl(var(--muted-foreground)); }
 .admin-page :is(input, select, button, a):focus-visible { outline: 2px solid hsl(var(--ring) / .65); outline-offset: 3px; }
-.admin-primary, .admin-secondary { display: inline-flex; justify-content: center; align-items: center; min-height: 36px; padding: 0 15px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid hsl(var(--foreground)); }
+.admin-primary, .admin-secondary, .admin-danger { display: inline-flex; justify-content: center; align-items: center; min-height: 36px; padding: 0 15px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid hsl(var(--foreground)); }
 .admin-primary { background: hsl(var(--foreground)); color: hsl(var(--card)); }
 .admin-primary:hover { opacity: .88; }
 .admin-secondary { background: hsl(var(--card)); color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
 .admin-secondary:hover { background: hsl(var(--muted) / .2); }
+.admin-danger { background: hsl(var(--destructive)); border-color: hsl(var(--destructive)); color: #fff; }
+.admin-danger:hover { opacity: .88; }
 .admin-page button:disabled { opacity: .5; cursor: wait; }
 .login-card .admin-primary { width: 100%; }
 .login-card .login-note { margin-top: 24px; font-size: 10px; text-align: center; }
@@ -28,7 +30,7 @@
 .cost-settings summary { cursor: pointer; width: fit-content; }
 .cost-settings form { display: flex; align-items: flex-end; gap: 12px; margin: 14px 0 8px; }
 .cost-settings label { width: 150px; }
-.admin-columns, .admin-node { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(125px, 1fr) minmax(115px, 1fr) minmax(120px, 1fr) 72px; align-items: center; gap: 20px; }
+.admin-columns, .admin-node { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(125px, 1fr) minmax(115px, 1fr) minmax(120px, 1fr) 112px; align-items: center; gap: 20px; }
 .admin-columns { font-size: 10px; color: hsl(var(--muted-foreground)); padding: 0 20px 10px; }
 .admin-sort { display: inline-flex; align-items: center; justify-self: start; gap: 6px; min-height: 28px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .admin-sort:hover, .admin-sort[aria-pressed="true"] { color: hsl(var(--foreground)); }
@@ -43,15 +45,21 @@
 .admin-node .node-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--muted-foreground) / .8); }
 .admin-node .node-value { display: block; font-family: var(--font-mono); font-size: 12px; }
 .admin-node .cell-label { display: none; }
-.node-actions { display: grid; grid-template-columns: repeat(2, 32px); justify-content: end; align-items: center; gap: 8px; }
+.node-actions { display: grid; grid-template-columns: repeat(3, 32px); justify-content: end; align-items: center; gap: 8px; }
 .node-actions .node-action { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; }
 .node-actions .node-action:hover { color: hsl(var(--foreground)); }
 .node-edit { grid-column: 2; }
+.node-delete { grid-column: 3; }
+.node-actions .node-delete:hover { color: hsl(var(--destructive)); }
 .admin-footnote { margin-top: 24px; font-size: 11px !important; }
 .admin-notice { margin: -10px 0 20px; padding: 10px 14px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--card)); }
 .admin-empty { padding: 50px 20px; text-align: center; border: 1px dashed hsl(var(--border)); border-radius: var(--radius); }
 .admin-page dialog { margin: auto; width: min(580px, calc(100% - 28px)); max-height: calc(100dvh - 28px); overflow-y: auto; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 20px 80px hsl(0 0% 0% / .14); }
 .admin-page dialog::backdrop { background: hsl(217 24% 11% / .32); }
+.admin-page #delete-dialog { width: min(420px, calc(100% - 28px)); }
+.delete-content { padding: 24px; }
+.delete-content h2 { font-size: 20px; overflow-wrap: anywhere; }
+.delete-content p { margin-top: 12px; overflow-wrap: anywhere; }
 #profile-form { padding: 24px; }
 .editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
 .editor-heading h2 { font-size: 20px; overflow-wrap: anywhere; }
@@ -69,12 +77,12 @@
 .admin-page .form-error { color: hsl(var(--destructive)); font-size: 11px; }
 #profile-error { margin-top: 16px; }
 .editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; }
-@media (max-width: 800px) {
+@media (max-width: 840px) {
   .admin-main { padding-top: 28px !important; }
   .admin-columns { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 0 0 10px; }
   .admin-columns > span { display: none; }
   .admin-node { position: relative; grid-template-columns: repeat(3, 1fr); gap: 14px 12px; padding: 14px 16px; }
-  .admin-node .node-identity { grid-column: 1 / -1; padding-right: 84px; }
+  .admin-node .node-identity { grid-column: 1 / -1; padding-right: 124px; }
   .admin-node .node-actions { position: absolute; right: 16px; top: 14px; }
   .admin-node .cell-label { display: block; font-size: 9px; color: hsl(var(--muted-foreground)); margin-bottom: 6px; }
   .admin-node .node-value { font-size: 11px; overflow-wrap: anywhere; }
