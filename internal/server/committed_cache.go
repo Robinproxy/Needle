@@ -57,11 +57,15 @@ func (h *Handler) committedNode(a AgentRow) (agentWithMetric, error) {
 	if err != nil {
 		return agentWithMetric{}, err
 	}
+	summary, err := h.store.GetTCPingSummary(a.ID, probes, h.now())
+	if err != nil {
+		return agentWithMetric{}, err
+	}
 	traffic, err := h.store.GetTrafficUsage(a.ID)
 	if err != nil {
 		return agentWithMetric{}, err
 	}
-	node := agentWithMetric{Agent: a, Metric: m, LatestTCPing: probes, TCPingEnabled: len(probes) > 0, Traffic: traffic}
+	node := agentWithMetric{Agent: a, Metric: m, LatestTCPing: probes, TCPingSummary: summary, TCPingEnabled: len(probes) > 0, Traffic: traffic}
 	if len(h.committed) >= maxLiveNodes {
 		clear(h.committed)
 	}

@@ -55,7 +55,7 @@ function mapCarrier(name) {
 }
 
 function pingLatColor(ms) {
-  if (!ms || ms === Infinity) return 'red';
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return 'red';
   if (ms < 80) return 'gray';
   if (ms < 161) return 'amber';
   return 'red';
@@ -552,6 +552,16 @@ function cardMetricsHTML(a) {
     + trafficHTML(a.traffic, a.agent.monthly_traffic_limit);
 }
 
+function probeSummary(a, probe) {
+  const summary = a.tcpping_summary?.find(item => item.name === probe.name && item.target === probe.target);
+  const latency = summary?.success_count > 0 ? summary.latency_ms : null;
+  const loss = summary?.sample_count > 0 ? Math.max(0, summary.sample_count - summary.success_count) / summary.sample_count * 100 : null;
+  const failed = probe.success === false;
+  return {latency, loss, failed,
+    latencyColor: valCss(failed ? 'red' : latency == null ? 'gray' : pingLatColor(latency)),
+    lossColor: valCss(failed ? 'red' : loss == null ? 'gray' : pingLossColor(loss))};
+}
+
 function cardProbesHTML(a) {
   if (a.tcpping_enabled === false) return '';
   const probes = a.latest_tcpping || [];
@@ -570,11 +580,11 @@ function cardProbesHTML(a) {
       return rank(a) - rank(b) || a.name.localeCompare(b.name);
     });
     return '<div class="probe-family probe-family-' + family.toLowerCase() + '">' + rows.map(p => {
-      const loss = p.success ? 0 : 100;
-      return '<div class="probe-row">'
+      const stats = probeSummary(a, p);
+      return '<div class="probe-row' + (stats.failed ? ' failed' : '') + '">'
         + '<span class="probe-name">' + escapeHtml(mapCarrier(p.name)) + '</span>'
-        + '<span class="probe-lat" style="color:' + valCss(p.success ? pingLatColor(p.latency_ms) : 'gray') + '">' + (p.success ? p.latency_ms.toFixed(0) + 'ms' : '—') + '</span>'
-        + '<span class="probe-loss" style="color:' + valCss(pingLossColor(loss)) + '">' + Number(loss.toFixed(1)) + '%</span></div>';
+        + '<span class="probe-lat" style="color:' + stats.latencyColor + '">' + (stats.latency != null ? stats.latency.toFixed(0) + 'ms' : '—') + '</span>'
+        + '<span class="probe-loss" style="color:' + stats.lossColor + '">' + (stats.loss != null ? Number(stats.loss.toFixed(1)) + '%' : '—') + '</span></div>';
     }).join('') + '</div>';
   }).join('');
 }
@@ -658,7 +668,7 @@ function renderCard(a, isActive) {
     + '<div class="card-metrics">' + cardMetricsHTML(a) + '</div>'
     + '<div class="card-speeds">' + cardNetworkHTML(a) + '</div>'
     + (a.tcpping_enabled === false ? '<div class="card-probes-off"><span>TCP Ping · Off</span></div>'
-      : '<div class="card-probes">' + cardProbesHTML(a) + '</div>')
+      : '<div class="card-probes" aria-label="TCP Ping over the last hour">' + cardProbesHTML(a) + '</div>')
     + '<div class="card-billing" aria-label="Billing cost and next renewal date">' + cardBillingHTML(a) + '</div>'
   + '</div>';
 }
@@ -680,12 +690,13 @@ function renderListRow(a, idx, isActive) {
   let pingHtml = '';
   if (a.tcpping_enabled !== false && a.latest_tcpping && a.latest_tcpping.length > 0) {
     const p = a.latest_tcpping[0];
-    const latStr = p.success ? p.latency_ms.toFixed(1) + 'ms' : '-';
-    const lossStr = p.success ? '0%' : '100%';
+    const stats = probeSummary(a, p);
+    const latStr = stats.latency != null ? stats.latency.toFixed(1) + 'ms' : '—';
+    const lossStr = stats.loss != null ? Number(stats.loss.toFixed(1)) + '%' : '—';
     const dotBg = tcppingColor(p.name);
-    const latClr = p.success ? valCss(pingLatColor(p.latency_ms)) : valCss('gray');
-    const lossClr = valCss(pingLossColor(p.success ? 0 : 100));
-    pingHtml = '<span class="list-ping">'
+    const latClr = stats.latencyColor;
+    const lossClr = stats.lossColor;
+    pingHtml = '<span class="list-ping' + (stats.failed ? ' failed' : '') + '" aria-label="TCP Ping over the last hour">'
       + '<span class="ping-dot" style="background:' + dotBg + '"></span>'
       + '<span class="list-ping-name">' + escapeHtml(mapCarrier(p.name)) + '</span>'
       + '<span class="list-ping-lat" style="color:' + latClr + '">' + latStr + '</span>'
@@ -1583,10 +1594,12 @@ function updateLiveSummaries(data) {
       }
       const ping = a.latest_tcpping?.[0];
       if (ping) {
+        const stats = probeSummary(a, ping);
+        card.querySelector('.list-ping')?.classList.toggle('failed', stats.failed);
         const lat = card.querySelector('.list-ping-lat');
         const loss = card.querySelector('.list-ping-loss');
-        if (lat) { lat.textContent = ping.success ? ping.latency_ms.toFixed(1) + 'ms' : '-'; lat.style.color = valCss(ping.success ? pingLatColor(ping.latency_ms) : 'gray'); }
-        if (loss) { loss.textContent = ping.success ? '0%' : '100%'; loss.style.color = valCss(pingLossColor(ping.success ? 0 : 100)); }
+        if (lat) { lat.textContent = stats.latency != null ? stats.latency.toFixed(1) + 'ms' : '—'; lat.style.color = stats.latencyColor; }
+        if (loss) { loss.textContent = stats.loss != null ? Number(stats.loss.toFixed(1)) + '%' : '—'; loss.style.color = stats.lossColor; }
       }
       const netEl = card.querySelector('.list-net');
       if (netEl) netEl.textContent = hasMetric(m, 8) ? '\u2193' + formatSpeed(m.network_down) + ' \u2191' + formatSpeed(m.network_up) : '\u2193— \u2191—';
@@ -1631,6 +1644,7 @@ function mergeLiveNode(previous, incoming, resetRevision = false) {
   if ((previous.live?.last_full_sample_at || 0) > (incoming.live?.last_full_sample_at || 0)) {
     merged.agent = {...previous.agent};
     merged.latest_tcpping = previous.latest_tcpping;
+    merged.tcpping_summary = previous.tcpping_summary;
     merged.tcpping_enabled = previous.tcpping_enabled;
     merged.traffic = previous.traffic;
     merged.expiry_date = previous.expiry_date;

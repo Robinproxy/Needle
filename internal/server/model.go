@@ -71,6 +71,16 @@ type TCPingRow struct {
 	CreatedAt    int64   `json:"created_at"`
 }
 
+// Rolling raw-sample statistics; the latest probe remains separate so an
+// immediate failure is visible even when most samples in the hour succeeded.
+type TCPingSummary struct {
+	Name         string  `json:"name"`
+	Target       string  `json:"target"`
+	LatencyMs    float64 `json:"latency_ms"`
+	SampleCount  int64   `json:"sample_count"`
+	SuccessCount int64   `json:"success_count"`
+}
+
 type TrafficUsage struct {
 	Sent      int64  `json:"sent"`
 	Recv      int64  `json:"recv"`

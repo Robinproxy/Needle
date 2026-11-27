@@ -22,6 +22,7 @@ Server + Agents, SQLite, public dashboard, optional administrator editing.
 ## Features
 
 - System metrics, TCP Ping, monthly traffic, and cost totals.
+- Card TCP Ping: rolling 1h average latency (successful probes) and loss rate; red routes indicate the latest probe failed.
 - Public dashboard; private management of billing, renewal, allowance, and node order.
 - Docker / Linux Server; Linux systemd and OpenWrt / ImmortalWrt Agents.
 

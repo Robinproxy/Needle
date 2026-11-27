@@ -108,15 +108,16 @@ type freshness struct {
 	HistoryStale     bool  `json:"history_stale"`
 }
 type agentWithMetric struct {
-	Agent         AgentRow      `json:"agent"`
-	Metric        *MetricRow    `json:"latest_metric,omitempty"`
-	LatestTCPing  []TCPingRow   `json:"latest_tcpping,omitempty"`
-	TCPingEnabled bool          `json:"tcpping_enabled"`
-	Traffic       *TrafficUsage `json:"traffic,omitempty"`
-	ExpiryDays    int           `json:"expiry_days"`
-	ExpiryDate    string        `json:"expiry_date"`
-	Live          freshness     `json:"live"`
-	Revision      uint64        `json:"revision"`
+	Agent         AgentRow        `json:"agent"`
+	Metric        *MetricRow      `json:"latest_metric,omitempty"`
+	LatestTCPing  []TCPingRow     `json:"latest_tcpping,omitempty"`
+	TCPingSummary []TCPingSummary `json:"tcpping_summary"`
+	TCPingEnabled bool            `json:"tcpping_enabled"`
+	Traffic       *TrafficUsage   `json:"traffic,omitempty"`
+	ExpiryDays    int             `json:"expiry_days"`
+	ExpiryDate    string          `json:"expiry_date"`
+	Live          freshness       `json:"live"`
+	Revision      uint64          `json:"revision"`
 }
 
 func (h *Handler) nodeSnapshot(a AgentRow) (*agentWithMetric, error) {

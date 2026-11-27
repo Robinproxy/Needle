@@ -18,6 +18,7 @@ const escapeAttribute = vm.runInContext('escapeAttr',ctx);
 assert.equal(escapeAttribute('<img src="x">&\''),'&lt;img src=&quot;x&quot;&gt;&amp;&#39;');
 for(const value of [null,undefined,0,'A&B',"'\"<>"])assert.equal(escapeAttribute(value),ctx.escapeHtml(value));
 const node = { agent: {id:1, hostname:'node',region:'CN'}, tcpping_enabled:true, latest_tcpping:[{name:'CMv6',target:'v6.example:80',success:true,latency_ms:12}] };
+node.tcpping_summary = [{name:'CMv6',target:'v6.example:80',latency_ms:12,sample_count:120,success_count:120}];
 ctx.fixture = [node];
 vm.runInContext('agents = fixture',ctx);
 assert(ctx.renderCard(node,false).includes(ctx.mapCarrier('CMv6')));
@@ -183,6 +184,7 @@ const dual = {...node,latest_tcpping:[
  {name:'CUv6',target:'[2001:db8::1]:80',success:true,latency_ms:30},
  {name:'custom<script>',target:'example.com:443',success:true,latency_ms:40},
 ]};
+dual.tcpping_summary = dual.latest_tcpping.map(p=>({name:p.name,target:p.target,latency_ms:p.latency_ms,sample_count:10,success_count:p.success?10:0}));
 const probes = ctx.cardProbesHTML(dual);
 assert(!probes.includes('probe-family-label'));
 assert(probes.includes('probe-family-ipv4'));assert(probes.includes('probe-family-ipv6'));assert(probes.includes('probe-family-custom'));
