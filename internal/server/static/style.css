@@ -305,10 +305,10 @@ header {
 .probe-family-ipv4 { grid-column: 1; grid-row: 1; }
 .probe-family-ipv6 { grid-column: 2; grid-row: 1; }
 .probe-family-custom { grid-column: 1 / -1; }
-.probe-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 5px; min-height: 21px; }
+.probe-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 5ch; align-items: center; gap: 5px; min-height: 21px; }
 .probe-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .probe-row.failed .probe-name, .list-ping.failed .list-ping-name { color: hsl(var(--destructive)); }
-.probe-lat, .probe-loss { font-variant-numeric: tabular-nums; }
+.probe-lat, .probe-loss { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card-probes > .ping-disabled { grid-column: 1 / -1; }
 
 /* LIST GRID */
